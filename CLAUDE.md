@@ -13,6 +13,19 @@ seven steps derived from live state.
 - **Nothing in `plugin/` may name a path, a repo, a lane, a person or an environment.** The plugin is
   code and wiring; the root is state and config. That split is the portability, and a hardcoded path is
   the exact bug class this project exists to delete.
+- **The same rule holds in the docs and the fixtures, where it is easier to break.** Write
+  `/path/to/your/session-exchange`, never a real clone location: a reader copying a path out of a README
+  that happens to work for the author is being told the layout is required when it is not. Fixture
+  directories are named for the shape they test (`container/alpha`), never after any real workspace,
+  because a fixture that mirrors one machine's tree reads as a supported layout. Both were violated once
+  and fixed; the author's own paths are the thing to grep for before a push.
+- **Assume the standard, allow the override, and keep the override machine-local.** Every knob has a
+  working default so the tool does something sensible with no configuration at all, and the defaults are
+  read from `plugin/schemas/exchange.schema.json` by `store.config()` rather than restated in Python, so
+  the standard is stated exactly once. Customisation lives in `<root>/.claude/exchange.json` and
+  `CC_EXCHANGE_ROOT`, both outside the plugin and both specific to the machine they are on. If you find
+  yourself adding a default to code, put it in the schema instead. If you find yourself needing a knob
+  the schema cannot express, that is a design question, not a place for a constant.
 - **Legacy detection is by shape, never by literal name.** Two of the scripts being replaced carry one
   environment's project prefix, which must not appear in a generalised tool. A glob also survives a
   rename, and the fixtures are named by shape for the same reason.

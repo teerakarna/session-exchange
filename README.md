@@ -69,6 +69,29 @@ why no write needs a lock, since the only writer of a session's claim is that se
 parses hand-typed structure again. The markdown keeps narrative, decisions and history, which is what a
 ledger is genuinely good at.
 
+## Configuration
+
+There is nothing you have to configure. Every knob has a default, `init` writes a marker that relies on
+them, and the only value the tool needs is a display name, which it takes from the directory if you do
+not give one.
+
+Override any of it by editing `<root>/.claude/exchange.json` by hand. It is deliberately the one file
+outside the plugin, so customisation stays with the machine and the tree it applies to, and nothing
+customised ever travels with the code:
+
+| | |
+|---|---|
+| `name` | What this root is called in injected context, so a session can tell which exchange it is reading |
+| `stale_days` | When a claim or handoff starts being flagged as old rather than shown as current. Default 7 |
+| `max_focus_chars`, `max_hot_paths`, `max_handoffs_listed` | Caps on what gets rendered into a session's context. Anything past a cap is counted, never silently dropped |
+| `labels` | Display-only directory-to-label map. Never a matching key, because a hand-typed label having to agree with another hand-typed label is the defect this design removes |
+
+The defaults are the `default` values in
+[`plugin/schemas/exchange.schema.json`](plugin/schemas/exchange.schema.json) and are read from it at
+runtime rather than restated in code, so that file is the answer to what any of them currently is. A
+misspelt key is reported in `doctor` and in your injected context, and the defaults still apply:
+refusing to show presence over a bad cap would be the wrong trade, and doing it quietly would be worse.
+
 ## Install
 
 The repo is private, by decision rather than oversight, and the Apache-2.0 licence is not a statement
@@ -79,10 +102,10 @@ that it is published (see [NOTICE](NOTICE)). Installing from GitHub therefore ne
 /plugin install session-exchange@session-exchange
 ```
 
-From a clone, which needs neither access nor auth:
+From a clone, which needs neither access nor auth, and takes the clone wherever you keep it:
 
 ```
-/plugin marketplace add ~/projects/personal/session-exchange
+/plugin marketplace add /path/to/your/session-exchange
 /plugin install session-exchange@session-exchange
 ```
 
@@ -172,7 +195,7 @@ Full threat model in [SECURITY.md](SECURITY.md).
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to test, and the one rule that is load-bearing |
 | [SECURITY.md](SECURITY.md) | Threat model, starting with cross-root leakage |
 | [CHANGELOG.md](CHANGELOG.md) | What works, and what is deliberately not built |
-| `plans/2026-09-25_portable-session-exchange*` in `dotfiles` | The design, the seven migration steps, and the evidence for each. Read first, if you have it |
+| `plans/2026-09-25_portable-session-exchange*` | The design, the seven migration steps, and the evidence for each. Lives in the author's own environment repo rather than here, so this is a pointer for one person and not a doc you are missing. `doctor` prints the same seven steps from live state |
 
 ## Testing discipline
 

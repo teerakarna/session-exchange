@@ -13,10 +13,11 @@ From GitHub, which needs read access to the private repo:
 /plugin install session-exchange@session-exchange
 ```
 
-From a clone, which needs neither access nor auth, and is the better option while the repo is moving:
+From a clone, which needs neither access nor auth, and is the better option while the repo is moving.
+Wherever you keep clones is where this goes; nothing in the plugin cares:
 
 ```
-/plugin marketplace add ~/projects/personal/session-exchange
+/plugin marketplace add /path/to/your/session-exchange
 /plugin install session-exchange@session-exchange
 ```
 
@@ -121,7 +122,7 @@ Point it at a clone instead. The clone is what you edit and test against anyway,
 in its path:
 
 ```sh
-alias exchange='python3 ~/projects/personal/session-exchange/plugin/lib/cli.py'
+alias exchange='python3 /path/to/your/session-exchange/plugin/lib/cli.py'
 ```
 
 If you would rather run the copy that is actually installed, derive the path rather than typing it, so
