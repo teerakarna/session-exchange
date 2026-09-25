@@ -117,7 +117,8 @@ def cmd_show(args):
     for claim in held:
         mark = " " if claim["session_id"] in live else "!"
         focus = claim.get("focus") or "(no focus stated)"
-        print(f" {mark} {claim.get('name') or claim['session_id']}  {focus[:config['max_focus_chars']]}")
+        shown = focus[:config["max_focus_chars"]]
+        print(f" {mark} {claim.get('name') or claim['session_id']}  {shown}")
         if claim.get("paths"):
             print(f"     paths: {', '.join(claim['paths'][:config['max_hot_paths']])}")
     if any(claim["session_id"] not in live for claim in held):

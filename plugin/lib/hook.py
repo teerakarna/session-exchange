@@ -2,7 +2,8 @@
 
 What each event is for:
 
-- **SessionStart** - resolve the root, seed this session's claim, and inject whatever the root has to
+- **SessionStart** - resolve the root, seed this session's claim, and inject whatever the root has
+  to
   say. Fires on startup, resume, clear and compact, so it has to be safe to run repeatedly against
   state it may already have written.
 - **SessionEnd** - clear the claim. This is what makes "set your row to idle when you are done" stop
@@ -94,7 +95,7 @@ def main(default_event, argv=None):
                 ))
             else:
                 handler(data, resolution.root, lines)
-    except Exception as exc:  # noqa: BLE001 - a hook may not take a session down with it
+    except Exception as exc:
         lines.append(hookio.problem(
             f"{type(exc).__name__} in the {event} hook: {exc}. "
             "Session unaffected; the exchange is not being updated."

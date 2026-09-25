@@ -1,8 +1,9 @@
 """Read Claude Code's own session registry.
 
 `~/.claude/sessions/*.json`, one file per live session, named for the process id and carrying
-`sessionId`, `cwd`, `name` and a per-turn `status`. This already exists and is already maintained, so
-presence is rendered from it rather than from anything this plugin asks a session to keep up to date.
+`sessionId`, `cwd`, `name` and a per-turn `status`. This already exists and is already maintained,
+so presence is rendered from it rather than from anything this plugin asks a session to keep up to
+date.
 Nobody edits a presence row again.
 
 Two things it cannot tell you, which is why claims exist alongside it:
@@ -83,7 +84,11 @@ def _parents(pid, limit=12):
             break
         chain.append(current)
         try:
-            out = subprocess.run(["ps", "-o", "ppid=", "-p", str(current)],
+            # S603/S607: the argv is fixed and the only interpolation is an integer pid, so there
+            # is no untrusted input to shell out. `ps` is left unqualified on purpose: it is
+            # /bin/ps on macOS and /usr/bin/ps on most Linux, and hardcoding either would break the
+            # other for no gain.
+            out = subprocess.run(["ps", "-o", "ppid=", "-p", str(current)],  # noqa: S603, S607
                                  capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             break

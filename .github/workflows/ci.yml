@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # The suite is the only gate this repo has, so it runs on every platform and every Python version
+  # the plugin can actually land on. Until this existed, "156 checks green" meant one machine, one
+  # interpreter, once, at whatever moment someone remembered to type it.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # 3.9 is the floor because the hooks invoke whatever `python3` is on PATH, and on a stock
+        # macOS that is the system 3.9. Excluded on the macOS runner only because setup-python has no
+        # arm64 build that far back; the version-sensitive behaviour is interpreter-level and the
+        # platform-sensitive parts (`os.kill`, `ps`) are covered by the newer macOS entries.
+        python: ["3.9", "3.11", "3.13"]
+        exclude:
+          - os: macos-latest
+            python: "3.9"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      # No install step, and that is the point: see the `stdlib` job below.
+      - name: Test
+        run: python plugin/tests/run.py
+
+  # The plugin runs as a hook against whatever `python3` the machine has, with no virtualenv and no
+  # opportunity to pip install anything. A third-party import is therefore not a dependency decision,
+  # it is a hook that raises ImportError at session start on every machine but the author's. Gated
+  # rather than documented, because a convention nothing checks is a convention already broken.
+  stdlib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Assert the runtime imports nothing but the standard library
+        run: |
+          python - <<'EOF'
+          import ast, pathlib, sys
+
+          # The lib modules import each other by bare name, because the handlers put that directory
+          # on sys.path rather than installing anything.
+          local = {p.stem for p in pathlib.Path("plugin/lib").glob("*.py")}
+          bad = []
+          for path in sorted(pathlib.Path("plugin/lib").rglob("*.py")):
+              tree = ast.parse(path.read_text(encoding="utf-8"))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      names = [alias.name for alias in node.names]
+                  elif isinstance(node, ast.ImportFrom):
+                      names = [node.module or ""]
+                  else:
+                      continue
+                  for name in names:
+                      root = name.split(".")[0]
+                      if root and root not in sys.stdlib_module_names and root not in local:
+                          bad.append(f"{path}: {name}")
+          if bad:
+              print("Third-party imports in the runtime:")
+              print("\n".join(f"  {line}" for line in bad))
+              sys.exit(1)
+          print(f"clean: {len(local)} local modules, standard library only")
+          EOF
+
+  # The repo's own layout test asserts the shape this project believes in. This asserts the shape the
+  # runtime believes in, which is the one that decides whether the plugin loads at all, and it tracks
+  # upstream when the manifest schema moves. `--strict` is documented for exactly this: it fails on
+  # unrecognised fields and missing metadata that the runtime would otherwise tolerate quietly.
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install the Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # Both manifests, because they are separate files with separate schemas and a marketplace that
+      # validates says nothing about the plugin it points at.
+      - name: Validate the plugin and marketplace manifests
+        run: |
+          claude plugin validate --strict ./plugin
+          claude plugin validate --strict .
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # Pinned, because an unpinned linter turns somebody else's release into a red build on a branch
+      # that changed nothing. The pin lives in a requirements file rather than inline so dependabot
+      # can bump it in a PR with the diff visible.
+      - name: Install ruff
+        run: python -m pip install -r .github/requirements-ci.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format
+        run: ruff format --check .
+
+  # Two shell scripts, and they are the entry point for everything else: if a handler is wrong,
+  # nothing downstream of it runs and the plugin looks installed and inert.
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: ShellCheck the hook handlers
+        run: shellcheck plugin/hooks-handlers/*.sh
+
+  secrets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # gitleaks-action posts a PR comment when it finds a leak.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # scans full history, not just the working tree
+
+      # This tool was designed against a real multi-session environment and is deliberately generic:
+      # nothing here names a path, a lane, a repo or a person. Secret scanning is the cheap half of
+      # keeping it that way.
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

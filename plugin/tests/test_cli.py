@@ -2,7 +2,8 @@
 """The CLI, run as a real command.
 
 `HOME` is pointed at a tmpdir throughout, which isolates the session registry, the legacy scripts
-and the user settings in one move. The registry fixture names this test process as the session's pid,
+and the user settings in one move. The registry fixture names this test process as the session's
+pid,
 because that is how the CLI works out who is calling it: it walks up the process tree until a pid
 matches a registry row, since a command run through a tool call has no other way to learn its own
 session id and matching on cwd picks the wrong session the moment two of them share a directory.
@@ -72,11 +73,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("marks the area above the repo, not the repo",
           (code, (area / ".claude" / "exchange.json").is_file()), (0, True))
     check("and not the repo itself", (repo / ".claude" / "exchange.json").exists(), False)
-    check("and creates the store", store_ok := (area / ".claude" / "exchange" / "handoffs").is_dir(),
-          True)
+    check("and creates the store",
+          (area / ".claude" / "exchange" / "handoffs").is_dir(), True)
 
     code, out = run(home, repo, "init")
-    check("running it again reports rather than rewrites", (code, "Already marked" in out), (0, True))
+    check("running it again reports rather than rewrites",
+          (code, "Already marked" in out), (0, True))
 
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
@@ -108,7 +110,8 @@ with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
 
-    code, out = run(home, repo, "claim", "--focus", "the hooks manifest", "--path", "a", "--path", "b")
+    code, out = run(home, repo, "claim", "--focus", "the hooks manifest",
+                    "--path", "a", "--path", "b")
     check("claims as the calling session, by name", (code, "the-caller" in out), (0, True))
     written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
     check("and records what it was told",
@@ -123,7 +126,8 @@ with tempfile.TemporaryDirectory() as tmp:
     # calling. Borrowing it labels someone else's claim with this session's name, and then shows
     # everybody a stale row under it.
     code, out = run(home, repo, "claim", "--session", "someone-else", "--focus", "other work")
-    other = json.loads((area / ".claude" / "exchange" / "sessions" / "someone-else.json").read_text())
+    other_path = area / ".claude" / "exchange" / "sessions" / "someone-else.json"
+    other = json.loads(other_path.read_text())
     check("an explicit session id does not borrow the caller's name",
           ("name" in other, other["focus"]), (False, "other work"))
 

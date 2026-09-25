@@ -1,11 +1,10 @@
 session-exchange
 Copyright 2026 Albert Asawaroengchai
 
-All rights reserved.
+Licensed under the Apache License, Version 2.0. See LICENSE.
 
-This is a private, proprietary project. No licence is granted to use, copy, modify or distribute
-this software or its documentation. It is published to a private repository for the author's own
-use across machines, and being installable as a Claude Code plugin does not make it open source.
-
-If that changes it will change deliberately, with a LICENSE file and a note in the README saying
-why. The absence of one here is the decision, not an oversight.
+The repository is private; the licence is not a statement that it is published. It is here because
+the licensing decision is cheapest to make now, before there is contributed history to relicense,
+and because this is the most genuinely generic of these tools: the portability constraint that makes
+it work at all means nothing in it names a path, a lane, a repo or a person. Whether it ever goes
+public is a separate decision, and the argument for it has to be made on its own.

@@ -83,7 +83,8 @@ def check(name, got, want):
 print("open handoffs by lane")
 
 # Lane B is the recipient of four open entries: the canonical one-line shape, the multi-recipient
-# header, the one whose headline wraps so its status marker sits on the second physical line, and the
+# header, the one whose headline wraps so its status marker sits on the second physical line, and
+# the
 # prose closure trap below.
 context, _ = run(FIXTURE, "Lane B")
 check("Lane B sees 4", len(listed(context)), 4)
@@ -121,11 +122,13 @@ print("prose in a header cannot close an entry")
 # Found on a real header during the replay: the docstring promises closure is read only from
 # positions that mean "closed", and that held for body lines but not for headers, where the test was
 # an unqualified case-insensitive search. A headline saying "no harm done" closed the entry. A false
-# closure is indistinguishable from a quiet day at the output, which is the failure this whole change
+# closure is indistinguishable from a quiet day at the output, which is the failure this whole
+# change
 # removes, so it has to stay broken-if-broken rather than silently swallowed.
 #
 # The keyword has to sit on the fixture entry's HEADER line. A first version of that entry put it on
-# the continuation line below, where the header test could never see it: both the broken and the fixed
+# the continuation line below, where the header test could never see it: both the broken and the
+# fixed
 # parser reported 4 and the check passed for the wrong reason. Verified the other way round before
 # trusting it - reverting only the header test on a copy takes this count to 3, and the entry that
 # disappears is this one.
@@ -135,7 +138,8 @@ check(
     any("prose closure trap" in line for line in listed(context)),
     True,
 )
-# The other direction: lowercase is fine when a `Status:` label qualifies it, so narrowing the header
+# The other direction: lowercase is fine when a `Status:` label qualifies it, so narrowing the
+# header
 # test to marker spelling must not have broken that.
 check(
     "lowercase keyword next to Status: still closes",

@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 MARKER = pathlib.PurePath(".claude/exchange.json")
 OVERRIDE_VAR = "CC_EXCHANGE_ROOT"
@@ -37,12 +37,12 @@ class Resolution(NamedTuple):
     configured, which is rule 3.
     """
 
-    root: Optional[pathlib.Path]
+    root: pathlib.Path | None
     rule: str
-    problem: Optional[str] = None
+    problem: str | None = None
 
     @property
-    def marker(self) -> Optional[pathlib.Path]:
+    def marker(self) -> pathlib.Path | None:
         return self.root / MARKER if self.root else None
 
 

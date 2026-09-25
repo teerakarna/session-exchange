@@ -18,7 +18,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 
-import exchange_root  # noqa: E402
+import exchange_root
 
 failures = []
 
@@ -119,7 +119,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("same rule from a different area", default, base / "projects/personal")
 
     # Break it: if the sibling areas stop looking like areas, `projects` stops being refused.
-    # Without this the merge-point check could be a no-op and every assertion above would still pass.
+    # Without this the merge-point check could be a no-op and every assertion above would still
+    # pass.
     for area in ("work", "personal", "public"):
         (base / "projects" / area / "CLAUDE.md").unlink()
     default, _ = exchange_root.init_candidates(base / "projects/work/repo")
