@@ -81,6 +81,16 @@ implement it and the meta-test will tell you when you have not.
 Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`). Branch and PR for everything; nothing lands
 on `main` directly. No `Co-Authored-By` trailers.
 
+That last part is enforced rather than trusted: a ruleset on `main` requires a pull request and a green
+`ci`, blocks force pushes and branch deletion, and has no bypass actors, so a direct push is rejected
+for the owner too. Zero approvals are required, because an approval only the author could give is one
+that gets bypassed, and a gate routinely bypassed teaches that gates are optional.
+
+`ci` is the aggregate job at the bottom of the workflow, and it is the only check the ruleset names.
+That is deliberate: naming the matrix legs individually would put every OS and Python version into a
+repo setting, so dropping one would block `main` forever on a check that can never report again. Add a
+job to the workflow and add it to `ci`'s `needs`, or it gates nothing.
+
 Keep a PR readable in one sitting. The first one here was 21 files and 2249 lines, which got through
 only because it was all new code with no existing behaviour to regress. That is a property of a
 skeleton, not of the work after it.

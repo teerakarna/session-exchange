@@ -61,7 +61,11 @@ seven steps derived from live state.
 ## Working rules for this repo
 
 - Branch and PR for everything; nothing lands on `main` directly. Conventional commits. No
-  `Co-Authored-By` trailers.
+  `Co-Authored-By` trailers. A ruleset enforces this with no bypass actors, so a direct push is
+  rejected rather than merely discouraged, and there is no point attempting one.
+- **A new CI job must be added to the `ci` job's `needs`, or it gates nothing.** `ci` is the single
+  aggregate check the ruleset requires, so that renaming a matrix leg cannot block `main` on a check
+  that will never report again. A job outside its `needs` can fail while the merge button stays green.
 - Keep a PR readable in one sitting. The skeleton PR was 2249 lines and got away with it only because
   it was all new code with nothing to regress.
 - Plain `-`, never an em dash or an en dash, in prose and code comments alike.
