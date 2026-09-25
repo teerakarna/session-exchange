@@ -167,7 +167,10 @@ jobs:
     steps:
       - name: Fail unless every job succeeded
         run: |
-          results='${{ join(needs.*.result, " ") }}'
+          # Single quotes inside the expression, double outside: a GitHub expression only accepts
+          # single-quoted strings, and `" "` there is not a syntax error YAML can see. It parses
+          # fine and Actions rejects the whole file, so every job vanishes rather than one failing.
+          results="${{ join(needs.*.result, ' ') }}"
           echo "upstream: $results"
           # An empty list would pass the loop below without checking anything, which is the exact
           # shape of gate this repo exists to stop shipping. It should be unreachable.
