@@ -17,6 +17,7 @@ import io
 import json
 import os
 import pathlib
+import pty
 import subprocess
 import sys
 import tempfile
@@ -235,6 +236,124 @@ with tempfile.TemporaryDirectory() as tmp:
         (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
         "Stop",
     )
+
+print("the payload disagrees with the wiring about which event fired")
+
+# The rule `hookio` exists to enforce, and until this section there was no check behind it: every
+# other case here passes the same event name in argv and in the payload, so the whole suite stayed
+# green with `event_name` reduced to `return default`. That is the defect that made one lane's
+# handoffs invisible, reintroducible without a single failing test.
+#
+# Legacy wiring is on so that the run has something to inject. A reply only exists when there is a
+# line to put in it, which is `emit`'s own rule, so an event name cannot be read off a session that
+# correctly said nothing.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    code, out = run(
+        "Stop",
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "s",
+            "cwd": str(repo),
+            "source": "startup",
+        },
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check(
+        "the payload wins, so the reply is one Claude Code will accept",
+        (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
+        "SessionStart",
+    )
+    # Which handler ran is the other half: echoing the right name while running the wrong handler
+    # would satisfy the check above and still do nothing.
+    check(
+        "and the payload's handler ran, not the one argv named",
+        (code, "does not handle" in context),
+        (0, False),
+    )
+
+print("the payload does not say which event fired")
+
+# The fallback, and the reason `event_name` takes a default at all. Without this, the rule above
+# could be satisfied by dropping the default entirely, which turns a missing field into a reply
+# addressed to `None` and no injected context at all.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    code, out = run("Stop", {"session_id": "s", "cwd": str(repo)}, home)
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check(
+        "the wiring is the fallback, and it still replies under a real event name",
+        (
+            (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
+            "does not handle" in context,
+        ),
+        ("Stop", True),
+    )
+
+# A non-string is the same case as absent: the field cannot be echoed back, and a reply whose event
+# name is a number is dropped without comment.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    code, out = run(
+        "SessionStart", {"hook_event_name": 7, "session_id": "s", "cwd": str(repo)}, home
+    )
+    check(
+        "a payload event that is not a string falls back too",
+        (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
+        "SessionStart",
+    )
+
+print("stdin is not JSON at all")
+
+# `payload()` is called *outside* `main`'s try block, so its own swallowing of a bad parse is the
+# only thing between a malformed payload and a traceback on a non-zero exit - which is precisely
+# what rule 2 says a hook must never do. Nothing asserted it until here.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    environ = dict(os.environ, HOME=str(home))
+    environ.pop("CC_EXCHANGE_ROOT", None)
+    done = subprocess.run(
+        [sys.executable, str(LIB / "hook.py"), "SessionStart"],
+        input="not json {",
+        capture_output=True,
+        text=True,
+        env=environ,
+        timeout=30,
+    )
+    check(
+        "exits 0 with nothing on stderr rather than reporting a parse it cannot reply to",
+        (done.returncode, done.stderr.strip()),
+        (0, ""),
+    )
+
+print("stdin is a terminal, because somebody ran the handler by hand")
+
+# The guard whose absence is a hang rather than a wrong answer, which is why it needs a pty to
+# assert at all: with no payload coming, `read()` on a terminal waits forever, and a SessionStart
+# hook that never returns is a session that never starts. A timeout is caught and reported as a
+# failure rather than left to propagate, because a test that dies mid-run names nothing.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    environ = dict(os.environ, HOME=str(home))
+    environ.pop("CC_EXCHANGE_ROOT", None)
+    controller, follower = pty.openpty()
+    try:
+        done = subprocess.run(
+            [sys.executable, str(LIB / "hook.py"), "SessionStart"],
+            stdin=follower,
+            capture_output=True,
+            text=True,
+            env=environ,
+            timeout=15,
+        )
+        result = done.returncode
+    except subprocess.TimeoutExpired:
+        result = "hung waiting for a payload that a terminal is never going to send"
+    finally:
+        os.close(follower)
+        os.close(controller)
+    check("returns instead of waiting on a payload nobody is going to type", result, 0)
 
 print("a hook may not take a session down with it")
 

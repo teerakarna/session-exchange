@@ -34,6 +34,17 @@ matched the file was scored as "no failure", so the tool built to find checks th
 same defect, and it was reporting a real rule as untested while hiding a fake one. If you mutate by
 string replacement, assert the replacement happened.
 
+The sweep has since been pointed at a module nobody had asked about, and found the worst instance
+yet: `hookio.event_name` could be cut down to `return default`, ignoring the payload entirely, and
+the whole suite stayed green. That is the specific defect the module's own docstring says made one
+lane's handoffs invisible, and it was reintroducible without a single failing test, because every
+case in `test_hook.py` happened to pass the same event name in argv and in the payload. Agreement
+between two inputs is not a test of which one is read.
+
+The lesson generalises past this repo: **a sweep is only worth what it has been pointed at.** Six
+rules in a seventy-line module, five of them unasserted, in a suite that reads as thorough because
+the modules that got swept are thorough. Point it at the ones that did not.
+
 ## The corollary, which cost more to learn
 
 **Run the thing.** The two worst bugs in the first working version passed the whole suite: `claim`
