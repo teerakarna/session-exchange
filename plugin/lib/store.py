@@ -52,8 +52,15 @@ def markdown(root):
 
 
 def safe_id(value):
-    """The identifier, or None if it cannot be a filename."""
-    return value if isinstance(value, str) and SAFE_ID.match(value) else None
+    """The identifier, or None if it cannot be a filename.
+
+    `fullmatch`, not `match`, and the difference is not the obvious one: the pattern is anchored at
+    both ends already, but Python's `$` also matches just *before* a trailing newline. So `match`
+    accepted `"sess-1\\n"`, wrote a claim under that name, and put the newline in the `session_id`
+    field, where presence rendering will later put it inside a markdown table cell and end the row
+    early. The guard read as tight and let through the one character that matters most.
+    """
+    return value if isinstance(value, str) and SAFE_ID.fullmatch(value) else None
 
 
 def write_json(path, obj, schema=None):

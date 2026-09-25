@@ -56,6 +56,26 @@ def load(name):
     return json.loads((SCHEMA_DIR / f"{name}.schema.json").read_text(encoding="utf-8"))
 
 
+def _end_anchored(pattern):
+    """A trailing `$` meaning what JSON Schema means by it, rather than what Python does.
+
+    JSON Schema patterns are ECMA-262, where `$` without the multiline flag matches the end of the
+    string. Python's `$` also matches just *before* a trailing newline, so every `^...$` in the
+    shipped schemas accepted one trailing newline it was written to exclude: a session id, a
+    timestamp and a date among them, each of which gets rendered into a markdown table cell where a
+    newline ends the row early. Eight patterns, all with the same hole, and none of them looked like
+    it had one.
+
+    Only a trailing `$` is rewritten. That is the whole shape the shipped schemas use, and a
+    general ECMA-to-Python translation is not something a validator this size should pretend to do.
+    `search` is kept, because a JSON Schema pattern really is a partial match: anchoring is the
+    schema's job, not this function's.
+    """
+    if pattern.endswith("$") and not pattern.endswith("\\$"):
+        return pattern[:-1] + r"\Z"
+    return pattern
+
+
 def validate(instance, schema, where="value"):
     """Problems as a list of strings. Empty means valid.
 
@@ -97,7 +117,7 @@ def validate(instance, schema, where="value"):
     if isinstance(instance, str):
         if "minLength" in schema and len(instance) < schema["minLength"]:
             problems.append(f"{where}: must be at least {schema['minLength']} character(s)")
-        if "pattern" in schema and not re.search(schema["pattern"], instance):
+        if "pattern" in schema and not re.search(_end_anchored(schema["pattern"]), instance):
             problems.append(f"{where}: {instance!r} does not match {schema['pattern']}")
 
     if isinstance(instance, (int, float)) and not isinstance(instance, bool):
