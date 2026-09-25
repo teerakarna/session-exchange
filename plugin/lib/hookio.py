@@ -15,6 +15,7 @@ non-zero exit is worse than the problem it reports.
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 PREFIX = "session-exchange"
@@ -84,17 +85,17 @@ def emit(event, lines, out=None):
     way to write one. That would inject the empty section this function exists to prevent, so the
     filter is here first and its test hand-feeds an input no caller can currently produce.
 
-    Where the guarantee at the top of this module stops: a *reader* that has closed the read end of
-    stdout. The process then exits 120 with a `BrokenPipeError` on stderr, and not from this
-    `print`, which returns fine - the bytes sit in the buffer and CPython's shutdown flush is what
-    fails, after `main` has already returned 0. Wrapping the print changes nothing and neither does
-    flushing inside the wrapper. Issue #14 rather than a fix here, since nothing has shown that
-    Claude Code closes a hook's stdout early and the only fix that works is redirecting fd 1 to
-    devnull after a failed flush. So the guarantee is absolute for any input, not for any reader.
+    The guarantee at the top of this module used to stop at a *reader* that has closed the read end
+    of stdout: the process exited 120 with a `BrokenPipeError` on stderr, and not from this `print`,
+    which returns fine. The bytes sit in the buffer and CPython's shutdown flush is what fails, long
+    after `main` returned 0. So the flush happens here, where an `OSError` is still catchable,
+    and fd 1 is pointed at devnull when it fails - see below for why nothing shorter works. The
+    guarantee is now absolute for any reader as well as for any input.
     """
     lines = [line for line in lines if line]
     if not lines:
         return
+    stream = sys.stdout if out is None else out
     print(
         json.dumps(
             {
@@ -104,8 +105,25 @@ def emit(event, lines, out=None):
                 }
             }
         ),
-        file=sys.stdout if out is None else out,
+        file=stream,
     )
+    try:
+        stream.flush()
+    except OSError:
+        # Do not shorten this to `except OSError: pass`, and do not drop the flush and wrap the
+        # `print` instead. Both were tried and both still exit 120: a failed flush leaves the data
+        # in the buffer, so the interpreter's own shutdown flush retries it and fails again, on the
+        # way out, where nothing can catch it. Pointing fd 1 at devnull is what makes that retry
+        # succeed - the buffer still holds fd 1, and `dup2` changes what fd 1 is, so the bytes land
+        # in the dark instead of on a pipe with no reader.
+        #
+        # Only for the real stdout. `out=` is a test seam and an in-memory stream that failed to
+        # flush would not be fixed by touching fd 1, so redirecting it there would be a guess
+        # dressed as a guard.
+        if stream is sys.stdout:
+            null = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(null, 1)
+            os.close(null)
 
 
 def problem(text):

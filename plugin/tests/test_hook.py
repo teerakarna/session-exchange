@@ -474,6 +474,64 @@ check(
     "first\nsecond",
 )
 
+print("and a reader that has gone away does not take the session down with it")
+
+# The module docstring calls the guarantee absolute: anything that goes wrong becomes a line of
+# injected context and an exit status of 0. It held for every input and not for every *reader*. With
+# the read end of stdout closed before the hook writes, the process exited 120 with a
+# `BrokenPipeError` on stderr - and not from the `print`, which returns fine. The bytes sat in the
+# buffer and the interpreter's own shutdown flush was what failed, after `main` had already returned
+# 0, where nothing can catch it.
+#
+# End to end against the real handler rather than through `emit(out=...)`, because the whole failure
+# is in a real fd and a real buffer. An in-memory sink cannot have a reader that went away, so a
+# unit check here would pass against the broken version.
+#
+# The read end is closed before the process starts, so the write is broken from its first byte and
+# there is no race to lose.
+
+
+def run_into_a_dead_pipe(event, payload, home):
+    """Fire the hook with stdout a pipe nobody is reading. Returns `(exit code, stderr)`."""
+    environ = dict(os.environ, HOME=str(home))
+    environ.pop("CC_EXCHANGE_ROOT", None)
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)
+    try:
+        done = subprocess.run(
+            [sys.executable, str(LIB / "hook.py"), event],
+            input=json.dumps(payload),
+            stdout=write_fd,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=environ,
+            timeout=30,
+        )
+    finally:
+        os.close(write_fd)
+    return done.returncode, done.stderr
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    # Legacy wiring, so there is a line to inject. With nothing to say `emit` returns before it
+    # writes, and the check would pass on any version of this module.
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    code, err = run_into_a_dead_pipe(
+        "SessionStart",
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "sess-dead-pipe",
+            "cwd": str(repo),
+            "source": "startup",
+        },
+        home,
+    )
+    check("a hook whose reader has closed stdout still exits 0", code, 0)
+    # Both halves. The exit status is what Claude Code acts on, and 120 is what a failed shutdown
+    # flush produces, but a version that exits 0 while still printing a traceback has moved the
+    # problem rather than fixed it.
+    check("and leaves nothing on stderr", err, "")
+
 print("what payload does with a stream it is handed")
 
 # The other half of a pair this file only asserted one side of. `emit` takes `out=` and is checked

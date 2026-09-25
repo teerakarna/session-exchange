@@ -32,7 +32,11 @@ seven steps derived from live state.
 - **The legacy scan reports a settings path and a bare script name, never the command string.** A
   command string is where somebody's arguments are.
 - **A hook must never fail a session start.** Every handler is wrapped, always exits 0, and reports
-  problems in the injected context. A bad root resolves to no root and says why.
+  problems in the injected context. A bad root resolves to no root and says why. That covers the reader
+  as well as the input: with nobody reading stdout the bytes sit in the buffer and the interpreter's own
+  shutdown flush fails, after `main` has returned 0 and where nothing can catch it, so `emit` flushes
+  while it still can and points fd 1 at devnull if that fails. Wrapping the `print` instead does not
+  work, and it looks like it does.
 - **Silence is a real answer.** No root means no output and no files. Do not add a header, a heading or
   an "all clear" line that appears every session: a section that is usually empty is a section the
   reader stops looking at, which is the failure being fixed.

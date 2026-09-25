@@ -196,6 +196,19 @@ HOOKIO = [
         new='                "hookSpecificOutputs": {',
         caught_by="test_hook.py",
     ),
+    # The reader half of the guarantee, and the mutation is the fix removed rather than weakened:
+    # the two weaker versions of it, catching the `OSError` and doing nothing and flushing inside
+    # the wrapped `print`, both still exit 120, so either of those as a `new` would be a mutation
+    # the suite is right to catch for a reason that has nothing to do with the rule.
+    Mutation(
+        module="hookio",
+        rule="a stdout nobody is reading is silence, not an exit 120 on the way out",
+        old="            null = os.open(os.devnull, os.O_WRONLY)\n"
+        "            os.dup2(null, 1)\n"
+        "            os.close(null)",
+        new="            pass",
+        caught_by="test_hook.py",
+    ),
 ]
 
 STORE = [
