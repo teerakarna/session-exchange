@@ -75,6 +75,28 @@ check(
     [],
 )
 
+# `UNSWEPT` is the union of two sets now, which the accounting above cannot see: a name in both
+# would leave every check here green while the notes `targets` prints disagree with themselves
+# about whether the module is owed or declined. Same reason the intersection above is checked.
+check(
+    "a module is either owed a table or declined one, never both",
+    sorted(mutate.NOT_YET & set(mutate.DECLINED)),
+    [],
+)
+check(
+    "and UNSWEPT is exactly those two, so nothing is unswept without appearing in one of them",
+    mutate.UNSWEPT,
+    mutate.NOT_YET | set(mutate.DECLINED),
+)
+# The reason is the whole point of the split. A blank one turns a recorded decision back into the
+# silent permanent entry on a debt list that the split exists to stop, and `targets` prints it into
+# the sweep log, where an empty string reads as a tool bug rather than a choice.
+check(
+    "and a declined module says why, in words",
+    sorted(name for name, why in mutate.DECLINED.items() if len(why.split()) < 4),
+    [],
+)
+
 print("every mutation still patches the source it claims to")
 
 for name, table in sorted(mutate.TABLES.items()):
@@ -416,12 +438,20 @@ ONE = mutate.Mutation(
 )
 
 
-def run_main(argv, *, tables, caught, baseline_problem=None):
-    """`main`'s exit code and what it printed, with the two slow calls stubbed."""
-    real = (mutate.TABLES, mutate.baseline, mutate.sweep_one)
+def run_main(argv, *, tables, caught, baseline_problem=None, changed=None):
+    """`main`'s exit code and what it printed, with the two slow calls stubbed.
+
+    `changed` stubs `changed_since` for the `--since` checks, as `(paths, problem)`. Stubbed rather
+    than driven off this repository's real history: the answer would then depend on what the branch
+    happens to contain, so the check that says "a change to a doc sweeps nothing" would pass or fail
+    by accident. The git call has its own checks further down.
+    """
+    real = (mutate.TABLES, mutate.baseline, mutate.sweep_one, mutate.changed_since)
     mutate.TABLES = tables
     mutate.baseline = lambda: baseline_problem
     mutate.sweep_one = lambda mutation: (caught, "stubbed")
+    if changed is not None:
+        mutate.changed_since = lambda base: changed
     # `main` reads the sweep marker from the real `os.environ`, and this calls it in-process rather
     # than spawning it, so the copied dict `outside_sweep` returns cannot reach it. Inside the
     # baseline copy the marker is set, and without this every check below got the re-entrancy
@@ -433,7 +463,7 @@ def run_main(argv, *, tables, caught, baseline_problem=None):
         with contextlib.redirect_stdout(printed):
             return mutate.main(argv), printed.getvalue()
     finally:
-        mutate.TABLES, mutate.baseline, mutate.sweep_one = real
+        mutate.TABLES, mutate.baseline, mutate.sweep_one, mutate.changed_since = real
         if marker is not None:
             os.environ[mutate.SWEEPING] = marker
 
@@ -505,6 +535,187 @@ check("and says so rather than reporting zero of zero", "proves nothing" in prin
 code, printed = run_main(["nosuchmodule"], tables=TWO, caught=True)
 check("and a module with no table is an error, not an empty success", code, 2)
 check("and names the module it has nothing for", "nosuchmodule" in printed, True)
+
+print("and `--since` picks the modules a change could have broken")
+
+# Two modules with different catchers, because the mapping is the whole question and a single-module
+# table cannot tell a derivation that reads `caught_by` from one that returns everything.
+MAPPED = {
+    "hookio": [ONE],
+    "store": [ONE._replace(module="store", caught_by="test_store_claims.py")],
+}
+
+
+def targets_with(paths):
+    real = mutate.TABLES
+    mutate.TABLES = MAPPED
+    try:
+        return mutate.targets(paths)
+    finally:
+        mutate.TABLES = real
+
+
+check("a changed lib module is swept", targets_with(["plugin/lib/hookio.py"]), (["hookio"], []))
+# The load-bearing half, and the one a narrowing written the obvious way would get wrong. The sweep
+# asserts that the suite objects, so the way a mutation stops being caught is a check deleted from a
+# test file - and that diff touches nothing under `plugin/lib` at all.
+check(
+    "and so is the module whose catcher changed, which is how a gate actually gets weakened",
+    targets_with(["plugin/tests/test_store_claims.py"]),
+    (["store"], []),
+)
+check(
+    "and each module once, however many of its files changed",
+    targets_with(["plugin/lib/hookio.py", "plugin/tests/test_hook.py"])[0],
+    ["hookio"],
+)
+check(
+    "a change the sweep cannot measure selects nothing",
+    targets_with(
+        [".github/workflows/ci.yml", "README.md", "plugin/hooks-handlers/session-start.sh"]
+    ),
+    ([], []),
+)
+check(
+    "and a test file that catches no mutation selects nothing either",
+    targets_with(["plugin/tests/test_cli.py"]),
+    ([], []),
+)
+# The shape filter is three conditions and the probe found two of them deletable: with the `plugin`
+# test or the extension test gone, nothing in the suite objected. Both are the same failure, a path
+# that only looks like a module picking one - a vendored tree with its own `lib/` and `tests/`, a
+# note or a fixture sitting beside the module it is about - and the result is a sweep of a module
+# this change never touched, which reads as cover it is not.
+check(
+    "a module-shaped path somewhere else selects nothing",
+    targets_with(["vendor/lib/hookio.py", "elsewhere/tests/test_store_claims.py"]),
+    ([], []),
+)
+check(
+    "and neither does a file beside a module that is not the module",
+    targets_with(["plugin/lib/hookio.md"]),
+    ([], []),
+)
+# Narrowing has to stop when the thing doing the narrowing moves: every verdict in the last sweep
+# was produced by this file and `run.py`, so a change to either makes all of them stale at once.
+modules, notes = targets_with(["plugin/tests/mutate.py"])
+check("a change to the instrument reswept everything", modules, ["hookio", "store"])
+check("and says that is why", "instrument" in " ".join(notes), True)
+check(
+    "and so does a change to what the suite means",
+    targets_with(["plugin/tests/run.py"])[0],
+    ["hookio", "store"],
+)
+
+# An unswept module has to leave a line behind. Silence here is a PR whose only changed module was
+# never swept by anything, reported as a clean sweep, which is this repo's whole subject.
+modules, notes = targets_with(["plugin/lib/cli.py"])
+check("a declined module selects nothing", modules, [])
+check("but says it was declined, and why", "deliberately not swept" in " ".join(notes), True)
+modules, notes = targets_with(["plugin/lib/hook.py"])
+check("a module still owed a table selects nothing", modules, [])
+check("and says the change went unswept", "goes unswept" in " ".join(notes), True)
+
+docs = (["README.md"], None)
+code, printed = run_main(["--since", "main"], tables=TWO, caught=True, changed=docs)
+check("a change with nothing to sweep is a pass, not a refusal", code, 0)
+check("and says so in its own words", "nothing that a sweep can measure" in printed, True)
+# The one thing this must never be mistaken for. `no mutations to sweep, which proves nothing` is
+# exit 1 and means a sweep was asked to prove something and could not; this is exit 0 and means
+# there was nothing to ask. Same output would make the two indistinguishable in a log.
+check("and not by claiming a sweep happened", "every one of" in printed, False)
+check("and not by the refusal that means the opposite", "proves nothing" in printed, False)
+
+code, printed = run_main(
+    ["--since", "main"], tables=TWO, caught=True, changed=(["plugin/lib/hookio.py"], None)
+)
+check("a change under lib sweeps that module", code, 0)
+check("and only that module, which is the entire point", "every one of 2 mutation" in printed, True)
+
+code, printed = run_main(
+    ["--since", "nope"],
+    tables=TWO,
+    caught=True,
+    changed=(None, "no merge base for 'nope' and HEAD"),
+)
+check("a ref git cannot answer for stops the run", code, 2)
+check("and does not pass as an empty diff", "refusing to sweep" in printed, True)
+check("and says what git said", "no merge base" in printed, True)
+
+code, printed = run_main(["--since"], tables=TWO, caught=True)
+check("--since with no ref is an error", code, 2)
+check("and says what is missing rather than dying on the index", "needs a ref" in printed, True)
+# The message, not only the status, and that is what the check was missing. CI passes this in from
+# `github.event.before`, which can arrive empty, and with the `strip` gone the empty string reaches
+# git, fails at `merge-base`, and exits 2 as well - the same status from a refusal about the wrong
+# thing, reading `no merge base for '  '` when the answer is that nothing was passed.
+code, printed = run_main(["--since", "  "], tables=TWO, caught=True)
+check("and so is a blank one, which git would otherwise read as its own kind of failure", code, 2)
+check(
+    "and it is this refusal rather than git's, which reads as a broken repo",
+    "needs a ref" in printed,
+    True,
+)
+code, printed = run_main(["--since", "main", "hookio"], tables=TWO, caught=True)
+check("and naming modules as well is an error rather than one of them winning", code, 2)
+check("and says which arguments made it ambiguous", "hookio" in printed, True)
+
+
+# Through the seam, because the answers have to be fixed for the checks below to mean anything: the
+# real history differs by branch, and inside the baseline copy there is no `.git` at all.
+class FakeGit:
+    """Canned `git` answers, and a record of what it was asked."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.calls = []
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        code, out, err = self.answers.pop(0)
+        return subprocess.CompletedProcess(args, code, out, err)
+
+
+fake = FakeGit((0, "base123\n", ""), (0, "plugin/lib/store.py\n\nREADME.md\n", ""))
+check(
+    "the changed files are the diff's lines, blank ones dropped",
+    mutate.changed_since("main", fake),
+    (["plugin/lib/store.py", "README.md"], None),
+)
+# The merge base, not the ref itself, and asserted off what git was asked rather than off the
+# answer. A branch behind `main` shares no tip with it, so diffing the ref directly reports every
+# file somebody else changed as this change's own, and the sweep would then run every table on a
+# one-line PR.
+check(
+    "and the diff is taken against the merge base",
+    fake.calls[1],
+    ("diff", "--name-only", "base123"),
+)
+
+# The second guard, which no real input can reach: a base git cannot resolve fails at `merge-base`
+# first. Deleting it was green before this seam existed, and what it protects is the case where a
+# merge base comes back that `git diff` then refuses - a clean exit status read as nothing to sweep.
+refused = FakeGit((0, "base123\n", ""), (128, "", "fatal: bad"))
+paths, problem = mutate.changed_since("main", refused)
+check("a diff git refuses is a reason too, not an empty list", paths, None)
+check("and says it was the diff that failed", "cannot diff against" in (problem or ""), True)
+
+# And the real git call, on the one input whose answer does not depend on this repo's history - so
+# it holds inside the baseline copy too, where `.git` is not copied and every git command fails.
+paths, problem = mutate.changed_since("definitely-not-a-ref")
+check("an unresolvable ref comes back as a reason from git itself", paths, None)
+check("and the reason names the ref", "definitely-not-a-ref" in (problem or ""), True)
+# Which of the two guards answered, not just that one did, and this is the check that found the hole
+# rather than a refinement of it. Deleting the merge-base guard entirely left the two above green:
+# the empty ref it then passes to `git diff` fails there instead, so a reason still came back,
+# naming the same ref, from the wrong step. The failure the deleted guard exists for is a merge base
+# that comes back empty for a reason `git diff` happens to survive, and then the sweep reads a clean
+# exit as nothing to sweep. Two answers that agree cannot say which one was read, one function in.
+check(
+    "and says which step could not answer, not merely that one could not",
+    problem.split(" for ")[0],
+    "no merge base",
+)
 
 print("and the exit code reaches the process, which is all CI can see")
 

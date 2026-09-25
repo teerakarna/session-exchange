@@ -32,8 +32,15 @@ Line coverage measures execution. What matters here is whether a wrong answer ge
 
 ## Running it
 
-    python3 plugin/tests/mutate.py            # every module with a table
-    python3 plugin/tests/mutate.py hookio     # one module, while writing its table
+    python3 plugin/tests/mutate.py                      # every module with a table
+    python3 plugin/tests/mutate.py hookio               # one module, while writing its table
+    python3 plugin/tests/mutate.py --since origin/main  # only what this change could have broken
+
+The third form is what CI runs per push, and the cost is why: a sweep is one full suite run per
+mutation, so its price is linear in the size of the tables and every table owed under issue #8 makes
+every future push slower. Narrowing it to the modules a change can actually have affected keeps that
+flat, and the full sweep moves to a weekly schedule where the length of it does not matter. See
+`targets` for the derivation, which is wider than "the lib files that changed" for a reason.
 
 Not named `test_*.py` on purpose, so `run.py` does not pick it up: one full suite run per mutation
 is seconds rather than milliseconds. `test_mutations.py` is the fast half that does run there, and
@@ -344,22 +351,134 @@ TABLES = {
 }
 
 # Modules with no table yet, listed rather than merely absent so that the debt is a thing you have
-# to look at and a new module cannot join it by accident. `test_mutations.py` asserts this set plus
-# the keys of TABLES is exactly what is in `plugin/lib`, so adding a module without deciding which
-# half it belongs in fails the build. Tracked as issue #8.
-#
-# `ledger` and `reconcile` were swept in /tmp and passed; their tables were lost with the session
-# and are not credited here, because a sweep nobody can re-run is a claim rather than a check.
-UNSWEPT = {
+# to look at and a new module cannot join it by accident. `test_mutations.py` asserts these two sets
+# plus the keys of TABLES are exactly what is in `plugin/lib`, so adding a module without deciding
+# which of the three it belongs in fails the build. Tracked as issue #8.
+NOT_YET = {
     "claims",
-    "cli",
     "exchange_root",
     "hook",
-    "ledger",
     "legacy",
-    "reconcile",
     "registry",
 }
+
+# Not "not yet". Decided against, with the reason next to the name, because a debt list that
+# silently contains permanent entries stops being a debt list. These three are 1100 of the 1800
+# unswept lines and every one of their failure modes is a wrong answer on a command a human just
+# typed, which is the cheapest possible feedback loop; the sweep's cost, by contrast, is linear in
+# table size and paid on every push. Reversing one of these is an edit to this dict, which is the
+# point of writing the reason down rather than the decision.
+#
+# `ledger` and `reconcile` were swept in /tmp and passed; that is not why they are here, and it is
+# not credited as cover either, because a sweep nobody can re-run is a claim rather than a check.
+DECLINED = {
+    "cli": "argument parsing and output formatting, wrong in front of the person who typed it",
+    "ledger": "append and read back, and a bad row is visible in the next command's output",
+    "reconcile": "reports staleness to a reader who can see the sessions it is describing",
+}
+
+# The union is what the accounting in `test_mutations.py` and the `--since` notes below read, so the
+# split above costs those callers nothing.
+UNSWEPT = NOT_YET | set(DECLINED)
+
+
+# The two files that decide what a sweep measures rather than being measured by it: `run.py` is what
+# "the suite" means, and this file holds every table. A change to either makes the last sweep's
+# verdicts stale for every module, so `--since` stops narrowing and reswept the lot. `test_*.py` is
+# deliberately not in here - those map through `caught_by` instead, which is narrower and exact.
+INSTRUMENT = {"plugin/tests/run.py", "plugin/tests/mutate.py"}
+
+
+def targets(paths):
+    """Which modules a change to `paths` makes worth sweeping, and what was left out.
+
+    Returns `(modules, notes)`. Pure, and separate from the git call that feeds it, so the mapping
+    is checkable without a repository or a commit - the derivation is the part that can be wrong
+    in a way nothing notices, since its failure is a sweep that runs, passes, and measured the
+    wrong thing.
+
+    Three ways a path reaches a module:
+
+    - `plugin/lib/<name>.py` is the module itself, the obvious half.
+    - a test file maps through `caught_by`, because what the sweep asserts is that *the suite*
+      objects, and a check deleted from that file is precisely how a mutation stops being caught. A
+      sweep narrowed to changed lib modules alone would miss the whole of that, which is the failure
+      this repo would have shipped: the file that weakens the gate is not the file the gate is
+      about.
+    - `run.py` or this file is the instrument, so every table.
+
+    A note rather than a refusal for a changed module with no table. Failing would gate `cli`,
+    `ledger` and `reconcile` behind writing tables for them, and a gate that blocks ordinary work
+    gets bypassed, which is worse than the hole it was closing. The note says the change went
+    unswept, and the weekly full sweep does not cover it either: `UNSWEPT` means unswept
+    everywhere.
+    """
+    if INSTRUMENT & set(paths):
+        return sorted(TABLES), ["the sweep's own instrument changed, so every table is reswept"]
+    by_test = {}
+    for name, table in TABLES.items():
+        for mutation in table:
+            by_test.setdefault(mutation.caught_by, set()).add(name)
+    modules = set()
+    notes = []
+    for path in sorted(set(paths)):
+        parts = pathlib.PurePosixPath(path).parts
+        if len(parts) != 3 or parts[0] != "plugin" or not path.endswith(".py"):
+            continue
+        name = pathlib.PurePosixPath(path).stem
+        if parts[1] == "lib":
+            if name in TABLES:
+                modules.add(name)
+            elif name in DECLINED:
+                notes.append(f"{name} changed and is deliberately not swept: {DECLINED[name]}")
+            elif name in NOT_YET:
+                notes.append(
+                    f"{name} changed and has no table yet, so this change goes unswept (#8)"
+                )
+        elif parts[1] == "tests":
+            modules |= by_test.get(parts[2], set())
+    return sorted(modules), notes
+
+
+def git(*args):
+    """One git call in this repo, as a completed process. Never raises; the caller reads the status.
+
+    Module level and passed in below rather than closed over, so the two failure paths in
+    `changed_since` are reachable from a check. Without the seam the diff guard was unreachable by
+    any input: a base git cannot resolve fails at `merge-base` first, so nothing could exercise the
+    second guard, and deleting it left the suite green. A guard no input can reach is one this repo
+    deletes - unless the reason it cannot be reached is the absence of a seam, which is a different
+    problem with a different fix.
+    """
+    return subprocess.run(
+        ["git", "-C", str(REPO), *args], capture_output=True, text=True, check=False
+    )
+
+
+def changed_since(base, run=git):
+    """Repo-relative paths that differ from `base`, or a reason there is no answer.
+
+    The working tree rather than `HEAD`, so uncommitted edits count. Locally that is the common case
+    and the one worth making cheap; in CI the tree is clean, so the two are the same thing.
+
+    A merge base rather than `base` itself, or a branch that is behind main reports every file
+    somebody else changed as its own. Untracked files are not consulted: a new module with no table
+    fails the accounting in `test_mutations.py`, so the baseline stops the sweep before this
+    matters.
+
+    Any git failure is a reason, never an empty list. An empty list here means "nothing to sweep",
+    which exits 0, so a git call that silently failed would be a green gate that swept nothing -
+    the exact shape this file exists to delete.
+    """
+    found = run("merge-base", base, "HEAD")
+    if found.returncode != 0:
+        said = found.stderr.strip() or "git said nothing"
+        return None, f"no merge base for {base!r} and HEAD: {said}"
+    diff = run("diff", "--name-only", found.stdout.strip())
+    if diff.returncode != 0:
+        said = diff.stderr.strip() or "git said nothing"
+        return None, f"cannot diff against {base!r}: {said}"
+    return [line for line in diff.stdout.splitlines() if line], None
 
 
 def apply(text, mutation):
@@ -542,11 +661,48 @@ def main(argv):
         print(f"refusing to sweep: {SWEEPING} is set, so this is already running inside a sweep")
         return 2
 
-    wanted = argv or sorted(TABLES)
-    unknown = [name for name in wanted if name not in TABLES]
-    if unknown:
-        print(f"no table for: {', '.join(unknown)}")
-        return 2
+    argv = list(argv)
+    since = None
+    if argv and argv[0] == "--since":
+        if len(argv) < 2 or not argv[1].strip():
+            print("--since needs a ref to compare against")
+            return 2
+        since = argv[1]
+        argv = argv[2:]
+        # Refused rather than resolved in either direction. `--since main hookio` reads as both
+        # "sweep hookio if it changed" and "sweep hookio, and also whatever else did", and the two
+        # differ on exactly the runs where it matters. An ambiguous argument that quietly picks one
+        # is how a sweep comes to measure something other than what the caller asked for.
+        if argv:
+            named = ", ".join(argv)
+            print(f"--since derives the module list, so naming {named} as well is ambiguous")
+            return 2
+
+    if since is None:
+        wanted = argv or sorted(TABLES)
+        unknown = [name for name in wanted if name not in TABLES]
+        if unknown:
+            print(f"no table for: {', '.join(unknown)}")
+            return 2
+    else:
+        paths, problem = changed_since(since)
+        if problem:
+            print(f"refusing to sweep: {problem}")
+            return 2
+        wanted, notes = targets(paths)
+        print(f"=== {len(paths)} file(s) changed since {since}")
+        for note in notes:
+            print(f"  note  {note}")
+        # Exit 0, and distinct from the "no mutations to sweep" refusal at the bottom of this
+        # function. That one is a sweep asked to prove something and proving nothing; this one is a
+        # change the sweep has nothing to say about - a doc, a workflow, a handler - and the honest
+        # answer is to say so and not spend a suite run per mutation finding out again. The count
+        # and the ref are printed either way, because "nothing changed" and "the ref was wrong"
+        # look the same from here and only the log can tell them apart.
+        if not wanted:
+            print("nothing that a sweep can measure changed, so there is nothing to sweep")
+            return 0
+        print(f"  sweeping {', '.join(wanted)}")
 
     print("=== baseline")
     problem = baseline()
