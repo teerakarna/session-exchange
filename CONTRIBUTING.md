@@ -26,6 +26,14 @@ clever branch no arrangement of the input could reach, an escape-aware emphasis 
 case that cannot occur. An untestable rule is not free: it reads as protection, so the next person
 keeps it and widens the thing that was actually holding the line.
 
+The importer's key produced the other two outcomes. One was a missing gate rather than a dead rule:
+stop comparing status and every check still passed, because nothing asserted that closing an entry in
+the ledger after it was imported reaches the stored row. That is the ordinary case, and it was absent
+from a suite that read as thorough. The other was in the sweep itself. A mutation whose text no longer
+matched the file was scored as "no failure", so the tool built to find checks that cannot fail had the
+same defect, and it was reporting a real rule as untested while hiding a fake one. If you mutate by
+string replacement, assert the replacement happened.
+
 ## The corollary, which cost more to learn
 
 **Run the thing.** The two worst bugs in the first working version passed the whole suite: `claim`
@@ -33,6 +41,13 @@ took its display name from the calling session rather than the session being cla
 someone else's claim under the caller's name and then reported it back as stale; and the `SessionStart`
 handler read a payload field that does not exist. A green suite is not a demonstration. Use the
 commands, read the output, and check it says something true.
+
+Running it over the real fixture is what found the importer's key was not idempotent. The key holds a
+64-character prefix of the headline, and on two of the ten entries the cut landed on a space. Writing
+trimmed nothing, reading normalised the stored value and took the space off, so the key came back a
+character short, the row stopped matching the source it was written from, and the entry re-imported as
+new while the original reported as an orphan. Reasoning about the rule would not have turned that up.
+Ten failing checks on the first run did.
 
 ## Running it
 

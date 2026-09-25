@@ -40,5 +40,5 @@ select = [
 [lint.isort]
 # lib/ modules import each other by bare name, because the hook handlers put that directory on
 # sys.path rather than installing anything. Ruff cannot infer that from the tree.
-known-first-party = ["claims", "cli", "exchange_root", "hook", "hookio", "legacy", "registry",
-                     "store", "validate"]
+known-first-party = ["claims", "cli", "exchange_root", "hook", "hookio", "ledger", "legacy",
+                     "reconcile", "registry", "store", "validate"]
