@@ -198,11 +198,13 @@ jobs:
   # also categorically different from any other step's, naming a rule nothing asserts rather than a
   # rule broken, and merging it in would report that as "checks failed".
   #
-  # What it is not is free, and the first version of this comment claimed it was. `checks` runs in
-  # thirty seconds, so a separate job bills 1 + 2 while folding the sweep in bills 2, and the split
-  # costs one Linux minute per run. That is the price of the two reasons above rather than an argument
-  # for them, and it is stated here because the alternative was an arithmetic that came out even only
-  # if nobody measured `checks`.
+  # What it is not is free, and the first version of this comment claimed it was. `checks` comes in
+  # between fifteen and thirty seconds and the sweep between one and one and a half minutes, so a
+  # separate job bills 1 + 2 while folding the sweep in bills 2: the split costs one Linux minute per
+  # run, and goes on doing so for any `checks` under about fifty seconds. That is the price of the two
+  # reasons above rather than an argument for them. Stated as a range because the first version of
+  # this paragraph named one measurement of `checks` and the next CI run came in at half of it, which
+  # did not change the conclusion but is how the claim would have rotted.
   #
   # One interpreter, one OS. The sweep asserts what the suite asserts, which does not vary by Python
   # version - `test` is where version sensitivity belongs, and a matrix here would multiply those

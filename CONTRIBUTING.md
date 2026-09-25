@@ -215,7 +215,7 @@ that gets bypassed, and a gate routinely bypassed teaches that gates are optiona
 `mutate` is the one job kept out of `checks` without a permissions reason for it, against the
 arithmetic below: it runs the suite once per mutation, and its failure names a rule nothing asserts
 rather than a rule broken, which is not what "checks failed" would say. That costs one Linux minute
-per run, because `checks` takes thirty seconds and folding a minute of sweep into it stays inside two
+per run: `checks` comes in well under a minute, so folding a minute of sweep into it stays inside two
 billed minutes while splitting them bills three. The price is named in the job's own comment rather
 than argued away, which is what the first version of it did.
 
