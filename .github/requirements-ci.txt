@@ -1,5 +1,11 @@
 # CI tooling only. Nothing here is a runtime dependency: the plugin imports the standard library and
-# nothing else, which the `stdlib` job in ci.yml enforces. This file exists so the pin is a file
+# nothing else, which a step in the `checks` job enforces. This file exists so the pin is a file
 # dependabot can see and bump in a PR, rather than a literal buried in a run step that goes stale
 # quietly.
+#
+# The stdlib-only rule is about `plugin/lib`, which the hooks import with whatever `python3` the
+# machine has and no chance to install anything. It does not reach a CI step that has already run
+# pip, which is why the `needs` check in `checks` can parse the workflow properly instead of with a
+# regex that would agree with a file Actions rejects.
 ruff==0.16.9
+pyyaml==6.0.3
