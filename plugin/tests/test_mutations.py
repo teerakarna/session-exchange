@@ -21,6 +21,7 @@ saying what changed, and a flag lets a module be quietly forgotten.
 
 import contextlib
 import io
+import os
 import pathlib
 import subprocess
 import sys
@@ -40,6 +41,20 @@ def check(name, got, want):
     else:
         print(f"  FAIL  {name}: got {got!r}, want {want!r}")
         failures.append(name)
+
+
+def outside_sweep():
+    """The environment with the sweep marker removed, for checks about ordinary `mutate.py` runs.
+
+    This file runs inside the baseline copy as well as on its own, and the sweep sets the marker for
+    everything it spawns, so a check that wants `mutate.py`'s ordinary behaviour cannot inherit the
+    environment. See the use below `main`'s exit-status check for what happened when one did.
+
+    Only for subprocesses. `run_main` calls `main` in-process and has to reach `os.environ` itself.
+    """
+    env = dict(os.environ)
+    env.pop(mutate.SWEEPING, None)
+    return env
 
 
 print("every module in plugin/lib is accounted for")
@@ -404,12 +419,20 @@ def run_main(argv, *, tables, caught, baseline_problem=None):
     mutate.TABLES = tables
     mutate.baseline = lambda: baseline_problem
     mutate.sweep_one = lambda mutation: (caught, "stubbed")
+    # `main` reads the sweep marker from the real `os.environ`, and this calls it in-process rather
+    # than spawning it, so the copied dict `outside_sweep` returns cannot reach it. Inside the
+    # baseline copy the marker is set, and without this every check below got the re-entrancy
+    # refusal's exit 2 instead of the arithmetic it was written for. Fourteen of them at once, and
+    # `baseline` is what said so.
+    marker = os.environ.pop(mutate.SWEEPING, None)
     printed = io.StringIO()
     try:
         with contextlib.redirect_stdout(printed):
             return mutate.main(argv), printed.getvalue()
     finally:
         mutate.TABLES, mutate.baseline, mutate.sweep_one = real
+        if marker is not None:
+            os.environ[mutate.SWEEPING] = marker
 
 
 # Two modules and two mutations each, not one of each, and the output is read rather than only the
@@ -487,11 +510,18 @@ print("and the exit code reaches the process, which is all CI can see")
 # with the suite green and `ci` green with it. Run as a real process, because the contract is the
 # status, and with a module name that does not exist, which returns before `baseline` and so costs
 # milliseconds rather than a suite run.
+#
+# `outside_sweep` matters here rather than being tidiness. This file runs inside the baseline copy
+# and inherits the sweep marker, and the first re-entrancy guard turned this check red
+# the moment it shipped: `mutate.py` refused, so exit 2 arrived for the wrong reason and the message
+# was the refusal rather than `no table for`. `baseline` caught it, which is the line it exists for.
+# A check that asserts what happens outside a sweep has to say so rather than inherit an answer.
 done = subprocess.run(
     [sys.executable, str(HERE / "mutate.py"), "nosuchmodule"],
     capture_output=True,
     text=True,
     timeout=60,
+    env=outside_sweep(),
 )
 check("a refusal is an exit status, not just a printed line", done.returncode, 2)
 check("and the line is printed too", "no table for: nosuchmodule" in done.stdout, True)
@@ -630,6 +660,65 @@ check(
 check(
     "and announced before it runs, rather than labelling the file above it",
     before(out, "=== test_fine.py", PASSING_SAYS),
+    True,
+)
+
+print("and a sweep refuses to start inside a sweep")
+
+# 204 orphaned processes, half a core, two hours, and `ps` the only trace. See `mutate.SWEEPING`.
+#
+# A module that has a table, deliberately not `nosuchmodule`: with an unknown name this exits 2 from
+# the no-table refusal instead, so the check would pass with the guard deleted. That is the
+# argv-agrees-with-the-payload defect this repo keeps rediscovering, so the name is real, the only
+# thing here that can produce exit 2 is the guard, and the message is checked too, not the status
+# alone.
+nested = subprocess.run(
+    [sys.executable, str(HERE / "mutate.py"), "store"],
+    capture_output=True,
+    text=True,
+    timeout=60,
+    env={**os.environ, mutate.SWEEPING: "1"},
+)
+check("a sweep reached from inside a sweep refuses", nested.returncode, 2)
+check(
+    "and names the variable that told it so, which the caller did not set on purpose",
+    mutate.SWEEPING in nested.stdout,
+    True,
+)
+# Ahead of `baseline`, or the refusal costs a suite run per level and the chain is merely slower.
+check("and refuses before spending a baseline run", "=== baseline" in nested.stdout, False)
+
+# The other side of the seam. `main` refusing is half of it; the half that makes the refusal
+# reachable is `run_suite` putting the marker in the child's environment, and a guard nothing sets
+# never fires. Stubbed rather than run, because this asserts an argument rather than a behaviour and
+# running it costs a real suite. `subprocess.run` is restored in `finally` - `mutate.subprocess` is
+# the shared module object, so this patch is global while it is in place.
+captured = {}
+
+
+def fake_run(cmd, **kwargs):
+    captured.update(kwargs)
+    raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+
+
+real_run = mutate.subprocess.run
+mutate.subprocess.run = fake_run
+try:
+    mutate.run_suite()
+finally:
+    mutate.subprocess.run = real_run
+
+check(
+    "and the suite a sweep spawns is told that it is inside one",
+    captured.get("env", {}).get(mutate.SWEEPING),
+    "1",
+)
+# `env=` replaces the child's environment rather than adding to it, so a marker passed alone would
+# leave the suite without PATH or the interpreter's own variables. Green either way on this machine
+# until it is not, which is the kind of check worth having.
+check(
+    "with the rest of the environment intact, since env= replaces rather than adds",
+    "PATH" in captured.get("env", {}),
     True,
 )
 

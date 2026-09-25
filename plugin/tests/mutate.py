@@ -42,6 +42,7 @@ it is what stops a table drifting away from the source it claims to patch.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import shutil
@@ -56,6 +57,19 @@ LIB = PLUGIN / "lib"
 # repo root, so a scratch copy of `plugin/` alone fails that file on every run. See `baseline`.
 REPO = PLUGIN.parent
 IGNORE = shutil.ignore_patterns(".git", "__pycache__", ".ruff_cache")
+
+# Set in the environment of the suite a sweep spawns, and refused by `main` when it is set.
+#
+# Without it, 204 orphaned processes accumulated on one machine: a sweep prepares a copy, the suite
+# runs inside that copy, and nothing stopped something in there starting another real sweep, which
+# prepared another copy, and so on. Half a core for over two hours, and `ps` was the only trace it
+# left - the temp directories go on the way out, and a sweep that dies mid-run orphans its children
+# silently rather than reporting anything. Unbounded process growth is exactly a failure that does
+# not report itself, which is what this repo is about.
+#
+# A flag rather than a depth counter. Depth would let one level of nesting through, and there is no
+# reason to want one: the only honest answer to "start a sweep from inside a sweep" is no.
+SWEEPING = "CC_EXCHANGE_SWEEPING"
 
 
 class Mutation(NamedTuple):
@@ -370,6 +384,10 @@ def run_suite(mutation=None):
                 # rather than the job dying at `timeout-minutes` with the summary unprinted, and
                 # 600s against a 15 minute job means two hangs lose that report.
                 timeout=120,
+                # The marker travels with the child, so anything the suite starts inherits it and
+                # `main` refuses. Copied from `os.environ` rather than passed alone, because the
+                # suite needs PATH and the interpreter's own variables to run at all.
+                env={**os.environ, SWEEPING: "1"},
             )
         except subprocess.TimeoutExpired:
             return None, "the suite hung, which names nothing and blocks the sweep"
@@ -460,6 +478,14 @@ def sweep_one(mutation):
 
 
 def main(argv):
+    # Before the tables, before `baseline`, before anything that costs a suite run. A sweep reached
+    # from inside a sweep is not a slow sweep but an unbounded one: each level prepares a copy and
+    # runs a suite that can reach this line again. Exit 2 rather than 1, matching the other refusals
+    # here - neither a clean sweep nor a survivor, but a run that should not have started.
+    if os.environ.get(SWEEPING):
+        print(f"refusing to sweep: {SWEEPING} is set, so this is already running inside a sweep")
+        return 2
+
     wanted = argv or sorted(TABLES)
     unknown = [name for name in wanted if name not in TABLES]
     if unknown:
