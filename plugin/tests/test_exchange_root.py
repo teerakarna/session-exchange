@@ -12,6 +12,7 @@ days.
 """
 
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -156,6 +157,121 @@ with tempfile.TemporaryDirectory() as tmp:
     base = tree(tmp, repos_in=["orphan"])
     default, candidates = exchange_root.init_candidates(base / "orphan")
     check("nothing to mark returns None rather than guessing", (default, candidates), (None, []))
+
+print("the rules a sweep found nothing asserting")
+
+# Every check below exists because a mutation of the rule it names survived. `exchange_root` got its
+# table after ten other modules had one, and ten of its twenty-one rules turned out to be
+# asserted by nothing: good coverage of the answers it gives, almost none of the reasons.
+
+with tempfile.TemporaryDirectory() as tmp:
+    base = tree(tmp, areas=["work"], marker_at="work")
+
+    # An override is resolved, not just expanded. Every caller treats the root as a key - claims are
+    # written under it and compared by it - so the same directory reached by two spellings has to be
+    # one root and not two.
+    detour = base / "work" / ".." / "work"
+    r = exchange_root.resolve(base / "work", {"CC_EXCHANGE_ROOT": str(detour)})
+    check("an override is resolved, so one directory is one root", r.root, base / "work")
+
+    # `cwd-invalid` had no check at all, which meant a cwd that does not exist walked its parents as
+    # though it did. That is not academic: the payload's `cwd` is whatever Claude Code sent, and a
+    # deleted directory resolving to its parent's root is a session claiming to be somewhere else.
+    r = exchange_root.resolve(base / "work" / "gone")
+    check(
+        "a cwd that is not a directory says so rather than walking",
+        (r.root, r.rule, r.problem is not None),
+        (None, "cwd-invalid", True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # A marker that is a directory. `mkdir -p .claude/exchange.json` is one keystroke from the real
+    # thing, and `exists()` in place of `is_file()` would make it mark the tree.
+    base = pathlib.Path(tmp).resolve()
+    (base / "work" / ".claude" / "exchange.json").mkdir(parents=True)
+    r = exchange_root.resolve(base / "work")
+    check("a directory named like the marker marks nothing", r.rule, "unmarked")
+
+    # And the read side of the same thing: a root with no marker at all is a problem, because every
+    # caller of `read_marker` has already decided there is a root and is asking what it says.
+    config, problem = exchange_root.read_marker(base)
+    check(
+        "a missing marker is a problem, not empty config",
+        (config, problem is not None),
+        (None, True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # `.git` is a directory in a normal clone and a *file* in a worktree or a submodule. Both of the
+    # worktrees this plugin was built in are the second kind, so `is_dir()` here would have made the
+    # tool wrong in exactly the checkout it was written in and right everywhere it was tested.
+    base = pathlib.Path(tmp).resolve()
+    (base / "wt" / "sub").mkdir(parents=True)
+    (base / "wt" / ".git").write_text("gitdir: /somewhere/.git/worktrees/wt\n")
+    check(
+        "a worktree is a repo, .git being a file",
+        exchange_root.git_root(base / "wt" / "sub"),
+        base / "wt",
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The repo is the ceiling, and cwd is not. `init` run from a subdirectory has to answer what it
+    # answers from the repo root, or the suggestion depends on which directory you were in.
+    base = tree(
+        tmp,
+        areas=["container/alpha", "container/beta"],
+        repos_in=["container/alpha/repo"],
+    )
+    (base / "container/CLAUDE.md").write_text("areas\n")
+    (base / "CLAUDE.md").write_text("root\n")
+    (base / "container/alpha/repo/deep/nested").mkdir(parents=True)
+
+    default, candidates = exchange_root.init_candidates(base / "container/alpha/repo/deep/nested")
+    check("init from deep inside a repo answers the same", default, base / "container/alpha")
+    check(
+        "and the repo is still not a candidate", base / "container/alpha/repo" in candidates, False
+    )
+
+    # Home is excluded however it is spelled. Asserted by setting HOME rather than by trusting this
+    # machine's: on a laptop with a `~/CLAUDE.md` - which is the normal case for anyone using Claude
+    # Code - marking home would give every session on the machine sight of every other one.
+    was = os.environ.get("HOME")
+    try:
+        os.environ["HOME"] = str(base / "container")
+        _, candidates = exchange_root.init_candidates(base / "container/alpha/repo")
+        check("home is never a candidate", base / "container" in candidates, False)
+    finally:
+        if was is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = was
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The nearest candidate being the merge point is the arrangement that matters, and the one the
+    # checks above did not have: with the merge point second in the list, taking the nearest
+    # gives the right answer by accident and the skip could have been missing entirely.
+    base = tree(
+        tmp, areas=["hub/area-one", "hub/area-two"], repos_in=["hub/repo"], claude_at=["hub"]
+    )
+    (base / "CLAUDE.md").write_text("above\n")
+
+    default, candidates = exchange_root.init_candidates(base / "hub/repo")
+    check("the nearest candidate is skipped when it is a merge point", default, base)
+    check("and it is still offered", base / "hub" in candidates, True)
+
+    # Two is the threshold, and both sides of it are asserted here. This was caught only by
+    # `test_cli.py` before, which is the module's own rule being held up by another module's test.
+    check("two sibling areas is a merge point", exchange_root.is_merge_point(base / "hub"), True)
+    (base / "hub/area-two/CLAUDE.md").unlink()
+    check("one is not", exchange_root.is_merge_point(base / "hub"), False)
+
+    # A file rather than a directory. `iterdir` raises `NotADirectoryError`, and this is called
+    # while deciding what to suggest, so raising turns a cosmetic oddity into a failed `init`.
+    check(
+        "something that cannot be listed is not a merge point",
+        exchange_root.is_merge_point(base / "CLAUDE.md"),
+        False,
+    )
 
 print()
 if failures:
