@@ -219,12 +219,13 @@ jobs:
   #
   # Narrowed to what the change could have broken, rather than every table, and that is the one tier
   # in this workflow. A sweep is one full suite run per mutation, so its cost is linear in the size of
-  # the tables: six modules is 87 mutations, just over four minutes locally and four and three
-  # quarters on a runner, and the two newest tables are half of that on their own. So the five
-  # modules `UNSWEPT` still lists would put every future push past six or seven minutes to re-answer
-  # a question the last push already answered about code it did not touch. Nothing else here grows
-  # that way, which is why nothing else here is tiered - the matrix is four fixed legs, and making
-  # the PR gate weaker than the main gate is the failure mode this repo is about.
+  # the tables: six modules is 87 mutations, just over four minutes locally and between four and a
+  # half and four and three quarters on a runner, and the two newest tables are half of that on their
+  # own. So the five modules `UNSWEPT` still lists would put every future push past six or seven
+  # minutes to re-answer a question the last push already answered about code it did not touch.
+  # Nothing else here grows that way, which is why nothing else here is tiered - the matrix is four
+  # fixed legs, and making the PR gate weaker than the main gate is the failure mode this repo is
+  # about.
   #
   # The narrowing is in `mutate.py --since`, not in this file, so the same command is the local one.
   # `targets` there derives the module list, and it is wider than "the lib files that changed": a test
