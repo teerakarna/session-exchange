@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/teerakarna/session-exchange/schemas/exchange.schema.json",
+  "title": "Environment root marker",
+  "description": "`<root>/.claude/exchange.json`. Its presence is what makes a directory a root; its contents are the config that used to be hardcoded in four scripts. Written by `exchange init`, edited by hand thereafter, and never travels with the plugin - this file is the whole reason the plugin can name no paths.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Display name for this root, used in injected context so a session can tell which exchange it is looking at."
+    },
+    "stale_days": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 7,
+      "description": "A claim or handoff older than this is flagged rather than hidden. A row that reads as current and is ten days old is worse than no row."
+    },
+    "max_focus_chars": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 240,
+      "description": "Truncation cap for a claim's focus line. The ledger this replaces had single rows of 23 KB injected into every session."
+    },
+    "max_hot_paths": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 6,
+      "description": "How many claimed paths to render per session."
+    },
+    "max_handoffs_listed": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 8,
+      "description": "How many matching handoffs to render. Anything beyond the cap is counted, never silently dropped."
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Optional display-only grouping: root-relative directory to human-readable label. Never a matching key. A hand-typed label having to agree with a hand-typed label elsewhere is the defect class this design removes, so nothing is ever addressed or matched by these."
+    }
+  }
+}

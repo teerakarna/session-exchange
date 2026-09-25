@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/teerakarna/session-exchange/schemas/claim.schema.json",
+  "title": "Session claim",
+  "description": "`<root>/.claude/exchange/sessions/<session_id>.json`. One file per session, never a shared append target: concurrent writers on one file is the contention this layout exists to avoid. Seeded at SessionStart from the hook payload, updated by the session through `exchange claim`, removed at SessionEnd. Claims inform and never block - every recorded collision was a read-discipline failure, and a lock on a path would be a new failure mode for no measured benefit. Presence comes from the native registry; this file is the stated intent the registry cannot hold, because the registry's `status` is per-turn and `idle` there means not mid-turn rather than finished.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "cwd", "updated_at"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "From the hook payload. Constrained because it is also the filename: anything with a separator in it is rejected rather than resolved."
+    },
+    "name": {
+      "type": "string",
+      "description": "The session's own display name, as the native registry knows it."
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute working directory. What scope-addressed handoffs are matched against."
+    },
+    "git_branch": {
+      "type": "string",
+      "description": "Read from .git/HEAD, not from a subprocess. Absent when detached or outside a repo."
+    },
+    "focus": {
+      "type": "string",
+      "description": "What this session is actually doing, in its own words. The one field a machine cannot derive."
+    },
+    "repos": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Root-relative repository directories this session is working in."
+    },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Hot paths - files or directories being changed. Read this before heavy work in a shared repo."
+    },
+    "tickets": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Opaque references for a human reader. Never parsed."
+    },
+    "updated_at": {
+      "type": "string",
+      "pattern": "^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$",
+      "description": "UTC, seconds precision, always Z. A claim whose session no longer appears in the native registry is stale regardless of this, which is how a crashed session gets cleaned up without a SessionEnd."
+    }
+  }
+}

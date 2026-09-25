@@ -1,0 +1,25 @@
+{
+  "description": "Seed a session's claim and inject what its environment root has to say; clear the claim when the session ends.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-end.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
