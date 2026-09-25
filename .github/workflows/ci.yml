@@ -151,3 +151,36 @@ jobs:
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The single check branch protection requires, and the only reason this job exists. Requiring the
+  # other jobs by name means every matrix leg is named in a repo setting: rename one, or drop a
+  # Python version, and `main` is blocked forever waiting on a check that will never report again.
+  # A stuck gate gets bypassed, and a bypassed gate is worse than none, which is the failure this
+  # whole repo is about. One aggregate name is stable across any change to the matrix.
+  #
+  # `always()` so it runs even when something upstream failed, and the explicit result check because
+  # a skipped `needs` job does not fail a dependant on its own.
+  ci:
+    needs: [test, stdlib, manifests, lint, shell, secrets]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every job succeeded
+        run: |
+          # Single quotes inside the expression, double outside: a GitHub expression only accepts
+          # single-quoted strings, and `" "` there is not a syntax error YAML can see. It parses
+          # fine and Actions rejects the whole file, so every job vanishes rather than one failing.
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "upstream: $results"
+          # An empty list would pass the loop below without checking anything, which is the exact
+          # shape of gate this repo exists to stop shipping. It should be unreachable.
+          if [ -z "$results" ]; then
+            echo "::error::no upstream results to check, so this gate proved nothing"
+            exit 1
+          fi
+          for result in $results; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a required job did not succeed"
+              exit 1
+            fi
+          done
