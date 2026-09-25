@@ -474,6 +474,167 @@ check(
     "first\nsecond",
 )
 
+# The narrowing on the redirect below, which `if True:` satisfied with the whole suite green. `out=`
+# is a test seam, and pointing fd 1 at devnull because a caller's in-memory stream would not flush
+# is a guess dressed as a guard: the caller keeps its own stdout.
+
+
+class FlushFails(io.StringIO):
+    """A handed-in stream that raises where a dead pipe raises, in memory."""
+
+    def flush(self):
+        raise OSError("no reader here either")
+
+
+def fd1_across_a_failed_flush():
+    """What became of fd 1 when `emit` was handed a stream that will not flush.
+
+    fd 1 is saved and put back around the call, and the comparison is made before it is put back.
+    Without that, the regression this exists for reports nothing: `if True:` makes `emit` dup2
+    devnull onto fd 1, `sys.stdout` still holds fd 1, and every `check` below prints into the dark.
+    Measured, rather than reasoned about - the file went to zero bytes on stdout, zero on stderr and
+    exit 1, so the sweep scored it as caught by a file that crashed rather than by this rule, and
+    roughly a hundred and fifty later checks went dark with it.
+
+    Shielded for the same reason `injected` and `read_by` are. `FlushFails` exists to make `emit`'s
+    guard fire, so any change to that guard raises here, at module level, and would take the three
+    end-to-end checks below with it.
+
+    fd 1 by identity rather than by name, and a run where it is already devnull is reported as
+    proving nothing rather than passing: under `run.py` it is a pipe, but a suite run with stdout
+    sent to devnull by hand would otherwise be green for the wrong reason.
+    """
+    saved = os.dup(1)
+    try:
+        before = os.fstat(1)
+        try:
+            hookio.emit("SessionStart", ["a line"], out=FlushFails())
+        except Exception as exc:
+            return f"emit raised {type(exc).__name__}"
+        after = os.fstat(1)
+        null = os.stat(os.devnull)
+        if (before.st_dev, before.st_ino) == (null.st_dev, null.st_ino):
+            return "fd 1 was already devnull, so this proves nothing"
+        same = (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
+    finally:
+        os.dup2(saved, 1)
+        os.close(saved)
+    return "fd 1 is untouched" if same else "fd 1 was redirected"
+
+
+check(
+    "a stream the caller handed in never gets fd 1 redirected out from under it",
+    fd1_across_a_failed_flush(),
+    "fd 1 is untouched",
+)
+
+print("and a reader that has gone away does not take the session down with it")
+
+# The module docstring calls the guarantee absolute: anything that goes wrong becomes a line of
+# injected context and an exit status of 0. It held for every input and not for every *reader*. With
+# the read end of stdout closed before the hook writes, the process exited 120 with a
+# `BrokenPipeError` on stderr - and not from the `print`, which returns fine. The bytes sat in the
+# buffer and the interpreter's own shutdown flush was what failed, after `main` had already returned
+# 0, where nothing can catch it.
+#
+# End to end against the real handler rather than through `emit(out=...)`, because the whole failure
+# is in a real fd and a real buffer. An in-memory sink cannot have a reader that went away, so a
+# unit check here would pass against the broken version.
+#
+# Three states of it, not one. The first fix here guarded the flush, this file asserted the buffered
+# pipe, and the docstring claimed every reader - which is the `or {}` shape from CONTRIBUTING.md, a
+# check fed back exactly the input that showed the bug and reading as cover for the rest of the
+# rule. The other two both still exited 1 with a traceback: unbuffered, the write raises during the
+# `print` rather than in the shutdown flush, and with fd 1 closed CPython puts `None` in
+# `sys.stdout`, so the flush is an AttributeError. All three reach a real session -
+# `PYTHONUNBUFFERED` in somebody's environment is enough for the second.
+#
+# The read end is closed before the process starts, so the write is broken from its first byte and
+# there is no race to lose.
+
+
+def run_into_a_dead_pipe(event, payload, home, env=None, close_stdout=False):
+    """Fire the hook with no reader on stdout. Returns `(exit code, stderr)`.
+
+    `close_stdout` is fd 1 gone rather than merely unread, which `subprocess` has no argument for -
+    `DEVNULL` is an open fd. Same trick as the closed-stdin check above: a one-line interpreter
+    closes it and execs the hook.
+    """
+    environ = dict(os.environ, HOME=str(home))
+    environ.pop("CC_EXCHANGE_ROOT", None)
+    # Scrubbed for the same reason `CC_EXCHANGE_ROOT` is, and it matters more. Exported in the
+    # shell, it makes the block-buffered case below a second copy of the unbuffered one, and then
+    # removing the whole `dup2` body leaves every check here green - the central fix of this change
+    # unasserted, and the sweep naming a live rule as untested. Nothing in `ci.yml` sets it, which
+    # is the green-CI-is-necessary-but-not-sufficient case again: the hole only opens on a machine.
+    environ.pop("PYTHONUNBUFFERED", None)
+    environ.update(env or {})
+    if close_stdout:
+        hook_py = str(LIB / "hook.py")
+        argv = [
+            sys.executable,
+            "-c",
+            "import os;os.close(1);"
+            f"os.execv({sys.executable!r},[{sys.executable!r},{hook_py!r},{event!r}])",
+        ]
+        stdout = subprocess.DEVNULL
+    else:
+        argv = [sys.executable, str(LIB / "hook.py"), event]
+        read_fd, write_fd = os.pipe()
+        os.close(read_fd)
+        stdout = write_fd
+    try:
+        done = subprocess.run(
+            argv,
+            input=json.dumps(payload),
+            stdout=stdout,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=environ,
+            timeout=30,
+        )
+    finally:
+        if not close_stdout:
+            os.close(write_fd)
+    return done.returncode, done.stderr
+
+
+# Legacy wiring in every case, so there is a line to inject. With nothing to say `emit` returns
+# before it writes, and every check below would pass on any version of this module.
+for label, env, closed in (
+    ("whose reader has closed stdout", None, False),
+    ("writing unbuffered into the same dead pipe", {"PYTHONUNBUFFERED": "1"}, False),
+    ("with no stdout at all", None, True),
+):
+    with tempfile.TemporaryDirectory() as tmp:
+        home, root, repo = fixture(tmp, wire_legacy=True)
+        code, err = run_into_a_dead_pipe(
+            "SessionStart",
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "sess-dead-pipe",
+                "cwd": str(repo),
+                "source": "startup",
+            },
+            home,
+            env=env,
+            close_stdout=closed,
+        )
+        # Both halves, and stderr is the half that matters more. `session-start.sh` ends
+        # `|| exit 0`, so the exit status never reached Claude Code; the traceback did, and the
+        # module docstring calls that louder and less useful than the problem it reports.
+        check(f"a hook {label} still exits 0", code, 0)
+        check(f"and a hook {label} leaves nothing on stderr", err, "")
+        # And still did the work, which is the half a user notices. The reply is dropped by design
+        # when there is no stdout to put it on, so without this a future early return further up -
+        # in `hook.main` rather than in `emit` - would stop seeding claims with both checks above
+        # green, and "silence, not a traceback" would have become silence and nothing else.
+        check(
+            f"and a hook {label} still seeded its claim",
+            (root / ".claude" / "exchange" / "sessions" / "sess-dead-pipe.json").is_file(),
+            True,
+        )
+
 print("what payload does with a stream it is handed")
 
 # The other half of a pair this file only asserted one side of. `emit` takes `out=` and is checked

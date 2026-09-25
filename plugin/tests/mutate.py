@@ -206,8 +206,59 @@ HOOKIO = [
     Mutation(
         module="hookio",
         rule="the reply is shaped the way Claude Code reads it, key included",
-        old='                "hookSpecificOutput": {',
-        new='                "hookSpecificOutputs": {',
+        old='            "hookSpecificOutput": {',
+        new='            "hookSpecificOutputs": {',
+        caught_by="test_hook.py",
+    ),
+    # The reader half of the guarantee, one mutation per state of it, because the first version of
+    # this fix closed one of the three and the docstring claimed all three. A check fed back exactly
+    # the input that showed the bug is the `or {}` shape again, one file over.
+    #
+    # The body removed rather than weakened. The two weaker versions - catching the `OSError` and
+    # doing nothing, or flushing inside a wrapped `print` - both still exit 120, so either as a
+    # `new` would be caught for a reason that has nothing to do with the rule.
+    Mutation(
+        module="hookio",
+        rule="a stdout nobody is reading is silence, not an exit 120 on the way out",
+        old="            null = os.open(os.devnull, os.O_WRONLY)\n"
+        "            os.dup2(null, 1)\n"
+        "            os.close(null)",
+        new="            pass",
+        caught_by="test_hook.py",
+    ),
+    # The write inside the same `try` as the flush. Expressed as the whole block swapped for the
+    # version this was, with the `print` outside, because that is the shape of the defect: buffered,
+    # the write succeeds and the flush is where the pipe breaks, so a fix that only guards the flush
+    # passes every check written for the buffered case and raises on the unbuffered one.
+    Mutation(
+        module="hookio",
+        rule="an unbuffered stdout breaks during the write, which is inside the guard too",
+        old=(
+            "    try:\n"
+            "        print(reply, file=stream)\n"
+            "        stream.flush()\n"
+            "    except OSError:"
+        ),
+        new=(
+            "    print(reply, file=stream)\n    try:\n        stream.flush()\n    except OSError:"
+        ),
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hookio",
+        rule="no stdout at all is silence, not an AttributeError out of a hook",
+        old="    if stream is None:\n        return",
+        new="    if False:\n        return",
+        caught_by="test_hook.py",
+    ),
+    # The narrowing guard on the redirect, which had thirteen lines of comment defending it and
+    # nothing behind it: `if True` left the whole suite green, so the rule that `out=` is a seam and
+    # not an fd was protection that was not.
+    Mutation(
+        module="hookio",
+        rule="a stream the caller handed in is never fixed by redirecting fd 1",
+        old="        if stream is sys.__stdout__:",
+        new="        if True:",
         caught_by="test_hook.py",
     ),
 ]
