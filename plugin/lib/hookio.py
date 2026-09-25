@@ -131,14 +131,17 @@ def emit(event, lines, out=None):
         # what makes that retry succeed - the buffer still holds fd 1, and `dup2` changes what fd 1
         # is, so the bytes land in the dark instead of on a pipe with no reader.
         #
-        # Only for the real stdout. `out=` is a test seam and an in-memory stream that failed to
-        # write would not be fixed by touching fd 1, so redirecting it there would be a guess
-        # dressed as a guard.
+        # Only for the real stdout, and `sys.__stdout__` is what says that. `sys.stdout` means
+        # whatever it points at right now, which under a caller that has swapped it for an in-memory
+        # stream is exactly the guess this guard exists to avoid - `test_hook.py` does that swap.
+        # `out=` is a test seam too, and a stream that failed to write would not be fixed by
+        # touching fd 1. `sys.__stdout__` is also `None` when fd 1 is not open, which the early
+        # return above has already handled.
         #
         # `OSError` stays narrow, for the reason the `isatty` guard above stays enumerated: every
         # reader state that reaches a handler is either this or the `None` above. A stream whose
         # write raises anything else is the `out=` seam, where the caller is the test.
-        if stream is sys.stdout:
+        if stream is sys.__stdout__:
             null = os.open(os.devnull, os.O_WRONLY)
             os.dup2(null, 1)
             os.close(null)

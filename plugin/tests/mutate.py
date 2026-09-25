@@ -257,7 +257,7 @@ HOOKIO = [
     Mutation(
         module="hookio",
         rule="a stream the caller handed in is never fixed by redirecting fd 1",
-        old="        if stream is sys.stdout:",
+        old="        if stream is sys.__stdout__:",
         new="        if True:",
         caught_by="test_hook.py",
     ),

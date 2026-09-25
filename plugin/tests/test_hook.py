@@ -486,23 +486,46 @@ class FlushFails(io.StringIO):
         raise OSError("no reader here either")
 
 
-# fd 1 by identity rather than by name. The check is only worth anything while fd 1 is not already
-# devnull, so that is asserted first rather than assumed - under `run.py` it is a pipe, and a suite
-# run with stdout sent to devnull by hand would otherwise pass this vacuously.
-null = os.stat(os.devnull)
-before = os.fstat(1)
-hookio.emit("SessionStart", ["a line"], out=FlushFails())
-after = os.fstat(1)
+def fd1_across_a_failed_flush():
+    """What became of fd 1 when `emit` was handed a stream that will not flush.
+
+    fd 1 is saved and put back around the call, and the comparison is made before it is put back.
+    Without that, the regression this exists for reports nothing: `if True:` makes `emit` dup2
+    devnull onto fd 1, `sys.stdout` still holds fd 1, and every `check` below prints into the dark.
+    Measured, rather than reasoned about - the file went to zero bytes on stdout, zero on stderr and
+    exit 1, so the sweep scored it as caught by a file that crashed rather than by this rule, and
+    roughly a hundred and fifty later checks went dark with it.
+
+    Shielded for the same reason `injected` and `read_by` are. `FlushFails` exists to make `emit`'s
+    guard fire, so any change to that guard raises here, at module level, and would take the three
+    end-to-end checks below with it.
+
+    fd 1 by identity rather than by name, and a run where it is already devnull is reported as
+    proving nothing rather than passing: under `run.py` it is a pipe, but a suite run with stdout
+    sent to devnull by hand would otherwise be green for the wrong reason.
+    """
+    saved = os.dup(1)
+    try:
+        before = os.fstat(1)
+        try:
+            hookio.emit("SessionStart", ["a line"], out=FlushFails())
+        except Exception as exc:
+            return f"emit raised {type(exc).__name__}"
+        after = os.fstat(1)
+        null = os.stat(os.devnull)
+        if (before.st_dev, before.st_ino) == (null.st_dev, null.st_ino):
+            return "fd 1 was already devnull, so this proves nothing"
+        same = (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
+    finally:
+        os.dup2(saved, 1)
+        os.close(saved)
+    return "fd 1 is untouched" if same else "fd 1 was redirected"
+
 
 check(
-    "fd 1 is something worth protecting in the first place",
-    (before.st_dev, before.st_ino) == (null.st_dev, null.st_ino),
-    False,
-)
-check(
     "a stream the caller handed in never gets fd 1 redirected out from under it",
-    (after.st_dev, after.st_ino),
-    (before.st_dev, before.st_ino),
+    fd1_across_a_failed_flush(),
+    "fd 1 is untouched",
 )
 
 print("and a reader that has gone away does not take the session down with it")
@@ -539,6 +562,12 @@ def run_into_a_dead_pipe(event, payload, home, env=None, close_stdout=False):
     """
     environ = dict(os.environ, HOME=str(home))
     environ.pop("CC_EXCHANGE_ROOT", None)
+    # Scrubbed for the same reason `CC_EXCHANGE_ROOT` is, and it matters more. Exported in the
+    # shell, it makes the block-buffered case below a second copy of the unbuffered one, and then
+    # removing the whole `dup2` body leaves every check here green - the central fix of this change
+    # unasserted, and the sweep naming a live rule as untested. Nothing in `ci.yml` sets it, which
+    # is the green-CI-is-necessary-but-not-sufficient case again: the hole only opens on a machine.
+    environ.pop("PYTHONUNBUFFERED", None)
     environ.update(env or {})
     if close_stdout:
         hook_py = str(LIB / "hook.py")
@@ -596,6 +625,15 @@ for label, env, closed in (
         # module docstring calls that louder and less useful than the problem it reports.
         check(f"a hook {label} still exits 0", code, 0)
         check(f"and a hook {label} leaves nothing on stderr", err, "")
+        # And still did the work, which is the half a user notices. The reply is dropped by design
+        # when there is no stdout to put it on, so without this a future early return further up -
+        # in `hook.main` rather than in `emit` - would stop seeding claims with both checks above
+        # green, and "silence, not a traceback" would have become silence and nothing else.
+        check(
+            f"and a hook {label} still seeded its claim",
+            (root / ".claude" / "exchange" / "sessions" / "sess-dead-pipe.json").is_file(),
+            True,
+        )
 
 print("what payload does with a stream it is handed")
 
