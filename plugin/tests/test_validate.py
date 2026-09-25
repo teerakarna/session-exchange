@@ -108,6 +108,42 @@ check(
     1,
 )
 
+# Every pattern in every shipped schema is `^...$`, and Python's `$` matches before a trailing
+# newline where ECMA-262's does not. So all eight accepted one trailing newline they were written to
+# exclude, and the two below are the ones that get rendered into a markdown table, where a newline
+# ends the row. The id has a second guard in `store.safe_id`; the timestamp has only this one.
+check(
+    "a session id with a trailing newline is refused",
+    len(validate.validate(dict(CLAIM, session_id="sess-1\n"), claim_schema)),
+    1,
+)
+check(
+    "so is a timestamp with one",
+    len(validate.validate(dict(CLAIM, updated_at="2026-09-25T10:00:00Z\n"), claim_schema)),
+    1,
+)
+# And the anchoring still has to work in the ordinary direction, or the fix above could be a pattern
+# that matches nothing at all and every check here would still pass.
+check(
+    "while the exact spelling still passes",
+    validate.validate(dict(CLAIM, updated_at="2026-09-25T10:00:00Z"), claim_schema),
+    [],
+)
+# The other direction, and it needs schemas the repo does not ship, because every shipped pattern
+# ends in exactly one `$`. Without these, the rewrite could anchor patterns that were never anchored
+# and every check above would still pass: a JSON Schema pattern is a partial match, so deciding for
+# the schema where a string ends is the validator overreaching, not tightening.
+check(
+    "an unanchored pattern still matches in the middle, the way JSON Schema says",
+    validate.validate("xx-abc-xx", {"type": "string", "pattern": "abc"}),
+    [],
+)
+check(
+    "and a literal dollar at the end is not mistaken for an anchor",
+    validate.validate("costs $", {"type": "string", "pattern": r"costs \$"}),
+    [],
+)
+
 # `bool` is a subclass of `int` in Python, so an integer check written the obvious way accepts
 # `true`. Asserted because it is the kind of thing that passes review and then lets a cap of `true`
 # through into a renderer.

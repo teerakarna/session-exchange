@@ -77,7 +77,11 @@ with tempfile.TemporaryDirectory() as tmp:
 print("an identifier that is also a filename")
 
 check("a plain id passes", store.safe_id("abc-123.def"), "abc-123.def")
-for bad in ("../escape", "a/b", "", None, "with space"):
+# `"sess-1\n"` is in this list because it was not refused: the pattern is anchored at both ends and
+# Python's `$` still matches before a trailing newline, so `match` let it through, a claim was
+# written under that filename, and the newline landed in the `session_id` field. Presence rendering
+# puts that field in a markdown table cell, where a newline ends the row. The guard looked tight.
+for bad in ("../escape", "a/b", "", None, "with space", "sess-1\n", "a\nb"):
     check(f"{bad!r} is refused rather than rewritten", store.safe_id(bad), None)
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -85,6 +89,20 @@ with tempfile.TemporaryDirectory() as tmp:
     claim, problem = claims.seed(root, "../../evil", root)
     check("seeding with a traversing id writes nothing", (claim, problem is not None), (None, True))
     check("and nothing appeared outside the store", list(root.parent.glob("evil*")), [])
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    claim, problem = claims.seed(root, "sess-1\n", root)
+    check(
+        "seeding with a newline in the id writes nothing",
+        (claim, problem is not None),
+        (None, True),
+    )
+    check(
+        "and leaves no file named after it",
+        sorted(p.name for p in root.rglob("*.json")),
+        [],
+    )
 
 print("seed, update, clear")
 
