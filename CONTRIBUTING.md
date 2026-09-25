@@ -19,6 +19,13 @@ satisfies every positive assertion and turns the injected section into something
 skip); a schema grown a keyword the validator does not implement; a `hooks.json` handler path
 resolving to nothing; `safe_id` made permissive.
 
+Two more came out of the ledger parser, and both were *deletions*, which is the outcome worth
+expecting. Breaking each of its rules in turn found one that no mutation could fail - a guard
+excluding the continuation marker, duplicating work the entry anchor already did - and one whose
+clever branch no arrangement of the input could reach, an escape-aware emphasis stripper written for a
+case that cannot occur. An untestable rule is not free: it reads as protection, so the next person
+keeps it and widens the thing that was actually holding the line.
+
 ## The corollary, which cost more to learn
 
 **Run the thing.** The two worst bugs in the first working version passed the whole suite: `claim`
