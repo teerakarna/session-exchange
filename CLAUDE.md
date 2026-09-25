@@ -69,8 +69,15 @@ seven steps derived from live state.
   twenty-eight seconds of wall time and billed twenty-nine minutes. Not one of those is something a test
   run can tell you. Re-run after fixing what it finds, because a second pass has caught a bug the first
   pass's own fix introduced, and stop when a pass comes back clean rather than after a set number of
-  rounds. If the review cannot complete, say so plainly in the PR body instead of describing the
-  automated gate as a review.
+  rounds. Scope the re-run to what the fix touched and size it off that, not off the original diff:
+  as first written this bullet pinned `high` to the paths the whole diff covered, which put eleven
+  `high` passes on one PR whose last rounds changed only prose in `CONTRIBUTING.md`. A clean stop
+  with no cost ceiling terminates on the wrong axis. When a pass's only findings are in the harness's
+  scoring or in the wording rather than in behaviour, that is the point to read the diff yourself
+  instead of spending another pass, and to say in the PR body that you did. If the review cannot
+  complete, say so plainly in the PR body instead of describing the automated gate as a review - two
+  delegated passes on that PR died on a watchdog and returned nothing, which costs the same as a pass
+  that found something.
 - **Point the review at the checks the diff adds, not only at the code.** The load-bearing rule at the
   top of `CONTRIBUTING.md` can be satisfied on paper: a PR can name a gate it broke and paste output
   that does not actually demonstrate the thing it claims, which is how a suite reads as thorough while
