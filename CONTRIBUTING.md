@@ -82,6 +82,11 @@ uvx ruff@0.16.9 format --check .
 shellcheck plugin/hooks-handlers/*.sh
 ```
 
+None of that reads a check and asks whether it could fail, which is the one thing this repo cares most
+about, so a review of the diff is expected before a PR as well. `CLAUDE.md` states how to size it and
+what to point it at, and states it only there: a rule written out in two files is the drift this project
+is about.
+
 ## The schemas are the contract
 
 State is validated against `plugin/schemas/` on the way to disk. If a field needs adding, it goes in
