@@ -482,7 +482,12 @@ def main(argv):
     # from inside a sweep is not a slow sweep but an unbounded one: each level prepares a copy and
     # runs a suite that can reach this line again. Exit 2 rather than 1, matching the other refusals
     # here - neither a clean sweep nor a survivor, but a run that should not have started.
-    if os.environ.get(SWEEPING):
+    #
+    # Blank and whitespace mean unset, matching what `exchange_root.resolve` does with the only
+    # other CC_EXCHANGE_* variable rather than inventing a second convention one file over. Any
+    # other value means set, `0` included: the question is whether a sweep is above this one, and
+    # the refusal says which variable to unset if the answer is somehow no.
+    if (os.environ.get(SWEEPING) or "").strip():
         print(f"refusing to sweep: {SWEEPING} is set, so this is already running inside a sweep")
         return 2
 
