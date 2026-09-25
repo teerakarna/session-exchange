@@ -60,6 +60,23 @@ seven steps derived from live state.
 
 ## Working rules for this repo
 
+- **Run `python3 plugin/tests/run.py` and `/code-review` on the diff before opening a PR**, sized to the
+  change: low for docs, plans or a fixture rename, high for anything under `plugin/lib/`,
+  `plugin/hooks-handlers/`, `plugin/schemas/` or `.github/workflows/ci.yml`. Green CI is necessary and
+  not sufficient, and this repo is the reason that distinction has a name. The suite was green while
+  `hookio.event_name` could be cut down to `return default`, green while eight schema patterns accepted a
+  trailing newline they were written to exclude, and green across eleven jobs that finished in
+  twenty-eight seconds of wall time and billed twenty-nine minutes. Not one of those is something a test
+  run can tell you. Re-run after fixing what it finds, because a second pass has caught a bug the first
+  pass's own fix introduced, and stop when a pass comes back clean rather than after a set number of
+  rounds. If the review cannot complete, say so plainly in the PR body instead of describing the
+  automated gate as a review.
+- **Point the review at the checks the diff adds, not only at the code.** The load-bearing rule at the
+  top of `CONTRIBUTING.md` can be satisfied on paper: a PR can name a gate it broke and paste output
+  that does not actually demonstrate the thing it claims, which is how a suite reads as thorough while
+  five rules in a seventy-line module are unasserted. So the review is also asked, of every check being
+  added, whether it would notice its own absence, and whether the recorded failure is what that check
+  really prints.
 - Branch and PR for everything; nothing lands on `main` directly. Conventional commits. No
   `Co-Authored-By` trailers. A ruleset enforces this with no bypass actors, so a direct push is
   rejected rather than merely discouraged, and there is no point attempting one.
