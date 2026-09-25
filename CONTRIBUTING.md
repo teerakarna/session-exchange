@@ -124,6 +124,22 @@ That is deliberate: naming the matrix legs individually would put every OS and P
 repo setting, so dropping one would block `main` forever on a check that can never report again. Add a
 job to the workflow and add it to `ci`'s `needs`, or it gates nothing.
 
+**A new job is not free, and the unit is not the second.** Actions bills per job, rounded up to a
+whole minute, and macOS bills that minute at 10x. Eleven jobs finishing in twenty-eight seconds of
+wall time cost twenty-nine minutes, two thirds of it on the two macOS legs. So a check that needs no
+special runner, no extra permission and no independent report belongs as a step in `checks`, not as a
+job of its own - four of them were four separate jobs, six to eighteen seconds each, billing four
+minutes to do half a minute of work. `secrets` is the counter-example worth copying: it stays its own
+job because it needs `pull-requests: write`, and spreading that permission across the steps that run
+an unpinned `npm install -g` to save a minute is the wrong trade.
+
+Two things follow from the same arithmetic. Every job carries `timeout-minutes`, because the default
+cap is 360 and a hang on a macOS leg is an hour of billing per wasted hour. And the `concurrency`
+block cancels a superseded run on a PR branch, but never on `main`, where each push is a merge whose
+result has to stay individually visible - which is why the group key falls back to `github.run_id`
+off a PR rather than the ref: a queued run is dropped when another joins its group, regardless of
+`cancel-in-progress`.
+
 Keep a PR readable in one sitting. The first one here was 21 files and 2249 lines, which got through
 only because it was all new code with no existing behaviour to regress. That is a property of a
 skeleton, not of the work after it.

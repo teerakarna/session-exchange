@@ -6,52 +6,121 @@ on:
   push:
     branches: [main]
 
+# A new push to a PR cancels whatever run was still going for that same ref - never for main, where
+# every push is a merge that should run to completion and be individually visible.
+#
+# `github.run_id` in the group key for anything that is not a pull_request, rather than a plain
+# `ci-${{ github.ref }}`: GitHub cancels a run that is still *queued* the moment another run joins
+# the same group, regardless of `cancel-in-progress`, which only protects a run that has already
+# started. Shared across every push to main, three pushes in quick succession would silently drop the
+# middle one's queued run, breaking the "individually visible" guarantee this block exists to make.
+# `run_id` is unique per run, so each push gets a group of one and only PR runs actually share.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
-  # The suite is the only gate this repo has, so it runs on every platform and every Python version
-  # the plugin can actually land on. Until this existed, "156 checks green" meant one machine, one
-  # interpreter, once, at whatever moment someone remembered to type it.
+  # The suite is the only gate this repo has, so it runs on every Python version the plugin can land
+  # on. Until this existed, "156 checks green" meant one machine, one interpreter, once, at whatever
+  # moment someone remembered to type it.
+  #
+  # Spelt as `include` rather than a matrix with an `exclude` because the four legs are not a product
+  # with a hole in it, they are four deliberate choices:
+  #
+  # - 3.9 is the floor. The hooks invoke whatever `python3` is on PATH, and on a stock macOS that is
+  #   the system 3.9. Ubuntu only, because setup-python has no arm64 build that far back.
+  # - 3.11 and 3.13 cover the interpreter-level behaviour, which is where the version sensitivity is.
+  # - One macOS leg, on 3.13. The platform-sensitive parts are `os.kill` and `ps`, and those do not
+  #   vary by interpreter version, so a second macOS leg asserted nothing the first one did not - and
+  #   macOS minutes bill at 10x, so it was two thirds of this workflow's entire cost. The other
+  #   direction (drop macOS from PRs, run the full matrix only on push to main) was rejected: it makes
+  #   the PR gate weaker than the main gate, and a gate that is not the thing it is protecting is the
+  #   failure mode this repo exists about.
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        # 3.9 is the floor because the hooks invoke whatever `python3` is on PATH, and on a stock
-        # macOS that is the system 3.9. Excluded on the macOS runner only because setup-python has no
-        # arm64 build that far back; the version-sensitive behaviour is interpreter-level and the
-        # platform-sensitive parts (`os.kill`, `ps`) are covered by the newer macOS entries.
-        python: ["3.9", "3.11", "3.13"]
-        exclude:
-          - os: macos-latest
+        include:
+          - os: ubuntu-latest
             python: "3.9"
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.13"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
 
-      # No install step, and that is the point: see the `stdlib` job below.
+      # No install step, and that is the point: see the stdlib step in `checks`.
       - name: Test
         run: python plugin/tests/run.py
 
-  # The plugin runs as a hook against whatever `python3` the machine has, with no virtualenv and no
-  # opportunity to pip install anything. A third-party import is therefore not a dependency decision,
-  # it is a hook that raises ImportError at session start on every machine but the author's. Gated
-  # rather than documented, because a convention nothing checks is a convention already broken.
-  stdlib:
+  # Four jobs merged into one. Every job bills a minimum of one whole minute regardless of how little
+  # it runs, and these four took six, eight, nine and eighteen seconds, so four jobs was a four-minute
+  # floor to do half a minute of work. Same checks, same order of failure, one runner, one checkout.
+  #
+  # `secrets` deliberately stays split out rather than becoming a fifth step here: it needs
+  # `pull-requests: write` so gitleaks can comment on a find, and giving every step below that same
+  # write permission - including an unpinned global npm install - to save one more minute would trade
+  # least privilege for a rounding error.
+  #
+  # Ordered cheapest-setup first so the common failure surfaces soonest: shellcheck is preinstalled,
+  # the two Python steps share one interpreter setup, and the Node install goes last because it is
+  # three quarters of the job's wall time. loom orders its equivalent the other way, to keep an
+  # unpinned npm install off a runner with populated build caches - there is nothing comparable on
+  # this runner to reach, and `persist-credentials: false` above means there is no token on it either.
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        with:
+          persist-credentials: false
+
+      # Every step from here on carries `if: *gate`, defined once as `&gate` below and aliased after.
+      # A step with no `if:` line is visibly missing something; six hand-copied conditions, one of
+      # them subtly wrong, would not be. If you add a step, it needs the alias too, or that step
+      # reverts to default `success()` semantics and stops reporting independently.
+      #
+      # `!cancelled()` alone is not enough: it is true whenever the job was not cancelled, which says
+      # nothing about whether the checkout worked. A checkout that fails for its own reason would
+      # leave every later step running against a workspace that was never populated, turning one
+      # clean failure into five confusing ones. The explicit outcome check is the hard gate;
+      # `!cancelled()` is what lets the rest fail independently of each other - not `always()`, which
+      # would also run them through a genuine cancellation, spending exactly the minutes the
+      # concurrency group above exists to save.
+      #
+      # Two shell scripts, and they are the entry point for everything else: if a handler is wrong,
+      # nothing downstream of it runs and the plugin looks installed and inert.
+      - name: ShellCheck the hook handlers
+        if: &gate ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: shellcheck plugin/hooks-handlers/*.sh
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: *gate
         with:
           python-version: "3.13"
 
+      # The plugin runs as a hook against whatever `python3` the machine has, with no virtualenv and
+      # no opportunity to pip install anything. A third-party import is therefore not a dependency
+      # decision, it is a hook that raises ImportError at session start on every machine but the
+      # author's. Gated rather than documented, because a convention nothing checks is a convention
+      # already broken.
       - name: Assert the runtime imports nothing but the standard library
+        if: *gate
         run: |
           python - <<'EOF'
           import ast, pathlib, sys
@@ -80,62 +149,46 @@ jobs:
           print(f"clean: {len(local)} local modules, standard library only")
           EOF
 
-  # The repo's own layout test asserts the shape this project believes in. This asserts the shape the
-  # runtime believes in, which is the one that decides whether the plugin loads at all, and it tracks
-  # upstream when the manifest schema moves. `--strict` is documented for exactly this: it fails on
-  # unrecognised fields and missing metadata that the runtime would otherwise tolerate quietly.
-  manifests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-
-      - name: Install the Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      # Both manifests, because they are separate files with separate schemas and a marketplace that
-      # validates says nothing about the plugin it points at.
-      - name: Validate the plugin and marketplace manifests
-        run: |
-          claude plugin validate --strict ./plugin
-          claude plugin validate --strict .
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13"
-
       # Pinned, because an unpinned linter turns somebody else's release into a red build on a branch
       # that changed nothing. The pin lives in a requirements file rather than inline so dependabot
       # can bump it in a PR with the diff visible.
       - name: Install ruff
+        if: *gate
         run: python -m pip install -r .github/requirements-ci.txt
 
       - name: Lint
+        if: *gate
         run: ruff check .
 
       - name: Format
+        if: *gate
         run: ruff format --check .
 
-  # Two shell scripts, and they are the entry point for everything else: if a handler is wrong,
-  # nothing downstream of it runs and the plugin looks installed and inert.
-  shell:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: *gate
+        with:
+          node-version: "22"
 
-      - name: ShellCheck the hook handlers
-        run: shellcheck plugin/hooks-handlers/*.sh
+      # The repo's own layout test asserts the shape this project believes in. This asserts the shape
+      # the runtime believes in, which is the one that decides whether the plugin loads at all, and it
+      # tracks upstream when the manifest schema moves. `--strict` is documented for exactly this: it
+      # fails on unrecognised fields and missing metadata the runtime would otherwise tolerate
+      # quietly. Deliberately unpinned, unlike every action here - pinning would freeze the schema
+      # this is checked against, and catching "the format moved and ours no longer conforms" is the
+      # whole reason the step exists.
+      #
+      # Both manifests, because they are separate files with separate schemas and a marketplace that
+      # validates says nothing about the plugin it points at.
+      - name: Validate the plugin and marketplace manifests
+        if: *gate
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate --strict ./plugin
+          claude plugin validate --strict .
 
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       # gitleaks-action posts a PR comment when it finds a leak.
@@ -143,6 +196,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0 # scans full history, not just the working tree
 
       # This tool was designed against a real multi-session environment and is deliberately generic:
@@ -161,9 +215,10 @@ jobs:
   # `always()` so it runs even when something upstream failed, and the explicit result check because
   # a skipped `needs` job does not fail a dependant on its own.
   ci:
-    needs: [test, stdlib, manifests, lint, shell, secrets]
+    needs: [test, checks, secrets]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Fail unless every job succeeded
         run: |
