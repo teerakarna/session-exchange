@@ -56,8 +56,11 @@ def resolve(cwd, environ=None) -> Resolution:
         if not path.is_dir():
             # Loud, because someone set this deliberately and it silently did nothing. An
             # unset variable is rule 3; a set-and-wrong one is a mistake worth surfacing.
-            return Resolution(None, "override-invalid",
-                              f"{OVERRIDE_VAR} is set to {override!r}, which is not a directory.")
+            return Resolution(
+                None,
+                "override-invalid",
+                f"{OVERRIDE_VAR} is set to {override!r}, which is not a directory.",
+            )
         return Resolution(path.resolve(), "override")
 
     start = pathlib.Path(cwd).expanduser()
@@ -118,10 +121,7 @@ def init_candidates(cwd):
     ceiling = repo if repo else start
 
     home = pathlib.Path.home().resolve()
-    candidates = [
-        d for d in ceiling.parents
-        if (d / "CLAUDE.md").is_file() and d != home
-    ]
+    candidates = [d for d in ceiling.parents if (d / "CLAUDE.md").is_file() and d != home]
     default = next((d for d in candidates if not is_merge_point(d)), None)
     return default, candidates
 

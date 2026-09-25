@@ -44,12 +44,18 @@ print("the shipped schemas accept what the plugin writes")
 for label, instance in (("exchange", MARKER), ("claim", CLAIM), ("handoff", HANDOFF)):
     check(f"a minimal valid {label}", validate.validate(instance, validate.load(label)), [])
 
-check("a handoff addressed to a session rather than a scope",
-      validate.validate(dict(HANDOFF, to={"session_id": "abc-123"}),
-                        validate.load("handoff")), [])
-check("an imported handoff needs no date",
-      validate.validate(dict(HANDOFF, imported={"route": "a/b", "headline": "the thing"}),
-                        validate.load("handoff")), [])
+check(
+    "a handoff addressed to a session rather than a scope",
+    validate.validate(dict(HANDOFF, to={"session_id": "abc-123"}), validate.load("handoff")),
+    [],
+)
+check(
+    "an imported handoff needs no date",
+    validate.validate(
+        dict(HANDOFF, imported={"route": "a/b", "headline": "the thing"}), validate.load("handoff")
+    ),
+    [],
+)
 
 print("and reject what it must not")
 
@@ -58,37 +64,63 @@ claim_schema = validate.load("claim")
 
 # Exactly one addressing mode. Both at once is the mistake worth catching, because it reads as
 # more specific and is actually ambiguous.
-check("a handoff addressed both ways is refused",
-      len(validate.validate(dict(HANDOFF, to={"repo": "x", "session_id": "abc"}),
-                            handoff_schema)), 1)
-check("a handoff addressed no way at all is refused",
-      len(validate.validate(dict(HANDOFF, to={}), handoff_schema)), 1)
-check("an unknown status is refused",
-      len(validate.validate(dict(HANDOFF, status="done"), handoff_schema)), 1)
-check("a session id that could climb out of its directory is refused",
-      len(validate.validate(dict(CLAIM, session_id="../../etc/passwd"), claim_schema)), 1)
-check("an unexpected key is refused",
-      len(validate.validate(dict(CLAIM, lane="platform"), claim_schema)), 1)
+check(
+    "a handoff addressed both ways is refused",
+    len(validate.validate(dict(HANDOFF, to={"repo": "x", "session_id": "abc"}), handoff_schema)),
+    1,
+)
+check(
+    "a handoff addressed no way at all is refused",
+    len(validate.validate(dict(HANDOFF, to={}), handoff_schema)),
+    1,
+)
+check(
+    "an unknown status is refused",
+    len(validate.validate(dict(HANDOFF, status="done"), handoff_schema)),
+    1,
+)
+check(
+    "a session id that could climb out of its directory is refused",
+    len(validate.validate(dict(CLAIM, session_id="../../etc/passwd"), claim_schema)),
+    1,
+)
+check(
+    "an unexpected key is refused",
+    len(validate.validate(dict(CLAIM, lane="platform"), claim_schema)),
+    1,
+)
 # The location prefix is the caller's to supply, and `store` passes the filename so a problem read
 # off disk says which file it came from. Both spellings are asserted, because a problem that cannot
 # say where it is is not actionable.
-check("a missing required key is named",
-      validate.validate({"cwd": "/tmp/x"}, claim_schema),
-      ["value: missing required key 'session_id'",
-       "value: missing required key 'updated_at'"])
-check("and carries the location the caller gave it",
-      validate.validate({"cwd": "/tmp/x"}, claim_schema, "s1.json")[0],
-      "s1.json: missing required key 'session_id'")
-check("a loosely spelt timestamp is refused",
-      len(validate.validate(dict(CLAIM, updated_at="2026-9-5 01:02"), claim_schema)), 1)
+check(
+    "a missing required key is named",
+    validate.validate({"cwd": "/tmp/x"}, claim_schema),
+    ["value: missing required key 'session_id'", "value: missing required key 'updated_at'"],
+)
+check(
+    "and carries the location the caller gave it",
+    validate.validate({"cwd": "/tmp/x"}, claim_schema, "s1.json")[0],
+    "s1.json: missing required key 'session_id'",
+)
+check(
+    "a loosely spelt timestamp is refused",
+    len(validate.validate(dict(CLAIM, updated_at="2026-9-5 01:02"), claim_schema)),
+    1,
+)
 
 # `bool` is a subclass of `int` in Python, so an integer check written the obvious way accepts
 # `true`. Asserted because it is the kind of thing that passes review and then lets a cap of `true`
 # through into a renderer.
-check("true is not an integer",
-      len(validate.validate({"name": "x", "stale_days": True}, validate.load("exchange"))), 1)
-check("but a real integer is",
-      validate.validate({"name": "x", "stale_days": 14}, validate.load("exchange")), [])
+check(
+    "true is not an integer",
+    len(validate.validate({"name": "x", "stale_days": True}, validate.load("exchange"))),
+    1,
+)
+check(
+    "but a real integer is",
+    validate.validate({"name": "x", "stale_days": 14}, validate.load("exchange")),
+    [],
+)
 
 print("an unimplemented keyword raises rather than silently not applying")
 

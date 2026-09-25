@@ -134,9 +134,7 @@ def config(root):
     """
     schema = validate.load("exchange")
     defaults = {
-        key: spec["default"]
-        for key, spec in schema["properties"].items()
-        if "default" in spec
+        key: spec["default"] for key, spec in schema["properties"].items() if "default" in spec
     }
     obj, problem = read_json(pathlib.Path(root) / ".claude" / "exchange.json", schema)
     if obj is None:

@@ -52,9 +52,7 @@ def run(ledger, lane_pattern, lane_key="test"):
         OLD_DAYS="100000",
         MAX_LISTED="100",
     )
-    done = subprocess.run(
-        [sys.executable, str(SCRIPT)], env=env, capture_output=True, text=True
-    )
+    done = subprocess.run([sys.executable, str(SCRIPT)], env=env, capture_output=True, text=True)
     if done.returncode != 0:
         return None, done.stderr
     if not done.stdout.strip():

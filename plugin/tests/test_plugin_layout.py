@@ -54,15 +54,20 @@ check("the hooks manifest parses", problem, None)
 events = sorted(hooks["hooks"])
 check("the events wired", events, ["SessionEnd", "SessionStart"])
 
-commands = [entry["command"]
-            for event in hooks["hooks"].values()
-            for matcher in event
-            for entry in matcher["hooks"]]
+commands = [
+    entry["command"]
+    for event in hooks["hooks"].values()
+    for matcher in event
+    for entry in matcher["hooks"]
+]
 check("every wiring is a command", len(commands), 2)
 
 for command in commands:
-    check(f"uses the plugin root variable: {command[:40]}...",
-          "${CLAUDE_PLUGIN_ROOT}" in command, True)
+    check(
+        f"uses the plugin root variable: {command[:40]}...",
+        "${CLAUDE_PLUGIN_ROOT}" in command,
+        True,
+    )
     # The whole point of checking: an unresolvable handler path is silent at runtime.
     referenced = re.findall(r"\$\{CLAUDE_PLUGIN_ROOT\}(/[^\"']+)", command)
     check("names one path under the plugin root", len(referenced), 1)
@@ -73,10 +78,13 @@ print("and each handler runs the entrypoint it claims to")
 
 for handler, event in (("session-start.sh", "SessionStart"), ("session-end.sh", "SessionEnd")):
     text = (PLUGIN / "hooks-handlers" / handler).read_text(encoding="utf-8")
-    check(f"{handler} passes {event}", f"hook.py\" {event}" in text, True)
+    check(f"{handler} passes {event}", f'hook.py" {event}' in text, True)
     # `set -e` in a hook handler turns any failure into a failed session start.
-    check(f"{handler} does not exit non-zero on failure",
-          ("set -e" in text and "set -eu" in text) or "|| exit 0" in text, True)
+    check(
+        f"{handler} does not exit non-zero on failure",
+        ("set -e" in text and "set -eu" in text) or "|| exit 0" in text,
+        True,
+    )
 
 print("the schemas the code loads are all present")
 
@@ -91,20 +99,24 @@ for name in ("exchange", "claim", "handoff"):
 print("the command documents only what exists")
 
 command_doc = (PLUGIN / "commands" / "exchange.md").read_text(encoding="utf-8")
-check("has frontmatter with a description",
-      command_doc.startswith("---\n") and "description:" in command_doc.split("---")[1], True)
+check(
+    "has frontmatter with a description",
+    command_doc.startswith("---\n") and "description:" in command_doc.split("---")[1],
+    True,
+)
 
 sys.argv = ["exchange"]
 import cli  # noqa: E402
 
 parser = cli.build_parser()
 subcommands = sorted(
-    name
-    for action in parser._subparsers._group_actions
-    for name in action.choices
+    name for action in parser._subparsers._group_actions for name in action.choices
 )
-check("the CLI offers what was designed",
-      subcommands, ["claim", "doctor", "handoff", "init", "migrate", "show"])
+check(
+    "the CLI offers what was designed",
+    subcommands,
+    ["claim", "doctor", "handoff", "init", "migrate", "show"],
+)
 for name in subcommands:
     # A command the doc does not mention is a command nobody will run.
     check(f"the doc mentions {name}", f"`{name}" in command_doc, True)

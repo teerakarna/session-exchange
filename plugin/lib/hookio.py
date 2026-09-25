@@ -52,12 +52,17 @@ def emit(event, lines, out=None):
     lines = [line for line in lines if line]
     if not lines:
         return
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": event,
-            "additionalContext": "\n".join(lines),
-        }
-    }), file=sys.stdout if out is None else out)
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "additionalContext": "\n".join(lines),
+                }
+            }
+        ),
+        file=sys.stdout if out is None else out,
+    )
 
 
 def problem(text):

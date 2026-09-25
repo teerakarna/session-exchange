@@ -21,8 +21,17 @@ SCHEMA_DIR = pathlib.Path(__file__).resolve().parents[1] / "schemas"
 # Carry no constraint, so they need no implementation.
 ANNOTATIONS = {"$schema", "$id", "title", "description", "default", "examples"}
 IMPLEMENTED = ANNOTATIONS | {
-    "type", "required", "properties", "additionalProperties", "items",
-    "enum", "minimum", "minLength", "minItems", "pattern", "oneOf",
+    "type",
+    "required",
+    "properties",
+    "additionalProperties",
+    "items",
+    "enum",
+    "minimum",
+    "minLength",
+    "minItems",
+    "pattern",
+    "oneOf",
 }
 
 # `bool` is a subclass of `int` in Python, so an integer test has to exclude it explicitly or
@@ -63,8 +72,7 @@ def validate(instance, schema, where="value"):
     problems = []
 
     if "oneOf" in schema:
-        matched = [i for i, sub in enumerate(schema["oneOf"])
-                   if not validate(instance, sub, where)]
+        matched = [i for i, sub in enumerate(schema["oneOf"]) if not validate(instance, sub, where)]
         if len(matched) != 1:
             problems.append(
                 f"{where}: must match exactly one of the {len(schema['oneOf'])} permitted shapes, "

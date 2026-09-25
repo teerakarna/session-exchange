@@ -30,6 +30,13 @@ select = [
 # validated rather than paths being opened.
 "plugin/tests/**" = ["S101", "S603", "S607", "S108"]
 
+# The one subprocess in the runtime: `ps -o ppid=` to walk the process tree, which is how a command
+# run through a tool call learns its own session id. Fixed argv, one integer interpolated, and `ps`
+# deliberately unqualified because its path differs between macOS and Linux. Suppressed here rather
+# than with an inline noqa: a noqa binds to a physical line, and the formatter chooses which line a
+# multi-line call sits on, so the suppression silently stopped covering S603 once.
+"plugin/lib/registry.py" = ["S603", "S607"]
+
 [lint.isort]
 # lib/ modules import each other by bare name, because the hook handlers put that directory on
 # sys.path rather than installing anything. Ruff cannot infer that from the tree.

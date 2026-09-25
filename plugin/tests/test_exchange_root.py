@@ -65,13 +65,19 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     base = tree(tmp, areas=["work"], repos_in=["work/repo"])
     r = exchange_root.resolve(base / "work/repo")
-    check("no marker anywhere is a silent no-op", (r.root, r.rule, r.problem),
-          (None, "unmarked", None))
+    check(
+        "no marker anywhere is a silent no-op",
+        (r.root, r.rule, r.problem),
+        (None, "unmarked", None),
+    )
 
     # The override needs no marker at all - that is the point of it.
     r = exchange_root.resolve(base / "work/repo", {"CC_EXCHANGE_ROOT": str(base / "work")})
-    check("override beats the walk, with no marker present", (r.root, r.rule),
-          (base / "work", "override"))
+    check(
+        "override beats the walk, with no marker present",
+        (r.root, r.rule),
+        (base / "work", "override"),
+    )
 
     # And it wins even when a marker would have resolved.
     tree(tmp, marker_at="work/repo")
@@ -80,8 +86,11 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Set-and-wrong is a mistake, not a quiet day. Unset is rule 3; this is not.
     r = exchange_root.resolve(base / "work/repo", {"CC_EXCHANGE_ROOT": str(base / "nope")})
-    check("override pointing nowhere is loud", (r.root, r.rule, r.problem is not None),
-          (None, "override-invalid", True))
+    check(
+        "override pointing nowhere is loud",
+        (r.root, r.rule, r.problem is not None),
+        (None, "override-invalid", True),
+    )
     r = exchange_root.resolve(base / "work/repo", {"CC_EXCHANGE_ROOT": "   "})
     check("blank override falls through rather than erroring", r.rule, "marker")
 
@@ -104,16 +113,22 @@ print("where init would mark")
 
 with tempfile.TemporaryDirectory() as tmp:
     # A repo inside an area inside a directory of areas: the shape of the real workspace.
-    base = tree(tmp, areas=["projects/work", "projects/personal", "projects/public"],
-                repos_in=["projects/work/repo", "projects/personal/dotfiles"])
+    base = tree(
+        tmp,
+        areas=["projects/work", "projects/personal", "projects/public"],
+        repos_in=["projects/work/repo", "projects/personal/dotfiles"],
+    )
     (base / "projects/CLAUDE.md").write_text("areas\n")
     (base / "CLAUDE.md").write_text("root\n")
 
     default, candidates = exchange_root.init_candidates(base / "projects/work/repo")
     check("defaults to the area, not the repo", default, base / "projects/work")
     check("the repo itself is never a candidate", base / "projects/work/repo" in candidates, False)
-    check("the directory of areas is offered but not chosen",
-          (base / "projects" in candidates, default == base / "projects"), (True, False))
+    check(
+        "the directory of areas is offered but not chosen",
+        (base / "projects" in candidates, default == base / "projects"),
+        (True, False),
+    )
 
     default, _ = exchange_root.init_candidates(base / "projects/personal/dotfiles")
     check("same rule from a different area", default, base / "projects/personal")

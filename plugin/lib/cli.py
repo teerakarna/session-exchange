@@ -63,14 +63,19 @@ def cmd_init(args):
         print(f"Default: {target}")
         for candidate in candidates:
             if candidate != target:
-                note = " (refused: marking it would merge separate workspaces)" \
-                    if exchange_root.is_merge_point(candidate) else ""
+                note = (
+                    " (refused: marking it would merge separate workspaces)"
+                    if exchange_root.is_merge_point(candidate)
+                    else ""
+                )
                 print(f"Also possible: {candidate}{note}")
 
     if exchange_root.is_merge_point(target) and not args.force:
-        print(f"Refusing to mark {target}: its subdirectories are separate workspaces, and one "
-              "exchange across them would show each the others' sessions and handoffs. "
-              "Mark them individually, or pass --force if this really is one workspace.")
+        print(
+            f"Refusing to mark {target}: its subdirectories are separate workspaces, and one "
+            "exchange across them would show each the others' sessions and handoffs. "
+            "Mark them individually, or pass --force if this really is one workspace."
+        )
         return 1
 
     marker = target / ".claude" / "exchange.json"
@@ -83,16 +88,19 @@ def cmd_init(args):
         print(f"  name: {config['name']}")
         return 0
 
-    problem = store.write_json(marker, {"name": args.name or target.name},
-                               validate.load("exchange"))
+    problem = store.write_json(
+        marker, {"name": args.name or target.name}, validate.load("exchange")
+    )
     if problem:
         print(f"problem: {problem}")
         return 1
     store.sessions_dir(target).mkdir(parents=True, exist_ok=True)
     store.handoffs_dir(target).mkdir(parents=True, exist_ok=True)
     print(f"Marked {marker}")
-    print("Sessions started under here will now seed a claim. Nothing else changes until the "
-          "plugin is installed.")
+    print(
+        "Sessions started under here will now seed a claim. Nothing else changes until the "
+        "plugin is installed."
+    )
     return 0
 
 
@@ -117,17 +125,16 @@ def cmd_show(args):
     for claim in held:
         mark = " " if claim["session_id"] in live else "!"
         focus = claim.get("focus") or "(no focus stated)"
-        shown = focus[:config["max_focus_chars"]]
+        shown = focus[: config["max_focus_chars"]]
         print(f" {mark} {claim.get('name') or claim['session_id']}  {shown}")
         if claim.get("paths"):
-            print(f"     paths: {', '.join(claim['paths'][:config['max_hot_paths']])}")
+            print(f"     paths: {', '.join(claim['paths'][: config['max_hot_paths']])}")
     if any(claim["session_id"] not in live for claim in held):
         print("  ! marks a claim whose session is no longer in the registry: stale, not current.")
     for problem in problems:
         print(f"problem   {problem}")
 
-    handoffs, handoff_problems = store.read_all(store.handoffs_dir(root),
-                                                validate.load("handoff"))
+    handoffs, handoff_problems = store.read_all(store.handoffs_dir(root), validate.load("handoff"))
     open_count = sum(1 for h in handoffs if h.get("status") != "closed")
     print(f"handoffs  {len(handoffs)} stored, {open_count} not closed")
     for problem in handoff_problems:
@@ -141,8 +148,10 @@ def cmd_claim(args):
         return 1
     session_id = args.session or (registry.own_entry() or {}).get("sessionId")
     if not session_id:
-        print("problem: could not work out which session this is. The registry has no entry for "
-              "any process above this one. Pass --session explicitly.")
+        print(
+            "problem: could not work out which session this is. The registry has no entry for "
+            "any process above this one. Pass --session explicitly."
+        )
         return 1
 
     # The display name is looked up for the id being claimed as, not for this process. With
@@ -153,14 +162,24 @@ def cmd_claim(args):
         claims.seed(resolution.root, session_id, args.cwd, name=known.get("name"))
 
     claim, problem = claims.update(
-        resolution.root, session_id,
+        resolution.root,
+        session_id,
         focus=args.focus,
-        add={f: v for f, v in (("repos", args.repo), ("paths", args.path),
-                               ("tickets", args.ticket)) if v},
+        add={
+            f: v
+            for f, v in (("repos", args.repo), ("paths", args.path), ("tickets", args.ticket))
+            if v
+        },
         replace={"paths": args.set_path} if args.set_path else None,
-        clear_fields=[f for f, on in (("paths", args.clear_paths),
-                                      ("repos", args.clear_repos),
-                                      ("tickets", args.clear_tickets)) if on],
+        clear_fields=[
+            f
+            for f, on in (
+                ("paths", args.clear_paths),
+                ("repos", args.clear_repos),
+                ("tickets", args.clear_tickets),
+            )
+            if on
+        ],
     )
     if problem:
         print(f"problem: {problem}")
@@ -182,23 +201,36 @@ def _steps(root):
     handoffs, _ = store.read_all(store.handoffs_dir(root), validate.load("handoff"))
     state = legacy.report(root)
     return [
-        (1, "parser fixed and failing loud in place",
-         None, "needs the legacy renderer and the source ledger; asked for by `doctor` in the "
-               "environment that has them, not from here"),
-        (2, "root resolution extracted",
-         (plugin / "lib" / "exchange_root.py").is_file(), None),
-        (3, "plugin skeleton, hooks manifest, schemas, command",
-         (plugin / "hooks" / "hooks.json").is_file()
-         and (plugin / "schemas" / "handoff.schema.json").is_file()
-         and (plugin / "commands" / "exchange.md").is_file(), None),
-        (4, "open handoffs imported out of the markdown ledger",
-         any("imported" in h for h in handoffs) if handoffs else False, None),
-        (5, "this root marked",
-         (pathlib.Path(root) / ".claude" / "exchange.json").is_file(), None),
-        (6, "every other root marked",
-         None, "one root cannot see another, by design; run `doctor` there"),
-        (7, "legacy hooks unwired and deleted",
-         not state["on_disk"] and not state["wired"], None),
+        (
+            1,
+            "parser fixed and failing loud in place",
+            None,
+            "needs the legacy renderer and the source ledger; asked for by `doctor` in the "
+            "environment that has them, not from here",
+        ),
+        (2, "root resolution extracted", (plugin / "lib" / "exchange_root.py").is_file(), None),
+        (
+            3,
+            "plugin skeleton, hooks manifest, schemas, command",
+            (plugin / "hooks" / "hooks.json").is_file()
+            and (plugin / "schemas" / "handoff.schema.json").is_file()
+            and (plugin / "commands" / "exchange.md").is_file(),
+            None,
+        ),
+        (
+            4,
+            "open handoffs imported out of the markdown ledger",
+            any("imported" in h for h in handoffs) if handoffs else False,
+            None,
+        ),
+        (5, "this root marked", (pathlib.Path(root) / ".claude" / "exchange.json").is_file(), None),
+        (
+            6,
+            "every other root marked",
+            None,
+            "one root cannot see another, by design; run `doctor` there",
+        ),
+        (7, "legacy hooks unwired and deleted", not state["on_disk"] and not state["wired"], None),
     ]
 
 
@@ -218,8 +250,10 @@ def cmd_doctor(args):
         print(f"marker    valid, name {config['name']!r}")
 
     state = legacy.report(root)
-    print(f"legacy    {len(state['on_disk'])} script(s) on disk, "
-          f"{len(state['wired'])} wiring(s) found")
+    print(
+        f"legacy    {len(state['on_disk'])} script(s) on disk, "
+        f"{len(state['wired'])} wiring(s) found"
+    )
     for path in state["on_disk"]:
         print(f"          on disk: {path.name}")
     for settings, name in state["wired"]:
@@ -229,9 +263,11 @@ def cmd_doctor(args):
         print(f"problem   {problem}")
     if state["double_fire"]:
         faults += 1
-        print("DOUBLE FIRE: legacy hooks are still wired and will render alongside this plugin. "
-              "Until they are unwired, presence and handoffs appear twice and a stalled migration "
-              "is indistinguishable from a finished one.")
+        print(
+            "DOUBLE FIRE: legacy hooks are still wired and will render alongside this plugin. "
+            "Until they are unwired, presence and handoffs appear twice and a stalled migration "
+            "is indistinguishable from a finished one."
+        )
 
     print("steps")
     first_incomplete = None
@@ -247,9 +283,11 @@ def cmd_doctor(args):
         print(f"  [{mark}] {number}. {what}")
         if why_unknown:
             print(f"        not checkable here: {why_unknown}")
-    print("  [?] means this check is not implemented or not answerable from here. It is printed "
-          "rather than skipped: a diagnostic that quietly omits a check reads exactly like one "
-          "that passed it.")
+    print(
+        "  [?] means this check is not implemented or not answerable from here. It is printed "
+        "rather than skipped: a diagnostic that quietly omits a check reads exactly like one "
+        "that passed it."
+    )
     if first_incomplete:
         print(f"next      step {first_incomplete}")
     else:
@@ -258,22 +296,30 @@ def cmd_doctor(args):
 
 
 def cmd_not_built(args):
-    print(f"`exchange {args.command}` is not built yet: it arrives with migration step "
-          f"{args.step}. Nothing was changed.")
+    print(
+        f"`exchange {args.command}` is not built yet: it arrives with migration step "
+        f"{args.step}. Nothing was changed."
+    )
     return NOT_BUILT
 
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="exchange", description=__doc__.splitlines()[0])
-    parser.add_argument("--cwd", default=os.getcwd(),
-                        help="resolve the root from here instead of the working directory")
+    parser.add_argument(
+        "--cwd",
+        default=os.getcwd(),
+        help="resolve the root from here instead of the working directory",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     init = sub.add_parser("init", help="mark a directory as an environment root")
     init.add_argument("path", nargs="?", help="default: the nearest area above the enclosing repo")
     init.add_argument("--name", help="display name; defaults to the directory name")
-    init.add_argument("--force", action="store_true",
-                      help="mark a directory whose subdirectories are separate workspaces")
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="mark a directory whose subdirectories are separate workspaces",
+    )
     init.set_defaults(func=cmd_init)
 
     show = sub.add_parser("show", help="who is here, what they claim, what is waiting")

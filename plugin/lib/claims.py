@@ -41,7 +41,7 @@ def git_branch(cwd):
             text = head.read_text(encoding="utf-8").strip()
         except OSError:
             return None
-        return text[len("ref: refs/heads/"):] if text.startswith("ref: refs/heads/") else None
+        return text[len("ref: refs/heads/") :] if text.startswith("ref: refs/heads/") else None
     return None
 
 
