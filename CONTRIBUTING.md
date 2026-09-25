@@ -62,7 +62,7 @@ account for every module in `plugin/lib`. Both failures are otherwise silent. A 
 has drifted tests nothing while still reporting a catch, and none of the eleven modules had a table in
 the repo at all before this, which is the same "thorough where it was pointed" problem one level up.
 Three have one now. Of the eight that do not, `NOT_YET` names the five that are owed one and `DECLINED`
-names three with the reason recorded next to each: `cli`, `ledger` and `reconcile` are 1100 of the 1800
+names three with the reason recorded next to each: `cli`, `ledger` and `reconcile` are 1100 of the 1700
 unswept lines, and every failure mode they have is a wrong answer on a command a human just typed,
 which is a cheaper feedback loop than a sweep whose cost is linear in the size of the tables. The split
 exists because a debt list that quietly contains permanent entries stops being read as a debt list.
@@ -184,7 +184,7 @@ exists inside CI.
 
 | Tier | Command | In CI |
 |---|---|---|
-| Lint and shape | `uvx ruff@0.16.9 check .`, `ruff format --check .`, `shellcheck plugin/hooks-handlers/*.sh`, `claude plugin validate --strict ./plugin` | `checks`, every push |
+| Lint and shape | `uvx ruff@0.16.9 check .`, `ruff format --check .`, `shellcheck plugin/hooks-handlers/*.sh`, `claude plugin validate --strict ./plugin` and `--strict .` | `checks`, every push |
 | The suite | `python3 plugin/tests/run.py` | `test`, every push, on 3.9/3.11/3.13 and macOS |
 | Sweep, narrowed | `python3 plugin/tests/mutate.py --since origin/main` | `mutate`, every push |
 | Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |

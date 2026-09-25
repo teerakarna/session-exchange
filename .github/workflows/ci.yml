@@ -193,9 +193,9 @@ jobs:
   # Its own job rather than a step in `checks`, which the cost rule in CONTRIBUTING.md would otherwise
   # say. Three reasons, and the arithmetic was measured rather than assumed. It runs the full suite
   # once per mutation, plus the baseline - twenty-eight runs and seventy-five seconds locally for the
-  # three tables there are now - so as a
-  # step it would sit behind or in front of a lint that takes under a second, and either order is
-  # wrong: last means slow feedback on a typo, first means the cheap checks wait on it. Its failure is
+  # three tables there are now - so as a step it would sit behind or in front of a lint that takes
+  # under a second, and either order is wrong: last means slow feedback on a typo, first means the
+  # cheap checks wait on it. Its failure is
   # also categorically different from any other step's, naming a rule nothing asserts rather than a
   # rule broken, and merging it in would report that as "checks failed".
   #
