@@ -22,9 +22,23 @@ From a clone, which needs neither access nor auth, and is the better option whil
 
 The marketplace and the plugin share a name; `session-exchange@session-exchange` is not a typo.
 
-Either way the whole repo lands at `~/.claude/plugins/marketplaces/session-exchange/`, and the plugin
-itself is the `plugin/` subdirectory of that. The hooks find their own code through
-`CLAUDE_PLUGIN_ROOT`, so nothing needs a path configured.
+### The two paths, because they are easy to confuse
+
+Installing produces files in two places, and only one of them is the plugin:
+
+| Path | What it is |
+|---|---|
+| `~/.claude/plugins/marketplaces/session-exchange/` | the **marketplace clone**: the whole repo, including tests, docs and CI. One per marketplace, not per plugin |
+| `~/.claude/plugins/cache/session-exchange/session-exchange/<version>/` | the **installed plugin**: a copy of the repo's `plugin/` directory, and what `CLAUDE_PLUGIN_ROOT` resolves to |
+
+`~/.claude/plugins/installed_plugins.json` records the second as `installPath`, along with the commit it
+came from, which is the authoritative answer on any machine.
+
+Note the `<version>` in the second path. It comes from `plugin/.claude-plugin/plugin.json`, so it
+**changes on every version bump**. Do not hardcode it anywhere.
+
+The hooks need neither path. They find their own code through `CLAUDE_PLUGIN_ROOT`, which is why nothing
+in this plugin has a path configured.
 
 Nothing is written to `~/.claude/settings.json`. The hooks are declared in the plugin's own
 `hooks/hooks.json` and travel with it, which is the reason this is a plugin rather than four scripts and
@@ -38,8 +52,8 @@ installed from.
 A root is a directory containing `.claude/exchange.json`. From anywhere inside the tree you want
 coordinated:
 
-```sh
-python3 ~/.claude/plugins/marketplaces/session-exchange/plugin/lib/cli.py init
+```
+/exchange init
 ```
 
 It prints the directory it would mark, anything else it considered, and anything it is refusing, before
@@ -59,8 +73,8 @@ Useful for trying it somewhere without leaving a file behind.
 
 ## 3. Check it worked
 
-```sh
-python3 ~/.claude/plugins/marketplaces/session-exchange/plugin/lib/cli.py doctor
+```
+/exchange doctor
 ```
 
 What to read in the output:
@@ -95,14 +109,39 @@ configuration, and the same plugin serves both.
 
 ## An alias, if you use it at the terminal
 
-The plugin deliberately does not put anything on your PATH. A plugin that edits a shell profile has
-overstepped, and the path is stable enough to alias yourself:
+In a session, use `/exchange`: it resolves its own location through `CLAUDE_PLUGIN_ROOT` and needs no
+alias, no PATH entry and no configuration. Everything below is only for a shell prompt.
+
+The plugin deliberately puts nothing on your PATH, because a plugin that edits a shell profile has
+overstepped. Adding an alias yourself is fine, but not pointed at the installed copy: that path carries
+the plugin version and breaks silently at the next bump, which is the worst kind of break for something
+you type from memory.
+
+Point it at a clone instead. The clone is what you edit and test against anyway, and it has no version
+in its path:
 
 ```sh
-alias exchange='python3 ~/.claude/plugins/marketplaces/session-exchange/plugin/lib/cli.py'
+alias exchange='python3 ~/projects/personal/session-exchange/plugin/lib/cli.py'
 ```
 
-In a session, use `/exchange` instead; it resolves its own location and needs no alias.
+If you would rather run the copy that is actually installed, derive the path rather than typing it, so
+it survives a version bump:
+
+```sh
+exchange() {
+  local root
+  root=$(python3 -c '
+import json, pathlib
+data = json.loads((pathlib.Path.home() / ".claude/plugins/installed_plugins.json").read_text())
+entries = data["plugins"]["session-exchange@session-exchange"]
+print(max(entries, key=lambda e: e["installedAt"])["installPath"])
+') || return 1
+  python3 "$root/lib/cli.py" "$@"
+}
+```
+
+Both run the same code while the clone is in sync with what is installed. When they are not, the second
+is the honest one, which is the whole reason to prefer it while the plugin is still moving.
 
 ## Backing it out
 

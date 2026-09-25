@@ -12,7 +12,7 @@ deliberately.
 **Status: early, installable, not yet load-bearing.** Root resolution, both hooks, and
 `init | show | claim | doctor` work end to end. Handoff matching and the import out of the existing
 markdown ledger are not built, and `Stop` is deliberately unwired until they are. Seven migration
-steps, three done; `exchange doctor` prints all seven derived from live state, and the design lives with
+steps, three done; `doctor` prints all seven derived from live state, and the design lives with
 the plan (see [Docs](#docs)).
 
 ## Why
@@ -50,7 +50,7 @@ A root is any directory containing `.claude/exchange.json`. Resolution, highest 
 3. Nothing. Silent no-op, and nothing is ever created implicitly. If no exchange context is injected,
    this environment has no exchange and there is nothing to do.
 
-Sessions never read across roots, in either direction. `exchange init` defaults to the nearest ancestor
+Sessions never read across roots, in either direction. `init` defaults to the nearest ancestor
 `CLAUDE.md` directory strictly *above* the enclosing git root, because a repo-scoped exchange
 coordinates nothing: the sessions that need to see each other are in sibling repos. It refuses a
 directory whose sibling children are themselves workspaces rather than repos, since marking that would
@@ -88,10 +88,10 @@ From a clone, which needs neither access nor auth:
 
 Installing changes nothing on its own. With no root marked, resolution falls to rule 3 and the plugin
 stays silent and writes nothing. That is the design, not a setup step you forgot: mark a root when you
-want it to start, from a directory inside the tree you want coordinated.
+want it to start, from a directory inside the tree you want coordinated:
 
-```sh
-python3 ~/.claude/plugins/marketplaces/session-exchange/plugin/lib/cli.py init
+```
+/exchange init
 ```
 
 It prints the directory it would mark and any it is refusing, before it writes anything.
@@ -113,14 +113,15 @@ The command is told to call out a stale claim, a double fire and any reported pr
 summarising past them, and told never to claim on your behalf unasked.
 
 At a terminal it is the same code, invoked directly. There is no `exchange` on your PATH and the plugin
-does not put one there, because a plugin that edits your shell profile is a plugin that has overstepped:
+does not put one there, because a plugin that edits your shell profile has overstepped. The installed
+copy lives under a **version-pinned** path, so run it from a clone rather than hardcoding that:
 
 ```sh
-python3 ~/.claude/plugins/marketplaces/session-exchange/plugin/lib/cli.py doctor
+python3 path/to/session-exchange/plugin/lib/cli.py doctor
 ```
 
-Worth an alias if you use it often. `docs/installing.md` has one, and says why it is yours to add
-rather than the plugin's to install.
+`docs/installing.md` explains both paths, which one `CLAUDE_PLUGIN_ROOT` resolves to, and an alias that
+survives a version bump.
 
 ## Commands
 
