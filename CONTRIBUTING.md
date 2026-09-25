@@ -222,10 +222,14 @@ than argued away, which is what the first version of it did.
 `ci` is the aggregate job at the bottom of the workflow, and it is the only check the ruleset names.
 That is deliberate: naming the matrix legs individually would put every OS and Python version into a
 repo setting, so dropping one would block `main` forever on a check that can never report again. Add a
-job to the workflow and add it to `ci`'s `needs`, or it gates nothing. A step in `checks` asserts it
-now, because for eleven jobs and four consolidations that rule was kept by hand, on the one list every
+job to the workflow and add it to `ci`'s `needs`, or it gates nothing. A step inside `ci` asserts that
+now, because for eleven jobs and four consolidations the rule was kept by hand, on the one list every
 other gate hangs off, and forgetting it looks exactly like remembering it: the job runs, reports, goes
-red, and the merge button stays green.
+red, and the merge button stays green. Inside `ci` rather than in `checks`, where it was first written,
+because from there the one name it could not check was `checks` - and it also means the assertion is
+part of the only check the ruleset requires. The cost of that is one thing it forbids: a job that runs
+conditionally is `skipped` on the runs where its condition is false, and `ci` reads that as failure, so
+a conditional job needs both the loop and the assertion changed rather than a name added to a list.
 
 **A new job is not free, and the unit is not the second.** Actions bills per job, rounded up to a
 whole minute, and macOS bills that minute at 10x. The eleven jobs this workflow had before it was

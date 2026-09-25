@@ -152,39 +152,9 @@ jobs:
       # Pinned, because an unpinned linter turns somebody else's release into a red build on a branch
       # that changed nothing. The pin lives in a requirements file rather than inline so dependabot
       # can bump it in a PR with the diff visible.
-      - name: Install ruff and the YAML parser
+      - name: Install ruff
         if: *gate
         run: python -m pip install -r .github/requirements-ci.txt
-
-      # The one gate that guards every other gate. The ruleset requires exactly one check, `ci`, and
-      # `ci` fails only if a job in its `needs` failed. A job left out of that list still runs, still
-      # reports and still goes red on the PR, while the merge button stays green - the check exists,
-      # it is visibly running, and it gates nothing. Satisfied by hand until now, on the one list
-      # everything else hangs off.
-      #
-      # Only the direction that bites: every job has to be in `needs`. A name in `needs` that is not
-      # a job is already a hard Actions error, so checking that way round adds nothing.
-      - name: Assert every job is in ci's needs
-        if: *gate
-        run: |
-          python - <<'EOF'
-          import sys
-
-          import yaml
-
-          # The workflow uses a YAML anchor for the step conditions, so this has to be a real parser.
-          # `yaml.safe_load` resolves the alias; anything regex-shaped would have to guess.
-          jobs = yaml.safe_load(open(".github/workflows/ci.yml", encoding="utf-8"))["jobs"]
-          needs = jobs["ci"].get("needs") or []
-          if isinstance(needs, str):
-              needs = [needs]
-          missing = [name for name in jobs if name != "ci" and name not in needs]
-          if missing:
-              for name in missing:
-                  print(f"::error::job '{name}' is not in ci's needs, so it gates nothing")
-              sys.exit(1)
-          print(f"ci needs all {len(needs)} other job(s): {', '.join(sorted(needs))}")
-          EOF
 
       - name: Lint
         if: *gate
@@ -288,7 +258,65 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The list above is the one gate that guards every other gate: `ci` is the only check the
+      # ruleset names, and it fails only if a job in its `needs` failed. A job left out of that list
+      # still runs, still reports and still goes red on the PR, while the merge button stays green.
+      # The check exists, it is visibly running, and it is gating nothing. Eleven jobs and four
+      # consolidations kept the list by hand.
+      #
+      # In `ci` rather than as a step in `checks`, which is where the cost rule in CONTRIBUTING.md
+      # would otherwise put it and where it was first written. From inside `checks` the one omission
+      # it cannot catch is `checks` itself: drop that name and the step goes red, correctly, while
+      # `checks` is no longer required, the other three jobs succeed, and `ci` goes green with the
+      # merge button. A check that exempts the job it runs in is the shape it exists to close. Here it
+      # costs no extra billed job - `ci` is already a minute's floor doing a second of work.
+      #
+      # Only the direction that bites: every job has to be in `needs`. A name in `needs` that is not a
+      # job is a hard Actions error already, so checking that way round adds nothing.
+      #
+      # There is no exemption mechanism, deliberately, and it forbids one thing: a job that runs
+      # conditionally. Out of `needs` and this step fails; in `needs` and the loop below reads
+      # `skipped` as failure on every run where the condition is false. If that is ever wanted, the
+      # loop and this step have to change together, which is a design decision rather than a list
+      # edit, and this is what will make somebody notice it is one.
+      # Same independent-reporting pattern as `checks`, and the same reasoning, but written out rather
+      # than sharing that job's anchor: the aggregate step below must report whatever else in here
+      # went wrong, or a failed checkout would skip it and leave `ci` green having checked nothing.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        with:
+          python-version: "3.13"
+
+      - name: Assert every job is in ci's needs
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          python -m pip install -r .github/requirements-ci.txt
+          python - <<'EOF'
+          import sys
+
+          import yaml
+
+          # A real parser, because the workflow uses a YAML anchor for the step conditions in
+          # `checks` and anything regex-shaped would have to guess at the file Actions actually reads.
+          jobs = yaml.safe_load(open(".github/workflows/ci.yml", encoding="utf-8"))["jobs"]
+          needs = jobs["ci"].get("needs") or []
+          if isinstance(needs, str):
+              needs = [needs]
+          missing = [name for name in jobs if name != "ci" and name not in needs]
+          if missing:
+              for name in missing:
+                  print(f"::error::job '{name}' is not in ci's needs, so it gates nothing")
+              sys.exit(1)
+          print(f"ci needs all {len(needs)} other job(s): {', '.join(sorted(needs))}")
+          EOF
+
       - name: Fail unless every job succeeded
+        if: ${{ !cancelled() }}
         run: |
           # Single quotes inside the expression, double outside: a GitHub expression only accepts
           # single-quoted strings, and `" "` there is not a syntax error YAML can see. It parses

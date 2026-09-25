@@ -6,8 +6,9 @@ updates:
       interval: weekly
 
   # CI tooling only. There is no pip entry for the project itself because there is no project
-  # dependency: the runtime imports the standard library and nothing else, and the `stdlib` job in
-  # ci.yml fails the build if that ever stops being true.
+  # dependency: the runtime imports the standard library and nothing else, and a step in the `checks`
+  # job fails the build if that ever stops being true. There has been no `stdlib` job since the
+  # eleven-job workflow was consolidated, which this comment went on claiming for months.
   - package-ecosystem: pip
     directory: /.github
     schedule:
