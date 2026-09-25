@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/teerakarna/session-exchange/schemas/handoff.schema.json",
+  "title": "Handoff",
+  "description": "`<root>/.claude/exchange/handoffs/<id>.json`. Addressed to a scope - a repo and optionally paths - or to one live session, never to a hand-typed lane name. That is the point: a lane vocabulary drifts, nothing says when it has, and the label in a script then has to agree with the label in a file nobody diffs. Two real handoffs were invisible for 9 and 3 days to exactly that. Scope addressing also works for a session that does not exist yet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "from", "to", "created", "status", "body"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "Also the filename, so constrained the same way a session_id is."
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cwd"],
+      "properties": {
+        "session_id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+        "name": { "type": "string" },
+        "cwd": { "type": "string", "minLength": 1 }
+      },
+      "description": "Who posted it. `session_id` is absent on an imported entry, because the session that wrote it is long gone."
+    },
+    "to": {
+      "description": "Exactly one addressing mode. A scope reaches whoever is working there, now or later; a session_id reaches one live session and nobody else.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repo"],
+          "properties": {
+            "repo": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Root-relative repository directory."
+            },
+            "paths": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Narrows the scope within the repo. Absent means the whole repo."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session_id"],
+          "properties": {
+            "session_id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" }
+          }
+        }
+      ]
+    },
+    "created": {
+      "type": "string",
+      "pattern": "^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "accepted", "closed"],
+      "description": "Accepting is explicitly not closing. A lane taking ownership is not the work being finished, and an accepted handoff with no later closure is exactly the state that should stay visible."
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Markdown. Never parsed for structure by anything."
+    },
+    "history": {
+      "type": "array",
+      "description": "Append-only. Status changes in place - the ledger's own convention was acknowledge-in-place and it was the right one - so the previous state has to live somewhere or it is simply lost.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at", "status"],
+        "properties": {
+          "at": {
+            "type": "string",
+            "pattern": "^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
+          },
+          "status": { "type": "string", "enum": ["open", "accepted", "closed"] },
+          "by": { "type": "string" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "imported": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route", "headline"],
+      "description": "Present only on an entry lifted out of a markdown ledger, and together these fields are the importer's natural key. Deliberately not a hash of the entry text: the source convention has the recipient edit the entry in place, so the text changes on acknowledgement while the identity does not. A hash key is idempotent under the operation that does not matter and duplicates under the only one that does, leaving the stale copy beside the new one still marked open.",
+      "properties": {
+        "route": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Normalised: case folded, and the whitespace around `/`, `&` and `+` collapsed, because the same label occurs both spaced and unspaced in the source and both spellings are current. The normaliser must also tolerate a reversed arrow - one historical record names the recipient first, and no direction-bound pattern catches it."
+        },
+        "headline": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The original headline, normalised and truncated to a prefix. Read from the whole entry block rather than the header line, because a preserved original can wrap onto following lines. This is the component that makes the key survive acknowledgement by construction: the convention's entire purpose is to preserve the original verbatim behind a `Was:` marker, so it is the one thing the operation is defined to keep. A prefix rather than the full string, so a later typo fix does not re-key an existing entry."
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$",
+          "description": "Optional, and the key degrades rather than faults without it: dated entries are universal in the live file only, and two historical records carry no date at all. Route and date alone are not unique either - nine collisions across the 45 historical records, because two handoffs between the same pair on the same day is ordinary. Position is not structure here: the date is read as the first date-shaped run in the header, which is convention rather than syntax, and nothing stops a closure date being written ahead of the original."
+        }
+      }
+    }
+  }
+}

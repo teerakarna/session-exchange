@@ -48,15 +48,38 @@ is what a ledger is genuinely good at.
 
 ## Status
 
-Early. What exists today is root resolution and the regression suite for the parser this replaces.
+Early, but installable and no longer hollow.
+
+| Works | |
+|---|---|
+| Root resolution | `CC_EXCHANGE_ROOT`, then the nearest marked ancestor, then nothing |
+| `SessionStart` | seeds this session's claim, warns if a legacy hook is still wired |
+| `SessionEnd` | clears the claim, so nobody has to remember to |
+| `exchange init` | marks a root, refusing one that would merge separate workspaces |
+| `exchange claim` | what this session is working on |
+| `exchange show` | who else is here, what they claim, what is waiting |
+| `exchange doctor` | live state with evidence, and the first outstanding migration step |
+
+`exchange handoff` and `exchange migrate` exit 2 and name the step that builds them. Exit 2 is not a
+failure: a command that does not exist yet must not report success, and must not look like a fault.
+
+Presence rendering and handoff matching are next. `Stop` is deliberately unwired until then, because
+its only job in the design is catching handoffs posted mid-session and until the matcher exists it
+could only spawn a process per turn to do nothing.
 
 ```
 python3 plugin/tests/run.py
 ```
 
-`test_handoff_parser.py` exercises the legacy hook still running on one machine and **skips** if it
-is absent, so the suite is green on a machine that never had it. It is here because the port has to
-keep it passing.
+156 checks. `test_handoff_parser.py` exercises the legacy hook still running on one machine and
+**skips** if it is absent, so the suite is green on a machine that never had it. It is here because
+the port has to keep it passing.
+
+State is validated against `plugin/schemas/` on the way to disk, by a validator that covers only the
+subset of JSON Schema those files use and **raises on any keyword it does not implement**. That is
+what makes hand-rolling one safe rather than reckless: the failure mode of a partial validator is a
+constraint that quietly does not run, and a test asserts that every keyword the schemas use is
+covered.
 
 ## Design and history
 
