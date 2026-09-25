@@ -61,8 +61,8 @@ every mutation still matches the source it claims to patch, and that `TABLES` an
 account for every module in `plugin/lib`. Both failures are otherwise silent. A mutation whose text
 has drifted tests nothing while still reporting a catch, and none of the eleven modules had a table in
 the repo at all before this, which is the same "thorough where it was pointed" problem one level up.
-Three have one now. Of the eight that do not, `NOT_YET` names the five that are owed one and `DECLINED`
-names three with the reason recorded next to each: `cli`, `ledger` and `reconcile` are 1100 of the 1700
+Four have one now. Of the seven that do not, `NOT_YET` names the four that are owed one and `DECLINED`
+names three with the reason recorded next to each: `cli`, `ledger` and `reconcile` are 1100 of the 1600
 unswept lines, and every failure mode they have is a wrong answer on a command a human just typed,
 which is a cheaper feedback loop than a sweep whose cost is linear in the size of the tables. The split
 exists because a debt list that quietly contains permanent entries stops being read as a debt list.
@@ -191,9 +191,10 @@ exists inside CI.
 | Secrets | none, unless you have `gitleaks` installed | `secrets`, every push, full history |
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: three tables is 27 mutations and about 75 seconds,
-and the eight modules `UNSWEPT` still owes would take every push near five minutes to re-answer a
-question the previous push already answered about code this one did not touch. So `ci` sweeps only the
+taste. A sweep is one full suite run per mutation: four tables is 45 mutations and just over two
+minutes, and the fourth table alone added 48 seconds to that, so the seven modules `UNSWEPT` still
+lists would take every push well past five minutes to re-answer a question the previous push already
+answered about code this one did not touch. So `ci` sweeps only the
 modules the change could have affected, and the full sweep runs weekly where the length of it does not
 matter.
 

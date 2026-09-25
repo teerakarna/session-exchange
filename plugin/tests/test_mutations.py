@@ -11,7 +11,7 @@ untested while hiding a fake one. Asserted here rather than only inside the swee
 that moves a line turns the table red on the cheap job instead of on the slow one.
 
 **A module with no table at all.** None of the eleven had one in the repo before this file existed,
-and three do now, which is exactly how the suite came to read as thorough: the modules that got
+and four do now, which is exactly how the suite came to read as thorough: the modules that got
 swept are thorough. So `TABLES` and `UNSWEPT` together have to account for every module in
 `plugin/lib`, and a new module joins neither by accident.
 
@@ -612,7 +612,7 @@ check(
 modules, notes = targets_with(["plugin/lib/cli.py"])
 check("a declined module selects nothing", modules, [])
 check("but says it was declined, and why", "deliberately not swept" in " ".join(notes), True)
-modules, notes = targets_with(["plugin/lib/hook.py"])
+modules, notes = targets_with(["plugin/lib/registry.py"])
 check("a module still owed a table selects nothing", modules, [])
 check("and says the change went unswept", "goes unswept" in " ".join(notes), True)
 

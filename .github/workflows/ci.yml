@@ -192,8 +192,8 @@ jobs:
   #
   # Its own job rather than a step in `checks`, which the cost rule in CONTRIBUTING.md would otherwise
   # say. Three reasons, and the arithmetic was measured rather than assumed. It runs the full suite
-  # once per mutation, plus the baseline - twenty-eight runs and seventy-five seconds locally for the
-  # three tables there are now - so as a step it would sit behind or in front of a lint that takes
+  # once per mutation, plus the baseline - forty-six runs and just over two minutes locally for the
+  # four tables there are now - so as a step it would sit behind or in front of a lint that takes
   # under a second, and either order is wrong: last means slow feedback on a typo, first means the
   # cheap checks wait on it. Its failure is
   # also categorically different from any other step's, naming a rule nothing asserts rather than a
@@ -219,9 +219,10 @@ jobs:
   #
   # Narrowed to what the change could have broken, rather than every table, and that is the one tier
   # in this workflow. A sweep is one full suite run per mutation, so its cost is linear in the size of
-  # the tables: three modules is 27 mutations and about 75 seconds, and the eight modules `UNSWEPT`
-  # owes would put every future push near five minutes to re-answer a question the last push already
-  # answered about code this one did not touch. Nothing else here grows that way, which is why nothing
+  # the tables: four modules is 45 mutations and just over two minutes, and the fourth table alone
+  # added 48 seconds of that, so the seven modules `UNSWEPT` still lists would put every future push
+  # well past five minutes to re-answer a question the last push already answered about code this one
+  # did not touch. Nothing else here grows that way, which is why nothing
   # else here is tiered - the matrix is four fixed legs, and making the PR gate weaker than the main
   # gate is the failure mode this repo is about.
   #

@@ -85,8 +85,12 @@ def fixture(tmp, *, wire_legacy):
     return home, root, repo
 
 
-def run(event, payload, home, env=None):
-    """Fire the hook. Returns `(exit code, injected context or None)`."""
+def run(event, payload, home, env=None, cwd=None):
+    """Fire the hook. Returns `(exit code, injected context or None)`.
+
+    `cwd` is the process's own working directory, which only matters for the one case where the
+    payload does not carry one and the module has to fall back to it.
+    """
     environ = dict(os.environ, HOME=str(home))
     environ.pop("CC_EXCHANGE_ROOT", None)
     environ.update(env or {})
@@ -96,6 +100,7 @@ def run(event, payload, home, env=None):
         capture_output=True,
         text=True,
         env=environ,
+        cwd=None if cwd is None else str(cwd),
         timeout=30,
     )
     if not done.stdout.strip():
@@ -224,6 +229,128 @@ with tempfile.TemporaryDirectory() as tmp:
     # green. Asserted on a live path rather than on the function, because the thing that matters is
     # that the prefix survives to the reader.
     check("and marks the line as coming from this plugin", "[session-exchange]" in context, True)
+
+print("what session start does when a step of it goes wrong")
+
+# Seven rules in `hook.py` with nothing behind them, every one found by sweeping the module rather
+# than by reading it, and all of them the same shape: a problem gets computed correctly and then
+# dropped. The suite had no case for it because every run in it was a run where nothing went wrong -
+# which is the comfortable half to write and the half that asserts least.
+
+# A claim that could not be written, because a payload with no session id has nothing to name the
+# file after. Without the line, the session starts looking exactly like one that is on the board.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    code, out = run("SessionStart", {"hook_event_name": "SessionStart", "cwd": str(repo)}, home)
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("a claim that could not be seeded says so", "session id" in context, True)
+    check("and the session still starts", code, 0)
+
+# The registry is the only place a display name comes from: the payload has no such field, so a
+# claim seeded without the lookup is a row every other session sees as a bare id. `pid` is this
+# process because the lookup is by id and does not care, but a row without one is skipped.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    (home / ".claude" / "sessions" / "reg.json").write_text(
+        json.dumps({"sessionId": "sess-named", "name": "macgyver-2", "pid": os.getpid()})
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-named", "cwd": str(repo)},
+        home,
+    )
+    seeded = root / ".claude" / "exchange" / "sessions" / "sess-named.json"
+    check(
+        "the claim carries the name the registry knows this session by",
+        json.loads(seeded.read_text()).get("name"),
+        "macgyver-2",
+    )
+
+# A marker that exists and does not parse is still a root, because `resolve` only asks whether the
+# file is there. So the run continues on defaults, and this line is the only thing between that and
+# a correctly configured exchange - a cap read as its default is not visibly a cap not read at all.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    (root / ".claude" / "exchange.json").write_text("{ not json")
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(repo)},
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check(
+        "config that could not be read is reported, not defaulted over",
+        "exchange.json" in context,
+        True,
+    )
+
+# A settings file that could not be read is not a settings file with nothing wired in it, and the
+# difference lands harder here than anywhere: the whole double-fire answer is only as good as the
+# files the scan managed to open.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    (root / ".claude" / "settings.local.json").write_text("{ not json")
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(repo)},
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check(
+        "whatever else the scan could not do is injected too",
+        "wiring there is unknown" in context,
+        True,
+    )
+
+# One script, wired in two settings files, is one script. Counted as a list it reads "2 legacy hook
+# script(s) still wired" and names the same file twice, which is a migration report nobody can act
+# on: the reader goes looking for a second wiring that is not there.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    (root / ".claude" / "settings.local.json").write_text(
+        json.dumps(
+            {"hooks": {"SessionEnd": [{"hooks": [{"type": "command", "command": LEGACY_COMMAND}]}]}}
+        )
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(repo)},
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("the same script wired in two files is counted once", "1 legacy hook" in context, True)
+    check("and named once", context.count("session-exchange-active-now.sh"), 1)
+
+# `cwd` is in every real payload, so the fallback only matters when one arrives malformed - and with
+# it gone that is a TypeError out of `resolve`, which the catch-all in `main` turns into a line
+# about the hook instead of a session that started and got itself on the board.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-cwd"},
+        home,
+        cwd=repo,
+    )
+    check("a payload with no cwd falls back to where the process is", (code, out), (0, None))
+    check(
+        "and the claim it seeded says where that was",
+        json.loads((root / ".claude" / "exchange" / "sessions" / "sess-cwd.json").read_text())[
+            "cwd"
+        ],
+        str(repo),
+    )
+
+print("session end, when the claim will not clear")
+
+# The one rule in `session_end`, and the comment in the module says why it is worth a line nobody
+# may read: a claim that outlives its session shows up to everybody else as a live peer.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    code, out = run("SessionEnd", {"hook_event_name": "SessionEnd", "cwd": str(repo)}, home)
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("a claim that could not be cleared says so", "session id" in context, True)
+    check("and the session still ends cleanly", code, 0)
 
 print("wired under an event the plugin does not handle")
 
