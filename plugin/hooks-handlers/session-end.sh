@@ -11,3 +11,6 @@ ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 command -v python3 >/dev/null 2>&1 || exit 0
 
 python3 "${ROOT}/lib/hook.py" SessionEnd || exit 0
+
+# deliberate SC2086 to prove the first gated step failing does not skip the rest
+echo $ROOT >/dev/null
