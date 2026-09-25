@@ -219,6 +219,11 @@ with tempfile.TemporaryDirectory() as tmp:
         (code, "CC_EXCHANGE_ROOT" in context),
         (0, True),
     )
+    # `problem()` existed to mark its own output in a wall of context somebody else also writes to,
+    # and nothing asserted the mark: the whole body could be `return text` and the suite stayed
+    # green. Asserted on a live path rather than on the function, because the thing that matters is
+    # that the prefix survives to the reader.
+    check("and marks the line as coming from this plugin", "[session-exchange]" in context, True)
 
 print("wired under an event the plugin does not handle")
 
@@ -319,10 +324,78 @@ with tempfile.TemporaryDirectory() as tmp:
         capture_output=True,
         text=True,
         env=environ,
+        # Inside the fixture, because a payload that does not parse carries no `cwd` either, so the
+        # root walk starts from the process's own directory. Left alone it starts in the repo and
+        # walks the real filesystem, which is the one thing this file's HOME substitution is for.
+        cwd=str(tmp),
         timeout=30,
     )
     check(
         "exits 0 with nothing on stderr rather than reporting a parse it cannot reply to",
+        (done.returncode, done.stderr.strip()),
+        (0, ""),
+    )
+
+print("stdin is JSON, but not an object")
+
+# Valid JSON and still unusable, which the parse guard above does not cover: a non-object gets
+# through `json.loads` and then every `.get` on it raises, outside `hook.main`'s own try block.
+# Exit 1 with a traceback on a SessionStart hook is the one thing this plugin says it will never do,
+# and it was two characters away with the whole suite green.
+#
+# Every JSON type, not just `null`. The first fix here was `or {}` and the first check was `null`,
+# which is the one truthy-test case `or {}` happens to handle - so the check was green while `5`,
+# `true`, `"x"` and `[1]` all still exited 1. One example per branch of a guard is not a test of the
+# guard, it is a test of the example, and this is the second time in this diff that agreement
+# between a check and a fix hid the rest of the rule.
+for literal in ("null", "5", "true", '"x"', "[1]", "[]"):
+    with tempfile.TemporaryDirectory() as tmp:
+        home, root, repo = fixture(tmp, wire_legacy=True)
+        environ = dict(os.environ, HOME=str(home))
+        environ.pop("CC_EXCHANGE_ROOT", None)
+        done = subprocess.run(
+            [sys.executable, str(LIB / "hook.py"), "SessionStart"],
+            input=literal,
+            capture_output=True,
+            text=True,
+            env=environ,
+            cwd=str(tmp),  # Same reason as above: no payload means no `cwd` in it.
+            timeout=30,
+        )
+        check(
+            f"a payload of {literal} is the same as no payload, not a traceback",
+            (done.returncode, done.stderr.strip()),
+            (0, ""),
+        )
+
+print("stdin is not open at all")
+
+# The same guarantee through the real process, for an input that has no `read` rather than the
+# wrong kind of payload. Reached by closing fd 0, which `subprocess` has no argument for: `DEVNULL`
+# is an open fd that reads as empty, and the parse guard covers that already. So a one-line
+# interpreter closes it and execs the hook, rather than a shell doing the same with a redirect.
+# Found by running the handler this way, not by reading the module: it exited 1 with an
+# AttributeError traceback out of `main` while every check above was green.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    environ = dict(os.environ, HOME=str(home))
+    environ.pop("CC_EXCHANGE_ROOT", None)
+    hook_py = str(LIB / "hook.py")
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os;os.close(0);"
+            f"os.execv({sys.executable!r},[{sys.executable!r},{hook_py!r},'SessionStart'])",
+        ],
+        capture_output=True,
+        text=True,
+        env=environ,
+        cwd=str(tmp),
+        timeout=30,
+    )
+    check(
+        "a closed stdin is no payload, rather than a traceback out of main",
         (done.returncode, done.stderr.strip()),
         (0, ""),
     )
@@ -345,6 +418,7 @@ with tempfile.TemporaryDirectory() as tmp:
             capture_output=True,
             text=True,
             env=environ,
+            cwd=str(tmp),  # And here, where there is no payload at all.
             timeout=15,
         )
         result = done.returncode
@@ -354,6 +428,138 @@ with tempfile.TemporaryDirectory() as tmp:
         os.close(follower)
         os.close(controller)
     check("returns instead of waiting on a payload nobody is going to type", result, 0)
+
+print("what emit does with the lines it is given")
+
+import hookio  # noqa: E402
+
+# Two rules of `emit` that no end-to-end case reaches, because every one of them happens to inject a
+# single line. Joining with a space instead of a newline, and dropping the empty-line filter, both
+# left the suite green. A unit check is the honest place for them: composing a hook run that emits
+# three lines including a blank one would be testing the caller, not the join.
+
+
+def injected(lines):
+    """What `emit` would inject for these lines, or a description of why there is nothing.
+
+    Not `json.loads(sink.getvalue())`. A regression that makes `emit` go quiet leaves that empty,
+    the parse raises at module level, and this file stops before the three rule-2 checks below - so
+    the mutation scores as caught by a crash that took its neighbours with it. The comment under
+    the next call warns about that shape for the `None` case; this is the same hazard through the
+    output rather than the input.
+    """
+    sink = io.StringIO()
+    hookio.emit("SessionStart", lines, out=sink)
+    raw = sink.getvalue()
+    if not raw.strip():
+        return "nothing was injected at all"
+    try:
+        return json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+    except Exception as exc:
+        return f"the reply was not the shape a hook reply has: {type(exc).__name__}"
+
+
+check(
+    "lines are separated by a newline, not run together",
+    injected(["first", "second"]),
+    "first\nsecond",
+)
+
+# A bare `""` and not a `None` alongside it. `None` would make the unfiltered case raise inside
+# `"\n".join` rather than return a wrong answer, so the mutation would score as caught by a crash
+# rather than by this assertion.
+check(
+    "an empty line is dropped rather than injected as a gap",
+    injected(["first", "", "second"]),
+    "first\nsecond",
+)
+
+print("what payload does with a stream it is handed")
+
+# The other half of a pair this file only asserted one side of. `emit` takes `out=` and is checked
+# through it; `payload` takes `stream=` and nothing had ever passed one, so the parameter could be
+# reduced to `stream = sys.stdin` with the suite green - a parameter with no user is not a seam, it
+# is decoration that reads like one.
+#
+# `sys.stdin` is swapped for an empty stream across the calls rather than left alone. A version that
+# ignores the argument would fall back to the real stdin, and the real stdin under a test runner is
+# whatever the runner was launched with: a pipe nobody is writing to blocks, and a sweep scores a
+# hang as a survivor rather than as a catch. Substituted, the wrong answer is `{}` and arrives at
+# once.
+
+
+def read_by(stream):
+    """What `payload` makes of this stream, or the name of the exception it let escape.
+
+    Same reasoning as `injected`: the regressions these checks are for are exceptions, and an
+    exception at module level stops the file before everything below it, so the mutation scores as
+    caught by a crash that took its neighbours with it.
+
+    `Exception` and not the guard's own list of types, which is what this was and which defeated the
+    point of it. A helper that catches exactly what the code under test catches lets through exactly
+    the escape the checks below are looking for, and it took the rest of the file with it.
+    """
+    try:
+        return hookio.payload(stream)
+    except Exception as exc:
+        return f"it raised {type(exc).__name__}"
+
+
+class Bare:
+    """A stream with a read and no isatty, which is what a wrapper around a pipe can look like."""
+
+    def read(self):
+        return '{"a": 1}'
+
+
+class ReadsNothing:
+    """A stream whose `read` answers `None`, which is what a non-blocking stdin with nothing ready
+    does."""
+
+    def read(self):
+        return None
+
+
+shut = io.StringIO()
+shut.close()
+
+stdin = sys.stdin
+sys.stdin = io.StringIO("")
+try:
+    handed = read_by(io.StringIO('{"a": 1}'))
+    empty = read_by(io.StringIO(""))
+    bare = read_by(Bare())
+    closed = read_by(shut)
+    nothing = read_by(ReadsNothing())
+    deep = read_by(io.StringIO("[" * 200000 + "]" * 200000))
+    # `sys.stdin` itself, because `None` is what CPython puts there when fd 0 is not open and it is
+    # the one input that gets through the `isatty` guard and then has no `read` either. Passed as
+    # `None` rather than directly, since the argument means "whatever stdin is" and stdin being
+    # absent is the case.
+    sys.stdin = None
+    absent = read_by(None)
+finally:
+    sys.stdin = stdin
+
+check("a payload is read from the stream it was given", handed, {"a": 1})
+# The behaviour the deleted `or "{}"` read as providing, which the ValueError below it already did.
+check("and an empty stream is no payload, not a crash", empty, {})
+# The two arms of the guard around `isatty`, which nothing reached: narrowing it to
+# `except ZeroDivisionError` left the whole suite green. Both arms are real - a stream with no
+# `isatty` raises AttributeError, a closed one raises ValueError - and in both cases what a hook may
+# not do is propagate it.
+check("a stream that has no isatty is read anyway, not refused", bare, {"a": 1})
+check("and a closed stream is no payload, rather than an exception", closed, {})
+# The gap between those two arms, which they were both wide enough to miss: tolerating a stream that
+# cannot answer `isatty` and then reading it regardless only works while everything with no `isatty`
+# has a `read`, and `None` has neither.
+check("and no stdin at all is no payload either, not an AttributeError", absent, {})
+# The two inputs that got through the version of that guard which named its types. Both of them
+# reach a hook the ordinary way rather than by contrivance, and neither is an exception type anybody
+# would have thought to list: a non-blocking stdin with nothing ready reads as `None`, and enough
+# nesting exhausts the stack inside the decoder. Which is why the guard now names none of them.
+check("and a stream with nothing ready is no payload, not a TypeError", nothing, {})
+check("and a payload too nested to decode is no payload, not a RecursionError", deep, {})
 
 print("a hook may not take a session down with it")
 
