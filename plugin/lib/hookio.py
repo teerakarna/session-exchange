@@ -85,41 +85,59 @@ def emit(event, lines, out=None):
     way to write one. That would inject the empty section this function exists to prevent, so the
     filter is here first and its test hand-feeds an input no caller can currently produce.
 
-    The guarantee at the top of this module used to stop at a *reader* that has closed the read end
-    of stdout: the process exited 120 with a `BrokenPipeError` on stderr, and not from this `print`,
-    which returns fine. The bytes sit in the buffer and CPython's shutdown flush is what fails, long
-    after `main` returned 0. So the flush happens here, where an `OSError` is still catchable,
-    and fd 1 is pointed at devnull when it fails - see below for why nothing shorter works. The
-    guarantee is now absolute for any reader as well as for any input.
+    The guarantee at the top of this module used to stop at the *reader*. Three states of it, all
+    reached by a real session and all previously a traceback on stderr:
+
+    - A pipe whose read end is closed, block-buffered, which is the ordinary one. The `print`
+      returns fine; the bytes sit in the buffer and CPython's shutdown flush is what fails, long
+      after `main` returned 0 and outside anything that can catch it.
+    - The same pipe with `PYTHONUNBUFFERED` set, or a reply past the buffer's size, where the write
+      happens during the `print` and raises there instead.
+    - fd 1 not open at all, where CPython puts `None` in `sys.stdout` - the exact mirror of the
+      `sys.stdin` case `payload` handles, and it arrives here as `None.flush()`.
+
+    So the write and the flush are both inside the `try`, and a stdout that is `None` returns early.
+    The guarantee is absolute for any reader as well as for any input.
     """
     lines = [line for line in lines if line]
     if not lines:
         return
     stream = sys.stdout if out is None else out
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": event,
-                    "additionalContext": "\n".join(lines),
-                }
+    # `print(file=None)` is a documented no-op rather than an error, so without this the failure is
+    # the `flush` below and it is an AttributeError, which is neither what the caller is guarding
+    # against nor something `main` can catch - `emit` is called outside its only try block. There is
+    # nothing to write to and no fd to redirect, so returning is the whole of the answer.
+    if stream is None:
+        return
+    reply = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": event,
+                "additionalContext": "\n".join(lines),
             }
-        ),
-        file=stream,
+        }
     )
     try:
+        print(reply, file=stream)
         stream.flush()
     except OSError:
-        # Do not shorten this to `except OSError: pass`, and do not drop the flush and wrap the
-        # `print` instead. Both were tried and both still exit 120: a failed flush leaves the data
-        # in the buffer, so the interpreter's own shutdown flush retries it and fails again, on the
-        # way out, where nothing can catch it. Pointing fd 1 at devnull is what makes that retry
-        # succeed - the buffer still holds fd 1, and `dup2` changes what fd 1 is, so the bytes land
-        # in the dark instead of on a pipe with no reader.
+        # The flush is explicit rather than left to the interpreter, and it is inside the same `try`
+        # as the write because either one can be where the pipe breaks: buffered, the `print`
+        # returns and the flush raises; unbuffered, the `print` raises and the flush never runs.
+        #
+        # And do not shorten the body to `pass`. That was tried and it still exits 120: a failed
+        # write leaves the data in the buffer, so the interpreter's own shutdown flush retries it
+        # and fails again, on the way out, where nothing can catch it. Pointing fd 1 at devnull is
+        # what makes that retry succeed - the buffer still holds fd 1, and `dup2` changes what fd 1
+        # is, so the bytes land in the dark instead of on a pipe with no reader.
         #
         # Only for the real stdout. `out=` is a test seam and an in-memory stream that failed to
-        # flush would not be fixed by touching fd 1, so redirecting it there would be a guess
+        # write would not be fixed by touching fd 1, so redirecting it there would be a guess
         # dressed as a guard.
+        #
+        # `OSError` stays narrow, for the reason the `isatty` guard above stays enumerated: every
+        # reader state that reaches a handler is either this or the `None` above. A stream whose
+        # write raises anything else is the `out=` seam, where the caller is the test.
         if stream is sys.stdout:
             null = os.open(os.devnull, os.O_WRONLY)
             os.dup2(null, 1)
