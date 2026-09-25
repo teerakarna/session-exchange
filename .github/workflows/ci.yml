@@ -186,6 +186,42 @@ jobs:
           claude plugin validate --strict ./plugin
           claude plugin validate --strict .
 
+  # Breaks one rule at a time and requires the suite to notice. `test` answers "does the suite pass";
+  # this answers "would it have failed if the code were wrong", which is the only question this repo
+  # treats as load-bearing and the one a green suite cannot address.
+  #
+  # Its own job rather than a step in `checks`, which the cost rule in CONTRIBUTING.md would otherwise
+  # say. Three reasons, and the arithmetic was measured rather than assumed. It runs the full suite
+  # once per mutation, plus the baseline - twenty-four runs, a bit over a minute locally - so as a
+  # step it would sit behind or in front of a lint that takes under a second, and either order is
+  # wrong: last means slow feedback on a typo, first means the cheap checks wait on it. Its failure is
+  # also categorically different from any other step's, naming a rule nothing asserts rather than a
+  # rule broken, and merging it in would report that as "checks failed".
+  #
+  # What it is not is free, and the first version of this comment claimed it was. `checks` runs in
+  # thirty seconds, so a separate job bills 1 + 2 while folding the sweep in bills 2, and the split
+  # costs one Linux minute per run. That is the price of the two reasons above rather than an argument
+  # for them, and it is stated here because the alternative was an arithmetic that came out even only
+  # if nobody measured `checks`.
+  #
+  # One interpreter, one OS. The sweep asserts what the suite asserts, which does not vary by Python
+  # version - `test` is where version sensitivity belongs, and a matrix here would multiply those
+  # twenty-four suite runs by four for no additional answer.
+  mutate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Sweep
+        run: python plugin/tests/mutate.py
+
   secrets:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -215,7 +251,7 @@ jobs:
   # `always()` so it runs even when something upstream failed, and the explicit result check because
   # a skipped `needs` job does not fail a dependant on its own.
   ci:
-    needs: [test, checks, secrets]
+    needs: [test, checks, mutate, secrets]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

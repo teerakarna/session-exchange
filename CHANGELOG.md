@@ -21,6 +21,11 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   ones it cannot answer rather than omitting them.
 - Repository hygiene: Apache-2.0, CI on Linux and macOS across Python 3.9 to 3.13, ruff, shellcheck,
   gitleaks, a gate asserting the runtime imports nothing but the standard library, and dependabot.
+- A mutation sweep as a CI gate. `plugin/tests/mutate.py` breaks one rule at a time and requires the
+  suite to notice; `test_mutations.py` is the cheap half that keeps the tables from drifting away
+  from the source they claim to patch. Twenty-three mutations across `hookio`, `store` and `validate`,
+  with `UNSWEPT` naming the eight modules still owed a table. Pointing it at `hookio` found nine live
+  rules there, two of them guards in `payload` wide enough to let a hook exit 1 with a traceback.
 
 ### Not built yet
 
