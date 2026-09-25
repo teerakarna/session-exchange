@@ -192,7 +192,8 @@ jobs:
   #
   # Its own job rather than a step in `checks`, which the cost rule in CONTRIBUTING.md would otherwise
   # say. Three reasons, and the arithmetic was measured rather than assumed. It runs the full suite
-  # once per mutation, plus the baseline - twenty-four runs, a bit over a minute locally - so as a
+  # once per mutation, plus the baseline - twenty-eight runs and seventy-five seconds locally for the
+  # three tables there are now - so as a
   # step it would sit behind or in front of a lint that takes under a second, and either order is
   # wrong: last means slow feedback on a typo, first means the cheap checks wait on it. Its failure is
   # also categorically different from any other step's, naming a rule nothing asserts rather than a
@@ -206,9 +207,34 @@ jobs:
   # this paragraph named one measurement of `checks` and the next CI run came in at half of it, which
   # did not change the conclusion but is how the claim would have rotted.
   #
+  # And the narrowing below makes that price worse rather than better, which is worth saying plainly:
+  # most runs now sweep one module or none, so this job usually finishes well inside a minute, and the
+  # split bills its extra Linux minute on nearly every run instead of on some. The two reasons above
+  # are what is being bought, at a rate that went up. Linux minutes are the cheap ones and the macOS
+  # leg in `test` still costs more than this job does in a month.
+  #
   # One interpreter, one OS. The sweep asserts what the suite asserts, which does not vary by Python
   # version - `test` is where version sensitivity belongs, and a matrix here would multiply those
-  # twenty-four suite runs by four for no additional answer.
+  # suite runs by four for no additional answer.
+  #
+  # Narrowed to what the change could have broken, rather than every table, and that is the one tier
+  # in this workflow. A sweep is one full suite run per mutation, so its cost is linear in the size of
+  # the tables: three modules is 27 mutations and about 75 seconds, and the eight modules `UNSWEPT`
+  # owes would put every future push near five minutes to re-answer a question the last push already
+  # answered about code this one did not touch. Nothing else here grows that way, which is why nothing
+  # else here is tiered - the matrix is four fixed legs, and making the PR gate weaker than the main
+  # gate is the failure mode this repo is about.
+  #
+  # The narrowing is in `mutate.py --since`, not in this file, so the same command is the local one.
+  # `targets` there derives the module list, and it is wider than "the lib files that changed": a test
+  # file maps to the modules its checks catch, because a deleted check is how a mutation stops being
+  # caught, and a change to `run.py` or `mutate.py` reswept everything.
+  #
+  # Still unconditional, and it has to be: `ci` reads a `skipped` need as failure, so a job with an
+  # `if:` on it would block `main` on every run where the condition was false. A change with nothing
+  # to sweep exits 0 with a printed reason instead, which is a job that ran and said so.
+  #
+  # The full sweep lives in `sweep.yml`, weekly, where the length of it does not matter.
   mutate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -216,13 +242,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # `--since` needs a merge base, which a depth-1 clone does not have.
+          fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
-      - name: Sweep
-        run: python plugin/tests/mutate.py
+      # `base.sha` on a PR, and it is the base rather than `HEAD^` because the checkout is a merge
+      # commit: `HEAD^` there is the tip of `main`, so a PR of six commits would sweep only what the
+      # last one touched. On a push to `main`, `event.before` is the previous tip, which after a squash
+      # merge is exactly one commit back.
+      #
+      # If that ref is ever unreachable - a force push to `main`, which the ruleset forbids -
+      # `mutate.py` refuses with exit 2 rather than reporting an empty diff as nothing to sweep. The
+      # recovery is a manual run of the `Sweep` workflow, not a change here.
+      - name: Sweep what this change could have broken
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: python plugin/tests/mutate.py --since "$BASE"
 
   secrets:
     runs-on: ubuntu-latest

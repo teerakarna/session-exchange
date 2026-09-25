@@ -50,8 +50,9 @@ time, which it was, four times, losing its tables and its own bug fixes with eve
 tables are the durable part; the runner is incidental:
 
 ```sh
-python3 plugin/tests/mutate.py            # every module with a table
-python3 plugin/tests/mutate.py hookio     # one module, while writing its table
+python3 plugin/tests/mutate.py                      # every module with a table
+python3 plugin/tests/mutate.py hookio               # one module, while writing its table
+python3 plugin/tests/mutate.py --since origin/main  # only what this change could have broken
 ```
 
 A sweep costs one full suite run per mutation, so it is its own CI job and not part of
@@ -60,7 +61,12 @@ every mutation still matches the source it claims to patch, and that `TABLES` an
 account for every module in `plugin/lib`. Both failures are otherwise silent. A mutation whose text
 has drifted tests nothing while still reporting a catch, and none of the eleven modules had a table in
 the repo at all before this, which is the same "thorough where it was pointed" problem one level up.
-Three have one now and `UNSWEPT` names the eight that are owed.
+Three have one now. Of the eight that do not, `NOT_YET` names the five that are owed one and `DECLINED`
+names three with the reason recorded next to each: `cli`, `ledger` and `reconcile` are 1100 of the 1800
+unswept lines, and every failure mode they have is a wrong answer on a command a human just typed,
+which is a cheaper feedback loop than a sweep whose cost is linear in the size of the tables. The split
+exists because a debt list that quietly contains permanent entries stops being read as a debt list.
+Reversing one of those decisions is an edit to a dict, which is the point of writing the reason down.
 
 Writing it down cost two more instances of the defect, in the harness, both found by probing it
 rather than by reading it. The scratch copy was `plugin/` alone while `test_plugin_layout.py` reads
@@ -170,6 +176,44 @@ uvx ruff@0.16.9 format --check .
 shellcheck plugin/hooks-handlers/*.sh
 ```
 
+## What runs when, and how to run it yourself
+
+Every gate here has a local command, because Actions goes down, the free minutes run out, and a gate
+you cannot run yourself is one you find out about after pushing. Nothing in CI is a step that only
+exists inside CI.
+
+| Tier | Command | In CI |
+|---|---|---|
+| Lint and shape | `uvx ruff@0.16.9 check .`, `ruff format --check .`, `shellcheck plugin/hooks-handlers/*.sh`, `claude plugin validate --strict ./plugin` | `checks`, every push |
+| The suite | `python3 plugin/tests/run.py` | `test`, every push, on 3.9/3.11/3.13 and macOS |
+| Sweep, narrowed | `python3 plugin/tests/mutate.py --since origin/main` | `mutate`, every push |
+| Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |
+| Secrets | none, unless you have `gitleaks` installed | `secrets`, every push, full history |
+
+The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
+taste. A sweep is one full suite run per mutation: three tables is 27 mutations and about 75 seconds,
+and the eight modules `UNSWEPT` still owes would take every push near five minutes to re-answer a
+question the previous push already answered about code this one did not touch. So `ci` sweeps only the
+modules the change could have affected, and the full sweep runs weekly where the length of it does not
+matter.
+
+That narrowing is in `mutate.py --since`, not in the workflow, so the command CI runs is the command
+you run. It is wider than "the lib modules that changed", and the extra width is the part that
+matters: a test file maps to the modules its checks catch, because a check deleted from a test file is
+exactly how a mutation stops being caught and that diff touches nothing under `plugin/lib` at all. A
+change to `run.py` or `mutate.py` itself reswept everything, since those two decide what the sweep
+measures. A change that no sweep can measure - a doc, a workflow, a handler - exits 0 saying so, which
+is deliberately not the same output as the refusal for a sweep that ran and proved nothing.
+
+Two things the narrowing gives up, both real. A rule can stop being asserted for a reason no diff
+points at: a check that covered a second module by accident, an interpreter change under the suite,
+two changes that are each fine and together are not. And a module in `UNSWEPT` is swept by nothing at
+all, weekly included, which is why a change to one of those prints a line saying the change went
+unswept rather than passing quietly. The weekly run is the net under the first; issue #8 is the second.
+
+Nothing else is tiered. The test matrix is four fixed legs that do not grow, and a PR gate weaker than
+the gate on `main` is the failure mode this repo is about, so it stays as it is.
+
 None of that reads a check and asks whether it could fail, which is the one thing this repo cares most
 about, so a review of the diff is expected before a PR as well. `CLAUDE.md` states how to size it and
 what to point it at, and states it only there: a rule written out in two files is the drift this project
@@ -217,7 +261,10 @@ arithmetic below: it runs the suite once per mutation, and its failure names a r
 rather than a rule broken, which is not what "checks failed" would say. That costs one Linux minute
 per run: `checks` comes in well under a minute, so folding a minute of sweep into it stays inside two
 billed minutes while splitting them bills three. The price is named in the job's own comment rather
-than argued away, which is what the first version of it did.
+than argued away, which is what the first version of it did - and narrowing the sweep to the modules a
+change could have broken made that price worse, not better, because most runs now sweep one module or
+none and finish inside the same minute `checks` does. The reasons for the split did not change; the
+rate did, and the comment says so.
 
 `ci` is the aggregate job at the bottom of the workflow, and it is the only check the ruleset names.
 That is deliberate: naming the matrix legs individually would put every OS and Python version into a

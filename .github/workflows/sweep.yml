@@ -1,0 +1,52 @@
+# The full mutation sweep, off the push path.
+#
+# `ci` sweeps only the modules a change could have broken, because a sweep is one full suite run per
+# mutation and paying for every table on every push is a cost that grows with the tables while
+# answering a question the last push already answered. This is the other half of that trade: once a
+# week, every table, on `main`, where the length of it does not matter because nobody is waiting.
+#
+# What it catches that the narrowed run cannot: a rule that stops being asserted for a reason no diff
+# points at. A check weakened in a file that maps to one module while covering another by accident, an
+# interpreter or runner change under the suite, two changes that are each fine and together are not.
+# None of those show up in `targets`, and without this they would show up never.
+#
+# Deliberately not a required check and deliberately not part of `ci`. A required check on a schedule
+# cannot pass a PR that predates its last run, and `ci` reads a job it does not have a result for as a
+# failure. This reports on its own and its failure is a finding to act on, not a merge to block.
+#
+# Two things about scheduled workflows worth knowing before trusting this as the safety net it is:
+# GitHub disables a schedule after 60 days with no activity in the repository, silently, and a
+# scheduled run only ever uses the workflow file on the default branch. So a quiet quarter turns this
+# off without saying so, and `workflow_dispatch` is what proves it still works.
+name: Sweep
+
+on:
+  schedule:
+    # 04:17 on Mondays. Off the hour because every cron in the world runs at :00 and the queue for a
+    # free runner is longer there; the day is arbitrary, the point is weekly rather than which day.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    # Generous next to `ci`'s 15, because this one grows on purpose: every table `UNSWEPT` owes lands
+    # here at one suite run per mutation. Still a cap, for the reason every job here has one - the
+    # default is 360 minutes and a hang bills every one of them.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # No `--since`, which is the whole difference from the `mutate` job in `ci`. With no arguments
+      # `mutate.py` sweeps every table, and it refuses to exit 0 having swept nothing.
+      - name: Sweep every table
+        run: python plugin/tests/mutate.py
