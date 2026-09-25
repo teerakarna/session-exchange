@@ -190,6 +190,19 @@ exists inside CI.
 | Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |
 | Secrets | none, unless you have `gitleaks` installed | `secrets`, every push, full history |
 
+`.pre-commit-config.yaml` wires the first two tiers to git, if you want them there:
+
+```sh
+uvx pre-commit install --install-hooks   # lint and shape on commit, the suite on push
+uvx pre-commit run --all-files           # or just run the commit tier now
+uvx pre-commit uninstall                 # and out again
+```
+
+Optional on purpose, and `uvx` so that sending a patch does not mean installing anything: `ci` is the
+authority on whether a change is good, and every hook in there runs a command from this file. What it
+buys is the round trip, a format failure found in under a second rather than two minutes later in a
+log. The sweep is in neither stage, for the arithmetic below.
+
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
 taste. A sweep is one full suite run per mutation: four tables is 45 mutations and just over two
 minutes, and the fourth table alone added 48 seconds to that, so the seven modules `UNSWEPT` still

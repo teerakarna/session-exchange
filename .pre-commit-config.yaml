@@ -1,0 +1,67 @@
+# The contributor gate, tiered the same way CI is and for the same reason.
+#
+# Optional, and it has to stay optional: nothing here is the authority on whether a change is good.
+# `ci` is, and every hook below runs a command that is also in CONTRIBUTING.md, so a contributor who
+# would rather type them gets the same answer. What this buys is the round trip - a format failure
+# found in under a second locally instead of two minutes later in a log.
+#
+#   uvx pre-commit install --install-hooks     # both stages, without installing pre-commit
+#   uvx pre-commit run --all-files             # the commit tier, on everything
+#   uvx pre-commit uninstall                   # and out again
+#
+# `uvx` rather than `pip install pre-commit`, because this repo's runtime dependency list is empty on
+# purpose and a contributor should not have to add to their machine to send a patch.
+#
+# Two stages, matching the two cheap tiers in `ci`:
+#
+# - **commit**: lint, format, shellcheck. Under a second, and every failure is mechanical.
+# - **push**: the suite, plus those three again - a hook with no `stages` runs at every stage, which
+#   is what you want here. Three seconds, worth paying once per push and not once per commit: a gate
+#   that interrupts a train of small commits gets uninstalled, and an uninstalled gate is weaker
+#   than a slower one.
+#
+# The mutation sweep is in neither. It is 45 mutations and just over two minutes today and grows with
+# every table added, so it belongs where nobody is waiting on it: narrowed to what changed in `ci`,
+# and in full weekly. `CONTRIBUTING.md` has the arithmetic.
+minimum_pre_commit_version: "4.0.0"
+
+# So that `pre-commit install` with no arguments wires both stages. Without it only `pre-commit` is
+# installed, the suite hook is configured and never runs, and the config reads as though it is
+# gating something it is not.
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Same version CI pins in `.github/requirements-ci.txt`. A different one here is worse than no
+    # hook at all: it fails on rules CI does not have, or passes code CI will reject.
+    rev: v0.16.9
+    hooks:
+      # No `--fix`. A hook that rewrites the code being committed changes what you are about to
+      # commit without showing it to you, and the fix for a lint failure is a judgement call often
+      # enough that it should not be made silently. `ruff check --fix` by hand is right there.
+      - id: ruff-check
+      - id: ruff-format
+        args: [--check, --diff]
+
+  - repo: local
+    hooks:
+      # Local and `system` rather than the published shellcheck hook, which runs in Docker. Docker
+      # is a much larger ask than this gate is worth, and everyone who has shellcheck has it from
+      # brew or apt already. If it is missing, this fails saying so, which is the honest outcome:
+      # CI runs shellcheck regardless, so a contributor skipping it locally loses nothing but time.
+      - id: shellcheck
+        name: shellcheck the hook handlers
+        entry: shellcheck
+        language: system
+        types: [shell]
+
+      # Push rather than commit, and `always_run` because the suite is not a per-file check: a change
+      # to one module is caught by a test file that is not in the diff, which is the whole point of
+      # having it.
+      - id: suite
+        name: the suite
+        entry: python3 plugin/tests/run.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
