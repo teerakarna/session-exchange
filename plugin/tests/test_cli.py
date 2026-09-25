@@ -2,7 +2,8 @@
 """The CLI, run as a real command.
 
 `HOME` is pointed at a tmpdir throughout, which isolates the session registry, the legacy scripts
-and the user settings in one move. The registry fixture names this test process as the session's pid,
+and the user settings in one move. The registry fixture names this test process as the session's
+pid,
 because that is how the CLI works out who is calling it: it walks up the process tree until a pid
 matches a registry row, since a command run through a tool call has no other way to learn its own
 session id and matching on cwd picks the wrong session the moment two of them share a directory.
@@ -35,10 +36,17 @@ def fixture(tmp):
     sessions = tmp / "home" / ".claude" / "sessions"
     sessions.mkdir(parents=True)
     (tmp / "home" / ".claude" / "hooks").mkdir()
-    (sessions / f"{os.getpid()}.json").write_text(json.dumps({
-        "pid": os.getpid(), "sessionId": "real-one", "name": "the-caller",
-        "cwd": str(tmp), "status": "busy",
-    }))
+    (sessions / f"{os.getpid()}.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "sessionId": "real-one",
+                "name": "the-caller",
+                "cwd": str(tmp),
+                "status": "busy",
+            }
+        )
+    )
     area = tmp / "area"
     (area / "repo" / ".git").mkdir(parents=True)
     (area / "repo" / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
@@ -49,7 +57,9 @@ def fixture(tmp):
 def run(home, cwd, *args):
     done = subprocess.run(
         [sys.executable, str(CLI), "--cwd", str(cwd), *args],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
         env={**os.environ, "HOME": str(home)} | {"CC_EXCHANGE_ROOT": ""},
     )
     return done.returncode, done.stdout + done.stderr
@@ -60,8 +70,11 @@ print("with no root, every command explains itself rather than guessing")
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     code, out = run(home, repo, "show")
-    check("show says there is no exchange here", (code, "no environment root" in out.lower()),
-          (1, True))
+    check(
+        "show says there is no exchange here",
+        (code, "no environment root" in out.lower()),
+        (1, True),
+    )
     check("and names what init would mark", str(area) in out, True)
 
 print("init")
@@ -69,14 +82,18 @@ print("init")
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     code, out = run(home, repo, "init")
-    check("marks the area above the repo, not the repo",
-          (code, (area / ".claude" / "exchange.json").is_file()), (0, True))
+    check(
+        "marks the area above the repo, not the repo",
+        (code, (area / ".claude" / "exchange.json").is_file()),
+        (0, True),
+    )
     check("and not the repo itself", (repo / ".claude" / "exchange.json").exists(), False)
-    check("and creates the store", store_ok := (area / ".claude" / "exchange" / "handoffs").is_dir(),
-          True)
+    check("and creates the store", (area / ".claude" / "exchange" / "handoffs").is_dir(), True)
 
     code, out = run(home, repo, "init")
-    check("running it again reports rather than rewrites", (code, "Already marked" in out), (0, True))
+    check(
+        "running it again reports rather than rewrites", (code, "Already marked" in out), (0, True)
+    )
 
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
@@ -91,16 +108,24 @@ with tempfile.TemporaryDirectory() as tmp:
     (inner / ".git").mkdir(parents=True)
 
     code, out = run(home, inner, "init")
-    check("defaults to the area rather than the container",
-          (code, (container / "one" / ".claude" / "exchange.json").is_file()), (0, True))
+    check(
+        "defaults to the area rather than the container",
+        (code, (container / "one" / ".claude" / "exchange.json").is_file()),
+        (0, True),
+    )
     code, out = run(home, inner, "init", str(container))
-    check("and refuses the container when asked for it by name",
-          (code, "Refusing to mark" in out, "separate workspaces" in out), (1, True, True))
-    check("nothing was written to the container",
-          (container / ".claude").exists(), False)
+    check(
+        "and refuses the container when asked for it by name",
+        (code, "Refusing to mark" in out, "separate workspaces" in out),
+        (1, True, True),
+    )
+    check("nothing was written to the container", (container / ".claude").exists(), False)
     code, out = run(home, inner, "init", str(container), "--force")
-    check("--force is the only way past it",
-          (code, (container / ".claude" / "exchange.json").is_file()), (0, True))
+    check(
+        "--force is the only way past it",
+        (code, (container / ".claude" / "exchange.json").is_file()),
+        (0, True),
+    )
 
 print("claim")
 
@@ -108,12 +133,16 @@ with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
 
-    code, out = run(home, repo, "claim", "--focus", "the hooks manifest", "--path", "a", "--path", "b")
+    code, out = run(
+        home, repo, "claim", "--focus", "the hooks manifest", "--path", "a", "--path", "b"
+    )
     check("claims as the calling session, by name", (code, "the-caller" in out), (0, True))
     written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
-    check("and records what it was told",
-          (written["name"], written["focus"], written["paths"], written["git_branch"]),
-          ("the-caller", "the hooks manifest", ["a", "b"], "main"))
+    check(
+        "and records what it was told",
+        (written["name"], written["focus"], written["paths"], written["git_branch"]),
+        ("the-caller", "the hooks manifest", ["a", "b"], "main"),
+    )
 
     code, out = run(home, repo, "claim", "--path", "c")
     written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
@@ -123,16 +152,24 @@ with tempfile.TemporaryDirectory() as tmp:
     # calling. Borrowing it labels someone else's claim with this session's name, and then shows
     # everybody a stale row under it.
     code, out = run(home, repo, "claim", "--session", "someone-else", "--focus", "other work")
-    other = json.loads((area / ".claude" / "exchange" / "sessions" / "someone-else.json").read_text())
-    check("an explicit session id does not borrow the caller's name",
-          ("name" in other, other["focus"]), (False, "other work"))
+    other_path = area / ".claude" / "exchange" / "sessions" / "someone-else.json"
+    other = json.loads(other_path.read_text())
+    check(
+        "an explicit session id does not borrow the caller's name",
+        ("name" in other, other["focus"]),
+        (False, "other work"),
+    )
 
     code, out = run(home, repo, "show")
     check("show lists both claims", (code, "claims    2" in out), (0, True))
-    check("with each session's focus", ("the hooks manifest" in out, "other work" in out),
-          (True, True))
-    check("and marks the one with no live session as stale",
-          "no longer in the registry" in out, True)
+    check(
+        "with each session's focus",
+        ("the hooks manifest" in out, "other work" in out),
+        (True, True),
+    )
+    check(
+        "and marks the one with no live session as stale", "no longer in the registry" in out, True
+    )
 
 print("doctor")
 
@@ -140,8 +177,7 @@ with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
     code, out = run(home, repo, "doctor")
-    check("reports the root and the rule that found it",
-          (code, "by marker" in out), (0, True))
+    check("reports the root and the rule that found it", (code, "by marker" in out), (0, True))
     check("names the first outstanding step", "next      step 4" in out, True)
     # A diagnostic that quietly omits a check reads exactly like one that passed it.
     check("prints the checks it cannot answer rather than skipping them", "[?]" in out, True)
@@ -151,13 +187,28 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
+    LEGACY_COMMAND = 'python3 "$HOME/.claude/hooks/session_exchange_handoffs.py"'
     hooks = home / ".claude" / "hooks"
     (hooks / "session_exchange_handoffs.py").write_text("# legacy\n")
     (hooks / "review-requests-check.sh").write_text("# unrelated\n")
-    (home / ".claude" / "settings.json").write_text(json.dumps({"hooks": {"SessionStart": [
-        {"hooks": [{"type": "command",
-                    "command": 'python3 "$HOME/.claude/hooks/session_exchange_handoffs.py"'}]}
-    ]}}))
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": LEGACY_COMMAND,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
 
     code, out = run(home, repo, "doctor")
     check("a wired legacy script is a fault, not a note", code, 1)
@@ -172,8 +223,11 @@ with tempfile.TemporaryDirectory() as tmp:
     run(home, repo, "init")
     for command in ("handoff", "migrate"):
         code, out = run(home, repo, command)
-        check(f"{command} exits 2 and names the step",
-              (code, "step 4" in out, "Nothing was changed" in out), (2, True, True))
+        check(
+            f"{command} exits 2 and names the step",
+            (code, "step 4" in out, "Nothing was changed" in out),
+            (2, True, True),
+        )
 
 print()
 if failures:

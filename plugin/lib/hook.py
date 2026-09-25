@@ -2,7 +2,8 @@
 
 What each event is for:
 
-- **SessionStart** - resolve the root, seed this session's claim, and inject whatever the root has to
+- **SessionStart** - resolve the root, seed this session's claim, and inject whatever the root has
+  to
   say. Fires on startup, resume, clear and compact, so it has to be safe to run repeatedly against
   state it may already have written.
 - **SessionEnd** - clear the claim. This is what makes "set your row to idle when you are done" stop
@@ -35,8 +36,9 @@ def session_start(data, root, lines):
     # payload does carry, rather than by walking the process tree, which is the same answer for the
     # price of one directory read.
     known = registry.by_session_id(session_id) or {}
-    _, problem = claims.seed(root, session_id, data.get("cwd") or os.getcwd(),
-                             name=known.get("name"))
+    _, problem = claims.seed(
+        root, session_id, data.get("cwd") or os.getcwd(), name=known.get("name")
+    )
     if problem:
         lines.append(hookio.problem(problem))
 
@@ -50,11 +52,13 @@ def session_start(data, root, lines):
     state = legacy.report(root)
     if state["double_fire"]:
         wired = sorted({name for _, name in state["wired"]})
-        lines.append(hookio.problem(
-            f"{len(wired)} legacy hook script(s) still wired: {', '.join(wired)}. "
-            "They fire alongside this plugin, so presence and handoffs are rendered twice. "
-            "Run `exchange doctor` for where the wiring is."
-        ))
+        lines.append(
+            hookio.problem(
+                f"{len(wired)} legacy hook script(s) still wired: {', '.join(wired)}. "
+                "They fire alongside this plugin, so presence and handoffs are rendered twice. "
+                "Run `exchange doctor` for where the wiring is."
+            )
+        )
     for problem in state["problems"]:
         lines.append(hookio.problem(problem))
 
@@ -88,17 +92,21 @@ def main(default_event, argv=None):
         else:
             handler = HANDLERS.get(event)
             if handler is None:
-                lines.append(hookio.problem(
-                    f"wired under {event}, which this plugin does not handle. "
-                    "Check hooks/hooks.json against how it was installed."
-                ))
+                lines.append(
+                    hookio.problem(
+                        f"wired under {event}, which this plugin does not handle. "
+                        "Check hooks/hooks.json against how it was installed."
+                    )
+                )
             else:
                 handler(data, resolution.root, lines)
-    except Exception as exc:  # noqa: BLE001 - a hook may not take a session down with it
-        lines.append(hookio.problem(
-            f"{type(exc).__name__} in the {event} hook: {exc}. "
-            "Session unaffected; the exchange is not being updated."
-        ))
+    except Exception as exc:
+        lines.append(
+            hookio.problem(
+                f"{type(exc).__name__} in the {event} hook: {exc}. "
+                "Session unaffected; the exchange is not being updated."
+            )
+        )
 
     hookio.emit(event, lines)
     return 0

@@ -16,9 +16,9 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 
-import claims  # noqa: E402
-import store  # noqa: E402
-import validate  # noqa: E402
+import claims
+import store
+import validate
 
 failures = []
 
@@ -42,28 +42,37 @@ with tempfile.TemporaryDirectory() as tmp:
 
     check("a valid claim writes", store.write_json(path, good, CLAIM_SCHEMA), None)
     check("and reads back", store.read_json(path, CLAIM_SCHEMA), (good, None))
-    check("a missing file is nothing here, not a problem",
-          store.read_json(claims.path(root, "absent"), CLAIM_SCHEMA), (None, None))
+    check(
+        "a missing file is nothing here, not a problem",
+        store.read_json(claims.path(root, "absent"), CLAIM_SCHEMA),
+        (None, None),
+    )
 
     path.write_text("{ truncated")
     obj, problem = store.read_json(path, CLAIM_SCHEMA)
-    check("a file that exists and will not parse says so",
-          (obj, problem is not None), (None, True))
+    check("a file that exists and will not parse says so", (obj, problem is not None), (None, True))
 
     path.write_text(json.dumps({"session_id": "s1"}))
     obj, problem = store.read_json(path, CLAIM_SCHEMA)
-    check("a file that parses and is invalid also says so",
-          (obj, "updated_at" in (problem or "")), (None, True))
+    check(
+        "a file that parses and is invalid also says so",
+        (obj, "updated_at" in (problem or "")),
+        (None, True),
+    )
 
 with tempfile.TemporaryDirectory() as tmp:
     root = pathlib.Path(tmp).resolve()
     path = claims.path(root, "s1")
     problem = store.write_json(path, {"session_id": "s1"}, CLAIM_SCHEMA)
     # Break it: if validation happened after the write, or not at all, the file would be here.
-    check("an invalid claim never reaches disk",
-          (problem is not None, path.exists()), (True, False))
-    check("and no stray temp file is left behind",
-          sorted(p.name for p in path.parent.glob("*")) if path.parent.is_dir() else [], [])
+    check(
+        "an invalid claim never reaches disk", (problem is not None, path.exists()), (True, False)
+    )
+    check(
+        "and no stray temp file is left behind",
+        sorted(p.name for p in path.parent.glob("*")) if path.parent.is_dir() else [],
+        [],
+    )
 
 print("an identifier that is also a filename")
 
@@ -74,10 +83,8 @@ for bad in ("../escape", "a/b", "", None, "with space"):
 with tempfile.TemporaryDirectory() as tmp:
     root = pathlib.Path(tmp).resolve()
     claim, problem = claims.seed(root, "../../evil", root)
-    check("seeding with a traversing id writes nothing",
-          (claim, problem is not None), (None, True))
-    check("and nothing appeared outside the store",
-          list(root.parent.glob("evil*")), [])
+    check("seeding with a traversing id writes nothing", (claim, problem is not None), (None, True))
+    check("and nothing appeared outside the store", list(root.parent.glob("evil*")), [])
 
 print("seed, update, clear")
 
@@ -87,25 +94,32 @@ with tempfile.TemporaryDirectory() as tmp:
     (root / ".git" / "HEAD").write_text("ref: refs/heads/feat/thing\n")
 
     claim, problem = claims.seed(root, "s1", root, name="pane-a")
-    check("a seeded claim carries what the payload knows",
-          (claim["session_id"], claim["name"], claim.get("git_branch"), problem),
-          ("s1", "pane-a", "feat/thing", None))
+    check(
+        "a seeded claim carries what the payload knows",
+        (claim["session_id"], claim["name"], claim.get("git_branch"), problem),
+        ("s1", "pane-a", "feat/thing", None),
+    )
 
     (root / ".git" / "HEAD").write_text("9d4f1c0e" * 5 + "\n")
     claim, _ = claims.seed(root, "s1", root)
-    check("a detached head is no branch rather than a sha-shaped one",
-          "git_branch" in claim, False)
+    check("a detached head is no branch rather than a sha-shaped one", "git_branch" in claim, False)
 
     claims.update(root, "s1", focus="the thing", add={"paths": ["a", "b"]})
     claim, _ = claims.update(root, "s1", add={"paths": ["b", "c"], "repos": ["dotfiles"]})
-    check("adding to a list deduplicates rather than repeating",
-          (claim["paths"], claim["repos"]), (["a", "b", "c"], ["dotfiles"]))
+    check(
+        "adding to a list deduplicates rather than repeating",
+        (claim["paths"], claim["repos"]),
+        (["a", "b", "c"], ["dotfiles"]),
+    )
 
     # SessionStart fires again on resume and on compact. Wiping the focus then would be a
     # regression the session itself cannot see.
     claim, _ = claims.seed(root, "s1", root)
-    check("re-seeding keeps what the session said about itself",
-          (claim["focus"], claim["paths"]), ("the thing", ["a", "b", "c"]))
+    check(
+        "re-seeding keeps what the session said about itself",
+        (claim["focus"], claim["paths"]),
+        ("the thing", ["a", "b", "c"]),
+    )
 
     claim, _ = claims.update(root, "s1", replace={"paths": ["only"]})
     check("replacing a list replaces it", claim["paths"], ["only"])
@@ -121,8 +135,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("clearing again is still success", claims.clear(root, "s1"), None)
 
     claim, problem = claims.update(root, "s1", focus="x")
-    check("updating a claim that does not exist explains itself",
-          (claim, problem is not None), (None, True))
+    check(
+        "updating a claim that does not exist explains itself",
+        (claim, problem is not None),
+        (None, True),
+    )
 
 print("one unreadable file does not hide the readable ones, or the reverse")
 
@@ -141,16 +158,21 @@ with tempfile.TemporaryDirectory() as tmp:
     (root / ".claude").mkdir()
     (root / ".claude" / "exchange.json").write_text(json.dumps({"name": "personal"}))
     config, problem = store.config(root)
-    check("a marker with only a name still yields every cap",
-          (config["name"], config["stale_days"], config["max_handoffs_listed"], problem),
-          ("personal", 7, 8, None))
+    check(
+        "a marker with only a name still yields every cap",
+        (config["name"], config["stale_days"], config["max_handoffs_listed"], problem),
+        ("personal", 7, 8, None),
+    )
 
     (root / ".claude" / "exchange.json").write_text(json.dumps({"name": "x", "stale_days": "7"}))
     config, problem = store.config(root)
     # Refusing to render because one cap is misspelt would be the wrong trade. Doing it silently
     # would be worse than either.
-    check("an invalid marker yields defaults and a problem, not one or the other",
-          (config["stale_days"], problem is not None), (7, True))
+    check(
+        "an invalid marker yields defaults and a problem, not one or the other",
+        (config["stale_days"], problem is not None),
+        (7, True),
+    )
 
 print()
 if failures:

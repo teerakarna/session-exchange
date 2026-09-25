@@ -1,0 +1,5 @@
+# CI tooling only. Nothing here is a runtime dependency: the plugin imports the standard library and
+# nothing else, which the `stdlib` job in ci.yml enforces. This file exists so the pin is a file
+# dependabot can see and bump in a PR, rather than a literal buried in a run step that goes stale
+# quietly.
+ruff==0.16.9

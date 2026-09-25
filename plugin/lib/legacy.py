@@ -58,8 +58,10 @@ def settings_files(root, user_settings=USER_SETTINGS):
     """
     root = pathlib.Path(root)
     found = [user_settings] if user_settings and pathlib.Path(user_settings).is_file() else []
-    for candidate in [root / ".claude" / "settings.local.json",
-                      *sorted(root.glob("*/.claude/settings.local.json"))]:
+    for candidate in [
+        root / ".claude" / "settings.local.json",
+        *sorted(root.glob("*/.claude/settings.local.json")),
+    ]:
         if candidate.is_file():
             found.append(candidate)
     return found

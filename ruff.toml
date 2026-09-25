@@ -1,0 +1,44 @@
+# Not a pyproject.toml, deliberately. This is a plugin, not a package: nothing pip-installs it and
+# there is no distribution to build, so packaging metadata would be a claim the repo cannot honour.
+# Ruff reads a bare ruff.toml perfectly well.
+
+line-length = 100
+
+# The floor, and it is not arbitrary. The hooks invoke whatever `python3` is on PATH, which on a
+# stock macOS is the system 3.9. Targeting anything newer would let pyupgrade rewrite this code into
+# syntax the machines it actually runs on cannot parse, and a hook that fails to parse is a hook that
+# silently does nothing.
+target-version = "py39"
+
+src = ["plugin/lib", "plugin/tests"]
+
+[lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # import sorting
+  "B",        # bugbear
+  "UP",       # pyupgrade
+  "S",        # bandit
+  "RUF",
+]
+
+[lint.per-file-ignores]
+# Assertions and subprocesses are what a test file here is made of: every check worth having runs the
+# real command as a real process, because an in-process call proves neither the exit code nor what
+# lands on stdout. S108 is the `/tmp/...` strings inside schema fixtures, which are values being
+# validated rather than paths being opened.
+"plugin/tests/**" = ["S101", "S603", "S607", "S108"]
+
+# The one subprocess in the runtime: `ps -o ppid=` to walk the process tree, which is how a command
+# run through a tool call learns its own session id. Fixed argv, one integer interpolated, and `ps`
+# deliberately unqualified because its path differs between macOS and Linux. Suppressed here rather
+# than with an inline noqa: a noqa binds to a physical line, and the formatter chooses which line a
+# multi-line call sits on, so the suppression silently stopped covering S603 once.
+"plugin/lib/registry.py" = ["S603", "S607"]
+
+[lint.isort]
+# lib/ modules import each other by bare name, because the hook handlers put that directory on
+# sys.path rather than installing anything. Ruff cannot infer that from the tree.
+known-first-party = ["claims", "cli", "exchange_root", "hook", "hookio", "legacy", "registry",
+                     "store", "validate"]

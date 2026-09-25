@@ -24,6 +24,10 @@ import tempfile
 LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 sys.path.insert(0, str(LIB))
 
+# A wiring in the shape of the one being replaced. The lane argument is invented: the point of
+# the assertion below is that this string never reaches the injected context.
+LEGACY_COMMAND = 'bash "$HOME/.claude/hooks/session-exchange-active-now.sh" a-lane-arg'
+
 failures = []
 
 
@@ -51,10 +55,24 @@ def fixture(tmp, *, wire_legacy):
     # anything and every positive check below would still pass.
     (hooks / "review-requests-check.sh").write_text("# unrelated, working, staying\n")
 
-    wiring = {"hooks": {"SessionStart": [{"hooks": [{
-        "type": "command",
-        "command": 'bash "$HOME/.claude/hooks/session-exchange-active-now.sh" a-lane-arg',
-    }]}]}} if wire_legacy else {"hooks": {}}
+    wiring = (
+        {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": LEGACY_COMMAND,
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        if wire_legacy
+        else {"hooks": {}}
+    )
     (home / ".claude" / "settings.json").write_text(json.dumps(wiring))
 
     root = tmp / "area"
@@ -73,7 +91,11 @@ def run(event, payload, home, env=None):
     environ.update(env or {})
     done = subprocess.run(
         [sys.executable, str(LIB / "hook.py"), event],
-        input=json.dumps(payload), capture_output=True, text=True, env=environ, timeout=30,
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=environ,
+        timeout=30,
     )
     if not done.stdout.strip():
         return done.returncode, None
@@ -84,38 +106,59 @@ print("session start, with a legacy hook still wired")
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=True)
-    code, out = run("SessionStart", {
-        "hook_event_name": "SessionStart",
-        "session_id": "sess-1",
-        "cwd": str(repo),
-        "source": "startup",
-    }, home)
+    code, out = run(
+        "SessionStart",
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "sess-1",
+            "cwd": str(repo),
+            "source": "startup",
+        },
+        home,
+    )
     context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
 
     check("exits 0", code, 0)
-    check("echoes back the event that fired",
-          (out or {}).get("hookSpecificOutput", {}).get("hookEventName"), "SessionStart")
+    check(
+        "echoes back the event that fired",
+        (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
+        "SessionStart",
+    )
     check("warns that legacy hooks are still wired", "still wired" in context, True)
     check("names the wired script", "session-exchange-active-now.sh" in context, True)
     # The one on disk but not wired is inert, so it is not what the warning is about.
-    check("does not name a script that is only on disk",
-          "session_exchange_handoffs.py" in context, False)
-    check("does not mistake an unrelated hook for legacy",
-          "review-requests" in context, False)
-    check("says nothing about the command string it found the wiring in",
-          "a-lane-arg" in context, False)
+    check(
+        "does not name a script that is only on disk",
+        "session_exchange_handoffs.py" in context,
+        False,
+    )
+    check("does not mistake an unrelated hook for legacy", "review-requests" in context, False)
+    check(
+        "says nothing about the command string it found the wiring in",
+        "a-lane-arg" in context,
+        False,
+    )
 
     claim = root / ".claude" / "exchange" / "sessions" / "sess-1.json"
     check("seeded a claim under the root, not under the repo", claim.is_file(), True)
     written = json.loads(claim.read_text())
-    check("the claim knows where the session is and on what branch",
-          (written["cwd"], written.get("git_branch")), (str(repo), "main"))
+    check(
+        "the claim knows where the session is and on what branch",
+        (written["cwd"], written.get("git_branch")),
+        (str(repo), "main"),
+    )
 
     print("session end")
-    code, out = run("SessionEnd", {
-        "hook_event_name": "SessionEnd", "session_id": "sess-1",
-        "cwd": str(repo), "reason": "clear",
-    }, home)
+    code, out = run(
+        "SessionEnd",
+        {
+            "hook_event_name": "SessionEnd",
+            "session_id": "sess-1",
+            "cwd": str(repo),
+            "reason": "clear",
+        },
+        home,
+    )
     check("exits 0 and says nothing", (code, out), (0, None))
     check("the claim is gone, with nobody having had to remember", claim.exists(), False)
 
@@ -123,14 +166,23 @@ print("session start, with nothing wired and nothing wrong")
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=False)
-    code, out = run("SessionStart", {
-        "hook_event_name": "SessionStart", "session_id": "sess-2", "cwd": str(repo),
-    }, home)
+    code, out = run(
+        "SessionStart",
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "sess-2",
+            "cwd": str(repo),
+        },
+        home,
+    )
     # Break it: the warning above must be conditional. An unconditional one passes every positive
     # check and turns the injected section into something a reader learns to skip.
     check("injects nothing at all", (code, out), (0, None))
-    check("but still seeded the claim",
-          (root / ".claude" / "exchange" / "sessions" / "sess-2.json").is_file(), True)
+    check(
+        "but still seeded the claim",
+        (root / ".claude" / "exchange" / "sessions" / "sess-2.json").is_file(),
+        True,
+    )
 
 print("rule 3: no root, no output, no files")
 
@@ -138,9 +190,15 @@ with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=True)
     outside = pathlib.Path(tmp) / "elsewhere"
     outside.mkdir()
-    code, out = run("SessionStart", {
-        "hook_event_name": "SessionStart", "session_id": "sess-3", "cwd": str(outside),
-    }, home)
+    code, out = run(
+        "SessionStart",
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": "sess-3",
+            "cwd": str(outside),
+        },
+        home,
+    )
     check("silent where there is no exchange", (code, out), (0, None))
     check("and creates nothing", list(outside.iterdir()), [])
 
@@ -148,12 +206,18 @@ print("a root that was pointed at deliberately and is wrong")
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=False)
-    code, out = run("SessionStart",
-                    {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(repo)},
-                    home, env={"CC_EXCHANGE_ROOT": str(pathlib.Path(tmp) / "nowhere")})
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "s", "cwd": str(repo)},
+        home,
+        env={"CC_EXCHANGE_ROOT": str(pathlib.Path(tmp) / "nowhere")},
+    )
     context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
-    check("says so rather than falling back to the walk",
-          (code, "CC_EXCHANGE_ROOT" in context), (0, True))
+    check(
+        "says so rather than falling back to the walk",
+        (code, "CC_EXCHANGE_ROOT" in context),
+        (0, True),
+    )
 
 print("wired under an event the plugin does not handle")
 
@@ -161,10 +225,16 @@ with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=False)
     code, out = run("Stop", {"hook_event_name": "Stop", "session_id": "s", "cwd": str(repo)}, home)
     context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
-    check("reports the mismatch instead of doing nothing quietly",
-          (code, "does not handle" in context), (0, True))
-    check("and replies under the event that actually fired",
-          (out or {}).get("hookSpecificOutput", {}).get("hookEventName"), "Stop")
+    check(
+        "reports the mismatch instead of doing nothing quietly",
+        (code, "does not handle" in context),
+        (0, True),
+    )
+    check(
+        "and replies under the event that actually fired",
+        (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
+        "Stop",
+    )
 
 print("a hook may not take a session down with it")
 
@@ -181,9 +251,15 @@ with tempfile.TemporaryDirectory() as tmp:
     original = hook.HANDLERS["SessionStart"]
     hook.HANDLERS["SessionStart"] = explode
     try:
-        sys.stdin = io.StringIO(json.dumps({
-            "hook_event_name": "SessionStart", "session_id": "s", "cwd": str(repo),
-        }))
+        sys.stdin = io.StringIO(
+            json.dumps(
+                {
+                    "hook_event_name": "SessionStart",
+                    "session_id": "s",
+                    "cwd": str(repo),
+                }
+            )
+        )
         sys.stdout = captured
         code = hook.main("SessionStart")
     finally:
@@ -193,8 +269,11 @@ with tempfile.TemporaryDirectory() as tmp:
     out = json.loads(captured.getvalue())
     context = out["hookSpecificOutput"]["additionalContext"]
     check("an exception is reported, not raised", code, 0)
-    check("and it names what broke",
-          ("RuntimeError" in context, "deliberate" in context), (True, True))
+    check(
+        "and it names what broke",
+        ("RuntimeError" in context, "deliberate" in context),
+        (True, True),
+    )
     check("and says the session is unaffected", "Session unaffected" in context, True)
 
 print()

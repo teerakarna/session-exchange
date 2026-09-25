@@ -49,15 +49,20 @@ def emit(event, lines, out=None):
     Silence is a real answer and the common one: no root here, or a root with nothing to say. An
     empty section header injected every session would train the reader to skip the section.
     """
-    lines = [l for l in lines if l]
+    lines = [line for line in lines if line]
     if not lines:
         return
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": event,
-            "additionalContext": "\n".join(lines),
-        }
-    }), file=sys.stdout if out is None else out)
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "additionalContext": "\n".join(lines),
+                }
+            }
+        ),
+        file=sys.stdout if out is None else out,
+    )
 
 
 def problem(text):

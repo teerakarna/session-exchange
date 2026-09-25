@@ -18,7 +18,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 
-import exchange_root  # noqa: E402
+import exchange_root
 
 failures = []
 
@@ -65,13 +65,19 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     base = tree(tmp, areas=["work"], repos_in=["work/repo"])
     r = exchange_root.resolve(base / "work/repo")
-    check("no marker anywhere is a silent no-op", (r.root, r.rule, r.problem),
-          (None, "unmarked", None))
+    check(
+        "no marker anywhere is a silent no-op",
+        (r.root, r.rule, r.problem),
+        (None, "unmarked", None),
+    )
 
     # The override needs no marker at all - that is the point of it.
     r = exchange_root.resolve(base / "work/repo", {"CC_EXCHANGE_ROOT": str(base / "work")})
-    check("override beats the walk, with no marker present", (r.root, r.rule),
-          (base / "work", "override"))
+    check(
+        "override beats the walk, with no marker present",
+        (r.root, r.rule),
+        (base / "work", "override"),
+    )
 
     # And it wins even when a marker would have resolved.
     tree(tmp, marker_at="work/repo")
@@ -80,8 +86,11 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Set-and-wrong is a mistake, not a quiet day. Unset is rule 3; this is not.
     r = exchange_root.resolve(base / "work/repo", {"CC_EXCHANGE_ROOT": str(base / "nope")})
-    check("override pointing nowhere is loud", (r.root, r.rule, r.problem is not None),
-          (None, "override-invalid", True))
+    check(
+        "override pointing nowhere is loud",
+        (r.root, r.rule, r.problem is not None),
+        (None, "override-invalid", True),
+    )
     r = exchange_root.resolve(base / "work/repo", {"CC_EXCHANGE_ROOT": "   "})
     check("blank override falls through rather than erroring", r.rule, "marker")
 
@@ -103,27 +112,39 @@ with tempfile.TemporaryDirectory() as tmp:
 print("where init would mark")
 
 with tempfile.TemporaryDirectory() as tmp:
-    # A repo inside an area inside a directory of areas: the shape of the real workspace.
-    base = tree(tmp, areas=["projects/work", "projects/personal", "projects/public"],
-                repos_in=["projects/work/repo", "projects/personal/dotfiles"])
-    (base / "projects/CLAUDE.md").write_text("areas\n")
+    # A repo inside an area inside a directory of areas. Named for the shape and nothing else:
+    # this is the layout the resolution rules have to handle, not a layout anyone has to adopt.
+    base = tree(
+        tmp,
+        areas=["container/alpha", "container/beta", "container/gamma"],
+        repos_in=["container/alpha/repo", "container/beta/other-repo"],
+    )
+    (base / "container/CLAUDE.md").write_text("areas\n")
     (base / "CLAUDE.md").write_text("root\n")
 
-    default, candidates = exchange_root.init_candidates(base / "projects/work/repo")
-    check("defaults to the area, not the repo", default, base / "projects/work")
-    check("the repo itself is never a candidate", base / "projects/work/repo" in candidates, False)
-    check("the directory of areas is offered but not chosen",
-          (base / "projects" in candidates, default == base / "projects"), (True, False))
+    default, candidates = exchange_root.init_candidates(base / "container/alpha/repo")
+    check("defaults to the area, not the repo", default, base / "container/alpha")
+    check(
+        "the repo itself is never a candidate",
+        base / "container/alpha/repo" in candidates,
+        False,
+    )
+    check(
+        "the directory of areas is offered but not chosen",
+        (base / "container" in candidates, default == base / "container"),
+        (True, False),
+    )
 
-    default, _ = exchange_root.init_candidates(base / "projects/personal/dotfiles")
-    check("same rule from a different area", default, base / "projects/personal")
+    default, _ = exchange_root.init_candidates(base / "container/beta/other-repo")
+    check("same rule from a different area", default, base / "container/beta")
 
-    # Break it: if the sibling areas stop looking like areas, `projects` stops being refused.
-    # Without this the merge-point check could be a no-op and every assertion above would still pass.
-    for area in ("work", "personal", "public"):
-        (base / "projects" / area / "CLAUDE.md").unlink()
-    default, _ = exchange_root.init_candidates(base / "projects/work/repo")
-    check("with no sibling areas, the container is no longer refused", default, base / "projects")
+    # Break it: if the sibling areas stop looking like areas, `container` stops being refused.
+    # Without this the merge-point check could be a no-op and every assertion above would still
+    # pass.
+    for area in ("alpha", "beta", "gamma"):
+        (base / "container" / area / "CLAUDE.md").unlink()
+    default, _ = exchange_root.init_candidates(base / "container/alpha/repo")
+    check("with no sibling areas, the container is no longer refused", default, base / "container")
 
 with tempfile.TemporaryDirectory() as tmp:
     # Areas that are themselves repos are a directory of repos, which is a legitimate root.

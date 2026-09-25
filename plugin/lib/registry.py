@@ -1,8 +1,9 @@
 """Read Claude Code's own session registry.
 
 `~/.claude/sessions/*.json`, one file per live session, named for the process id and carrying
-`sessionId`, `cwd`, `name` and a per-turn `status`. This already exists and is already maintained, so
-presence is rendered from it rather than from anything this plugin asks a session to keep up to date.
+`sessionId`, `cwd`, `name` and a per-turn `status`. This already exists and is already maintained,
+so presence is rendered from it rather than from anything this plugin asks a session to keep up to
+date.
 Nobody edits a presence row again.
 
 Two things it cannot tell you, which is why claims exist alongside it:
@@ -83,8 +84,18 @@ def _parents(pid, limit=12):
             break
         chain.append(current)
         try:
-            out = subprocess.run(["ps", "-o", "ppid=", "-p", str(current)],
-                                 capture_output=True, text=True, timeout=5)
+            # The argv is fixed and the only interpolation is an integer pid, so there is no
+            # untrusted input to shell out. `ps` is left unqualified on purpose: it is /bin/ps on
+            # macOS and /usr/bin/ps on most Linux, and hardcoding either breaks the other for no
+            # gain. Ruff's S603/S607 are answered in ruff.toml rather than inline, because an
+            # inline suppression binds to a physical line and the formatter decides which line
+            # this call ends up on.
+            out = subprocess.run(
+                ["ps", "-o", "ppid=", "-p", str(current)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
         except (OSError, subprocess.SubprocessError):
             break
         parent = out.stdout.strip()
@@ -101,8 +112,11 @@ def own_entry(sessions_dir=SESSIONS_DIR):
     command run through a tool call can learn its own session id: it is not in the environment, and
     matching on cwd would pick the wrong session the moment two of them work in the same directory.
     """
-    rows = {int(r["pid"]): r for r in entries(sessions_dir, live_only=False)
-            if str(r.get("pid", "")).isdigit()}
+    rows = {
+        int(r["pid"]): r
+        for r in entries(sessions_dir, live_only=False)
+        if str(r.get("pid", "")).isdigit()
+    }
     for pid in _parents(os.getpid()):
         if pid in rows:
             return rows[pid]
