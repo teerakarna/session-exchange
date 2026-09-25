@@ -21,6 +21,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 
 import exchange_root
 
+# Every check here passes the environment it means to test, except where the rule under test is the
+# fallback to the real one. `CC_EXCHANGE_ROOT` beats every fixture below, and it is a documented
+# per-pane override that anyone using this plugin may well have set, so leaving it in place means
+# the suite fails for five unrelated reasons on the machines most likely to be running it.
+os.environ.pop("CC_EXCHANGE_ROOT", None)
+
 failures = []
 
 
@@ -161,7 +167,7 @@ with tempfile.TemporaryDirectory() as tmp:
 print("the rules a sweep found nothing asserting")
 
 # Every check below exists because a mutation of the rule it names survived. `exchange_root` got its
-# table after ten other modules had one, and ten of its twenty-one rules turned out to be
+# table after four other modules had one, and ten of its twenty-two rules turned out to be
 # asserted by nothing: good coverage of the answers it gives, almost none of the reasons.
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -267,11 +273,17 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # A file rather than a directory. `iterdir` raises `NotADirectoryError`, and this is called
     # while deciding what to suggest, so raising turns a cosmetic oddity into a failed `init`.
-    check(
-        "something that cannot be listed is not a merge point",
-        exchange_root.is_merge_point(base / "CLAUDE.md"),
-        False,
-    )
+    #
+    # Caught rather than called bare, because the rule includes "and not an exception either" and a
+    # bare call cannot say that: the expression raises before `check` is entered, so the name never
+    # prints, `failures` is never appended, and the nonzero exit comes from the traceback instead of
+    # from the assertion. The sweep scores that as a catch, off the crash rather than off the check,
+    # which is the thing this file exists to stop being satisfied on paper.
+    try:
+        listed = exchange_root.is_merge_point(base / "CLAUDE.md")
+    except Exception as exc:
+        listed = f"raised {type(exc).__name__}"
+    check("something that cannot be listed is not a merge point", listed, False)
 
 print()
 if failures:

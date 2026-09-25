@@ -206,7 +206,7 @@ buys is the round trip, a format failure found in under a second rather than two
 log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: six tables is 86 mutations and just under four
+taste. A sweep is one full suite run per mutation: six tables is 87 mutations and just over four
 minutes, and the two newest tables are half of that on their own, so the five modules `UNSWEPT` still
 lists would take every push past six or seven minutes to re-answer a question the last push already
 answered about code it did not touch. So `ci` sweeps only the

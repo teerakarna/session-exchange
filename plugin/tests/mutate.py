@@ -487,7 +487,7 @@ HOOK = [
 
 # Root resolution, which the plan calls the test that must never regress: every other module is
 # handed a root and does not look for one, so a wrong answer here is the one bug that can show a
-# session in one area the presence and handoffs of another. Ten of the eighteen rules below had
+# session in one area the presence and handoffs of another. Ten of the twenty-two rules below had
 # nothing asserting them when this table was written, which is the arithmetic that made it worth
 # writing rather than a suspicion about it.
 EXCHANGE_ROOT = [
@@ -626,6 +626,25 @@ EXCHANGE_ROOT = [
         rule="the default skips a merge point rather than taking the nearest candidate",
         old="    default = next((d for d in candidates if not is_merge_point(d)), None)",
         new="    default = candidates[0] if candidates else None",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        # Skipped for the default and still offered are two rules, not one, and the second had no
+        # mutation: filtering merge points out of `candidates` leaves `default` identical,
+        # so every check on the default passes and the only thing lost is a human's ability to
+        # override the suggestion with the answer the tool declined to pick.
+        rule="a merge point is still offered, so the suggestion can be overridden",
+        old=(
+            "    candidates = [d for d in ceiling.parents "
+            'if (d / "CLAUDE.md").is_file() and d != home]'
+        ),
+        new=(
+            "    candidates = [\n"
+            "        d for d in ceiling.parents\n"
+            '        if (d / "CLAUDE.md").is_file() and d != home and not is_merge_point(d)\n'
+            "    ]"
+        ),
         caught_by="test_exchange_root.py",
     ),
     Mutation(
@@ -801,7 +820,7 @@ CLAIMS = [
         module="claims",
         rule="clearing a field removes it rather than emptying it",
         old="        claim.pop(field, None)",
-        new="        pass",
+        new="        claim[field] = []",
         caught_by="test_store_claims.py",
     ),
     Mutation(
