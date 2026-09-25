@@ -79,12 +79,19 @@ print("and each handler runs the entrypoint it claims to")
 for handler, event in (("session-start.sh", "SessionStart"), ("session-end.sh", "SessionEnd")):
     text = (PLUGIN / "hooks-handlers" / handler).read_text(encoding="utf-8")
     check(f"{handler} passes {event}", f'hook.py" {event}' in text, True)
-    # `set -e` in a hook handler turns any failure into a failed session start.
+    # `set -e` in a hook handler turns any future unguarded failure into a failed session, which is
+    # rule 2. Read as flags rather than as a substring: the old form here was
+    # `("set -e" in text and "set -eu" in text) or "|| exit 0" in text`, and both handlers contain
+    # `|| exit 0`, so the right side was always true and the check passed whatever the `set` line
+    # said. `set -euo pipefail` went through it green.
     check(
-        f"{handler} does not exit non-zero on failure",
-        ("set -e" in text and "set -eu" in text) or "|| exit 0" in text,
-        True,
+        f"{handler} does not turn on set -e",
+        [flags for flags in re.findall(r"^set -(\w+)", text, re.M) if "e" in flags],
+        [],
     )
+    # And the reason it can afford not to: every call that can fail says so itself.
+    guarded = f'hook.py" {event} || exit 0' in text
+    check(f"{handler} guards the interpreter it calls", guarded, True)
 
 print("the schemas the code loads are all present")
 

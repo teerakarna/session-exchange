@@ -190,7 +190,9 @@ exists inside CI.
 | Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |
 | Secrets | none, unless you have `gitleaks` installed | `secrets`, every push, full history |
 
-`.pre-commit-config.yaml` wires the first two tiers to git, if you want them there:
+`.pre-commit-config.yaml` wires lint, shellcheck and the suite to git, if you want them there.
+Not the two `claude plugin validate` calls, which need `claude` on PATH, so run those by hand or
+leave them to `checks`:
 
 ```sh
 uvx pre-commit install --install-hooks   # lint and shape on commit, the suite on push
