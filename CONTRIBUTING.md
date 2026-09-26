@@ -61,12 +61,14 @@ every mutation still matches the source it claims to patch, and that `TABLES` an
 account for every module in `plugin/lib`. Both failures are otherwise silent. A mutation whose text
 has drifted tests nothing while still reporting a catch, and none of the eleven modules had a table in
 the repo at all before this, which is the same "thorough where it was pointed" problem one level up.
-Six have one now. Of the five that do not, `NOT_YET` names the two that are owed one and `DECLINED`
-names three with the reason recorded next to each: `cli`, `ledger` and `reconcile` are 1100 of the 1300
-unswept lines, and every failure mode they have is a wrong answer on a command a human just typed,
+Eight have one now, and `NOT_YET` is empty. The three that do not are all in `DECLINED`, with the
+reason recorded next to each: `cli`, `ledger` and `reconcile` are 1087 lines, about half of
+`plugin/lib`, and every failure mode they have is a wrong answer on a command a human just typed,
 which is a cheaper feedback loop than a sweep whose cost is linear in the size of the tables. The split
 exists because a debt list that quietly contains permanent entries stops being read as a debt list.
 Reversing one of those decisions is an edit to a dict, which is the point of writing the reason down.
+`NOT_YET` stays as an empty set rather than being deleted, because a new module in `plugin/lib` fails
+the accounting until its name goes into one of the two, and that forced choice is the mechanism.
 
 Writing it down cost two more instances of the defect, in the harness, both found by probing it
 rather than by reading it. The scratch copy was `plugin/` alone while `test_plugin_layout.py` reads
@@ -206,12 +208,11 @@ buys is the round trip, a format failure found in under a second rather than two
 log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: six tables is 87 mutations and just over four
-minutes, and the two newest tables are half of that on their own, so the five modules `UNSWEPT` still
-lists would take every push past six or seven minutes to re-answer a question the last push already
-answered about code it did not touch. So `ci` sweeps only the
-modules the change could have affected, and the full sweep runs weekly where the length of it does not
-matter.
+taste. A sweep is one full suite run per mutation: eight tables is 135 mutations and seven minutes ten
+seconds locally, measured, where six tables was just over four. That is already past what a push
+should carry to re-answer a question the last push answered about code it did not touch, and it grows
+with every table added. So `ci` sweeps only the modules the change could have affected, and the full
+sweep runs weekly where the length of it does not matter.
 
 That narrowing is in `mutate.py --since`, not in the workflow, so the command CI runs is the command
 you run. It is wider than "the lib modules that changed", and the extra width is the part that

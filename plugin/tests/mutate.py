@@ -1263,8 +1263,8 @@ TABLES = {
 NOT_YET = set()
 
 # Not "not yet". Decided against, with the reason next to the name, because a debt list that
-# silently contains permanent entries stops being a debt list. These three are 1100 of the 1300
-# unswept lines and every one of their failure modes is a wrong answer on a command a human just
+# silently contains permanent entries stops being a debt list. These three are 1087 lines, about
+# half of `plugin/lib`, and every one of their failure modes is a wrong answer on a command a human
 # typed, which is the cheapest possible feedback loop; the sweep's cost, by contrast, is linear in
 # table size and paid on every push. Reversing one of these is an edit to this dict, which is the
 # point of writing the reason down rather than the decision.
