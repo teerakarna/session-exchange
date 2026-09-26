@@ -32,6 +32,11 @@ def git_branch(cwd):
     Read rather than shelled out: a hook runs on every session start, and `git` is both slower and
     one more thing that can be missing. Detached HEAD holds a bare sha, which is not a branch, so it
     reads as None rather than as a 40-character branch name.
+
+    `UnicodeDecodeError` is next to `OSError` because it is the same shape of failure and was not
+    covered: a real HEAD is ASCII, but a truncated or corrupt one holds whatever is on disk, and
+    decoding is not an `OSError`. This runs inside `seed`, so an exception here is not a missing
+    branch, it is a session with no claim at all and no presence for anyone else to read.
     """
     for candidate in (pathlib.Path(cwd), *pathlib.Path(cwd).parents):
         head = candidate / ".git" / "HEAD"
@@ -39,7 +44,7 @@ def git_branch(cwd):
             continue
         try:
             text = head.read_text(encoding="utf-8").strip()
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             return None
         return text[len("ref: refs/heads/") :] if text.startswith("ref: refs/heads/") else None
     return None

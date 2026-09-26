@@ -485,7 +485,370 @@ HOOK = [
     ),
 ]
 
+# Root resolution, which the plan calls the test that must never regress: every other module is
+# handed a root and does not look for one, so a wrong answer here is the one bug that can show a
+# session in one area the presence and handoffs of another. Ten of the twenty-two rules below had
+# nothing asserting them when this table was written, which is the arithmetic that made it worth
+# writing rather than a suspicion about it.
+EXCHANGE_ROOT = [
+    Mutation(
+        module="exchange_root",
+        rule="the override is consulted before the walk, not after",
+        old="    if override:",
+        new="    if False:",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="whitespace in the override means unset, not a directory named with spaces",
+        old='    override = (environ.get(OVERRIDE_VAR) or "").strip()',
+        new='    override = environ.get(OVERRIDE_VAR) or ""',
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="an override that is not a directory resolves to no root",
+        old="        if not path.is_dir():",
+        new="        if False:",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="and says which variable it was and what it was set to",
+        old='                f"{OVERRIDE_VAR} is set to {override!r}, which is not a directory.",',
+        new='                "the exchange root is not a directory.",',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="an override is resolved, so every root the plugin hands out is absolute and real",
+        old='        return Resolution(path.resolve(), "override")',
+        new='        return Resolution(path, "override")',
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a cwd that is not a directory is a reported problem, not an unmarked walk",
+        old="    if not start.is_dir():",
+        new="    if False:",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="the walk goes up, so the nearest marker wins and nested roots do not leak",
+        old="    for candidate in (start.resolve(), *start.resolve().parents):",
+        new="    for candidate in reversed([start.resolve(), *start.resolve().parents]):",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="the walk starts at cwd, so a marked directory resolves to itself",
+        old="    for candidate in (start.resolve(), *start.resolve().parents):",
+        new="    for candidate in start.resolve().parents:",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="the marker has to be a file, so a directory of that name marks nothing",
+        old="        if (candidate / MARKER).is_file():",
+        new="        if (candidate / MARKER).exists():",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="nothing found is no root, not this directory by default",
+        old='    return Resolution(None, "unmarked")',
+        new='    return Resolution(pathlib.Path(cwd), "unmarked")',
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a marker that is not there is a problem, not empty config",
+        old='        return None, f"{path} does not exist."',
+        new="        return {}, None",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a marker that does not parse is a problem, not empty config",
+        old='        return None, f"{path} is not valid JSON: {exc}."',
+        new="        return {}, None",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a marker holding something other than an object is a problem too",
+        old="    if not isinstance(config, dict):",
+        new="    if False:",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a worktree is a repo, where .git is a file rather than a directory",
+        old='        if (candidate / ".git").exists():',
+        new='        if (candidate / ".git").is_dir():',
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="init marks strictly above the repo: a repo-scoped exchange coordinates nothing",
+        old=(
+            "    candidates = [d for d in ceiling.parents "
+            'if (d / "CLAUDE.md").is_file() and d != home]'
+        ),
+        new=(
+            "    candidates = [\n"
+            "        d for d in [ceiling, *ceiling.parents]\n"
+            '        if (d / "CLAUDE.md").is_file() and d != home\n'
+            "    ]"
+        ),
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="the ceiling is the repo, not cwd, so init from a subdirectory answers the same",
+        old="    ceiling = repo if repo else start",
+        new="    ceiling = start",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="home is never a candidate, however many CLAUDE.md files are above it",
+        old=(
+            "    candidates = [d for d in ceiling.parents "
+            'if (d / "CLAUDE.md").is_file() and d != home]'
+        ),
+        new='    candidates = [d for d in ceiling.parents if (d / "CLAUDE.md").is_file()]',
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="the default skips a merge point rather than taking the nearest candidate",
+        old="    default = next((d for d in candidates if not is_merge_point(d)), None)",
+        new="    default = candidates[0] if candidates else None",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        # Skipped for the default and still offered are two rules, not one, and the second had no
+        # mutation: filtering merge points out of `candidates` leaves `default` identical,
+        # so every check on the default passes and the only thing lost is a human's ability to
+        # override the suggestion with the answer the tool declined to pick.
+        rule="a merge point is still offered, so the suggestion can be overridden",
+        old=(
+            "    candidates = [d for d in ceiling.parents "
+            'if (d / "CLAUDE.md").is_file() and d != home]'
+        ),
+        new=(
+            "    candidates = [\n"
+            "        d for d in ceiling.parents\n"
+            '        if (d / "CLAUDE.md").is_file() and d != home and not is_merge_point(d)\n'
+            "    ]"
+        ),
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="two sibling areas is already a merge point, not three",
+        old="    return len(areas) >= 2",
+        new="    return len(areas) >= 3",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="children that are repos do not make their parent a merge point",
+        old=(
+            "    areas = [c for c in children "
+            'if (c / "CLAUDE.md").is_file() and not (c / ".git").exists()]'
+        ),
+        new='    areas = [c for c in children if (c / "CLAUDE.md").is_file()]',
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a path that cannot be listed is not a merge point, and is not an exception either",
+        old="    except OSError:\n        return False",
+        new="    except OSError:\n        raise",
+        caught_by="test_exchange_root.py",
+    ),
+]
+
+# Claims are the only genuinely new state this plugin keeps, and the only state another session
+# reads. The registry can say a session is alive; nothing but a claim can say what it is doing, and
+# a wrong claim is worse than none - it is a peer confidently reported as working somewhere it is
+# not, which is the failure the whole exchange exists to remove.
+CLAIMS = [
+    Mutation(
+        module="claims",
+        rule="claims live in the store, not loose in the root",
+        old='    return store.sessions_dir(root) / f"{session_id}.json"',
+        new='    return pathlib.Path(root) / f"{session_id}.json"',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="the branch is found from a subdirectory, not only from the repo root",
+        old="    for candidate in (pathlib.Path(cwd), *pathlib.Path(cwd).parents):",
+        new="    for candidate in (pathlib.Path(cwd),):",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="the ref prefix is stripped, so the field holds a branch and not a ref",
+        old=(
+            '        return text[len("ref: refs/heads/") :] '
+            'if text.startswith("ref: refs/heads/") else None'
+        ),
+        new='        return text if text.startswith("ref: refs/heads/") else None',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a detached head is no branch, not a sha wearing the name of one",
+        old=(
+            '        return text[len("ref: refs/heads/") :] '
+            'if text.startswith("ref: refs/heads/") else None'
+        ),
+        new=(
+            '        return text[len("ref: refs/heads/") :] '
+            'if text.startswith("ref: refs/heads/") else text'
+        ),
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a HEAD that cannot be read is no branch, and not an exception either",
+        old="        except (OSError, UnicodeDecodeError):\n            return None",
+        new="        except (OSError, UnicodeDecodeError):\n            raise",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a HEAD that is not text is one of the ways it cannot be read",
+        old="        except (OSError, UnicodeDecodeError):",
+        new="        except OSError:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="re-seeding keeps what the session said about itself",
+        old="    claim = dict(existing) if existing else {}",
+        new="    claim = {}",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a seeded claim carries the session it is about",
+        old="    claim.update(session_id=session_id, cwd=str(cwd), updated_at=store.now())",
+        new="    claim.update(cwd=str(cwd), updated_at=store.now())",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a branch that has gone away is removed rather than left behind",
+        old='    elif "git_branch" in claim:\n        del claim["git_branch"]',
+        new='    elif "git_branch" in claim:\n        pass',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a seed that could not be written returns the problem, not the claim",
+        old=(
+            "    write_problem = store.write_json(path(root, session_id), claim, SCHEMA)\n"
+            "    return (None, write_problem) if write_problem else (claim, problem)"
+        ),
+        new=(
+            "    write_problem = store.write_json(path(root, session_id), claim, SCHEMA)\n"
+            "    return claim, problem"
+        ),
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="an unusable session id is refused by update too, not only by seed",
+        old=(
+            "    session_id = store.safe_id(session_id)\n"
+            "    if session_id is None:\n"
+            '        return None, "session id is not usable as a filename"'
+        ),
+        new=(
+            "    session_id = store.safe_id(session_id)\n"
+            "    if session_id is None:\n"
+            "        return None, None"
+        ),
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="updating a claim that is not there explains itself rather than half-succeeding",
+        old=(
+            "        return None, problem or "
+            '"no claim for this session yet; it is seeded at session start"'
+        ),
+        new="        return claim, None",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="an empty focus is a focus being cleared, not an argument that was not passed",
+        old="    if focus is not None:",
+        new="    if focus:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="replacing a list deduplicates it, the same as adding does",
+        old="        claim[field] = list(dict.fromkeys(values))",
+        new="        claim[field] = list(values)",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="adding keeps what was already there",
+        old="        claim[field] = list(dict.fromkeys(list(claim.get(field, [])) + list(values)))",
+        new="        claim[field] = list(dict.fromkeys(list(values)))",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="adding deduplicates rather than repeating a repo the session already named",
+        old="        claim[field] = list(dict.fromkeys(list(claim.get(field, [])) + list(values)))",
+        new="        claim[field] = list(claim.get(field, [])) + list(values)",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="clearing a field removes it rather than emptying it",
+        old="        claim.pop(field, None)",
+        new="        claim[field] = []",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="an update touches the timestamp, or a session that just spoke reads as stale",
+        old='    claim["updated_at"] = store.now()',
+        new="    pass",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="clearing a claim that is already gone is success, because session end fires twice",
+        old="        path(root, session_id).unlink(missing_ok=True)",
+        new="        path(root, session_id).unlink()",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a claim that could not be cleared says so, rather than looking like a live peer",
+        old='        return f"could not clear claim: {exc}"',
+        new="        return None",
+        caught_by="test_store_claims.py",
+    ),
+]
+
 TABLES = {
+    "claims": CLAIMS,
+    "exchange_root": EXCHANGE_ROOT,
     "hook": HOOK,
     "hookio": HOOKIO,
     "store": STORE,
@@ -497,14 +860,12 @@ TABLES = {
 # plus the keys of TABLES are exactly what is in `plugin/lib`, so adding a module without deciding
 # which of the three it belongs in fails the build. Tracked as issue #8.
 NOT_YET = {
-    "claims",
-    "exchange_root",
     "legacy",
     "registry",
 }
 
 # Not "not yet". Decided against, with the reason next to the name, because a debt list that
-# silently contains permanent entries stops being a debt list. These three are 1100 of the 1600
+# silently contains permanent entries stops being a debt list. These three are 1100 of the 1300
 # unswept lines and every one of their failure modes is a wrong answer on a command a human just
 # typed, which is the cheapest possible feedback loop; the sweep's cost, by contrast, is linear in
 # table size and paid on every push. Reversing one of these is an edit to this dict, which is the

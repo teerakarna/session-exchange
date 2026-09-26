@@ -192,8 +192,8 @@ jobs:
   #
   # Its own job rather than a step in `checks`, which the cost rule in CONTRIBUTING.md would otherwise
   # say. Three reasons, and the arithmetic was measured rather than assumed. It runs the full suite
-  # once per mutation, plus the baseline - forty-six runs and just over two minutes locally for the
-  # four tables there are now - so as a step it would sit behind or in front of a lint that takes
+  # once per mutation, plus the baseline - eighty-eight runs and just over four minutes locally for
+  # the six tables there are now - so as a step it would sit behind or in front of a lint that takes
   # under a second, and either order is wrong: last means slow feedback on a typo, first means the
   # cheap checks wait on it. Its failure is
   # also categorically different from any other step's, naming a rule nothing asserts rather than a
@@ -219,12 +219,13 @@ jobs:
   #
   # Narrowed to what the change could have broken, rather than every table, and that is the one tier
   # in this workflow. A sweep is one full suite run per mutation, so its cost is linear in the size of
-  # the tables: four modules is 45 mutations and just over two minutes, and the fourth table alone
-  # added 48 seconds of that, so the seven modules `UNSWEPT` still lists would put every future push
-  # well past five minutes to re-answer a question the last push already answered about code this one
-  # did not touch. Nothing else here grows that way, which is why nothing
-  # else here is tiered - the matrix is four fixed legs, and making the PR gate weaker than the main
-  # gate is the failure mode this repo is about.
+  # the tables: six modules is 87 mutations, just over four minutes locally and between four and a
+  # half and four and three quarters on a runner, and the two newest tables are half of that on their
+  # own. So the five modules `UNSWEPT` still lists would put every future push past six or seven
+  # minutes to re-answer a question the last push already answered about code it did not touch.
+  # Nothing else here grows that way, which is why nothing else here is tiered - the matrix is four
+  # fixed legs, and making the PR gate weaker than the main gate is the failure mode this repo is
+  # about.
   #
   # The narrowing is in `mutate.py --since`, not in this file, so the same command is the local one.
   # `targets` there derives the module list, and it is wider than "the lib files that changed": a test

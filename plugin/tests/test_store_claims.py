@@ -192,6 +192,97 @@ with tempfile.TemporaryDirectory() as tmp:
         (7, True),
     )
 
+print("the rules a sweep found nothing asserting")
+
+# Every check below exists because a mutation of the rule it names survived. The pattern in what
+# survived is worth naming: the happy path of `seed`, `update` and `clear` was asserted thoroughly,
+# and every failure path of all three was asserted by nothing. A claim that could not be written and
+# one that was written look the same to a caller that only ever reads the success case.
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    (root / ".git").mkdir()
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (root / "deep" / "nested").mkdir(parents=True)
+
+    # The walk up. `cwd` is wherever the session was started, which is usually not the repo root,
+    # and the checks above only ever asked from the root - so stopping at `cwd` would have passed
+    # every one of them and lost the branch for anyone working in a subdirectory.
+    check(
+        "the branch is found from a subdirectory, not only from the repo root",
+        claims.git_branch(root / "deep" / "nested"),
+        "main",
+    )
+
+    # A HEAD that is not valid UTF-8. This runs inside `seed`, so an exception here is not a missing
+    # branch, it is no claim written at all: the session would be invisible to every other one
+    # because a byte on disk was wrong. Decoding is not an `OSError`, which is why the guard next to
+    # this one had to be widened before the check could be written.
+    (root / ".git" / "HEAD").write_bytes(b"ref: refs/heads/\xff\xfe\n")
+    try:
+        branch = claims.git_branch(root)
+    except Exception as exc:
+        branch = f"raised {type(exc).__name__}"
+    check("a HEAD that cannot be read is no branch, and not an exception either", branch, None)
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    # A directory where the claim file goes. Contrived as a cause, ordinary as an effect: a full
+    # disk, a read-only mount and a permission change all arrive at the same place, and the caller
+    # has to be able to tell "claimed" from "did not claim".
+    claims.path(root, "s1").mkdir(parents=True)
+    claim, problem = claims.seed(root, "s1", root)
+    check(
+        "a seed that could not be written returns the problem, not the claim",
+        (claim, problem is not None),
+        (None, True),
+    )
+
+    # And the same file standing in the way of `clear`. Returning None here would leave a claim on
+    # disk that presence goes on rendering, so a session that ended reads as a live peer.
+    problem = claims.clear(root, "s1")
+    check("a claim that could not be cleared says so", problem is not None, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    claims.seed(root, "s1", root)
+
+    # `update` gets its id from the same payload `seed` does, but it is also reachable from
+    # `exchange claim`, so it does its own check rather than trusting the caller's.
+    claim, problem = claims.update(root, "s1/../escape", focus="x")
+    check(
+        "an unusable session id is refused by update too, not only by seed",
+        (claim, problem is not None),
+        (None, True),
+    )
+
+    claims.update(root, "s1", focus="the thing")
+    claim, _ = claims.update(root, "s1", focus="")
+    # `if focus:` instead of `if focus is not None:` is the same mistake as reading an empty string
+    # as an absent argument, and it means there is no way to say "I am no longer on anything".
+    check("an empty focus is a focus being cleared, not an argument not passed", claim["focus"], "")
+
+    claim, _ = claims.update(root, "s1", replace={"paths": ["a", "a", "b"]})
+    check("replacing a list deduplicates it, the same as adding does", claim["paths"], ["a", "b"])
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    # Seeded by hand with a timestamp from years ago rather than by calling `seed` twice: `now()` is
+    # seconds-precision, so two calls in the same second are the same string and the check would
+    # pass or fail on how fast the machine is.
+    was = "2020-01-01T00:00:00Z"
+    store.write_json(
+        claims.path(root, "s1"),
+        {"session_id": "s1", "cwd": str(root), "updated_at": was},
+        CLAIM_SCHEMA,
+    )
+    claim, _ = claims.update(root, "s1", focus="speaking now")
+    check(
+        "an update touches the timestamp, or a session that just spoke reads as stale",
+        claim["updated_at"] != was,
+        True,
+    )
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
