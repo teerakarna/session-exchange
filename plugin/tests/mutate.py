@@ -1312,6 +1312,20 @@ def targets(paths):
     gets bypassed, which is worse than the hole it was closing. The note says the change went
     unswept, and the weekly full sweep does not cover it either: `UNSWEPT` means unswept
     everywhere.
+
+    A changed test file that no `caught_by` names gets a note for the same reason, which it did not
+    for the first three tables (#24). Both halves were defensible alone - a file the tables do not
+    reference genuinely cannot be swept, and the unswept notes were about lib modules - and together
+    they printed "nothing that a sweep can measure changed" over a diff that added a test file and
+    239 lines of checks. True, and not what a reader takes from it. `test_handlers.py` is the
+    permanent case: the handlers are shell, which is outside anything this file can patch.
+
+    The note says "no table maps this change" rather than "nothing measures it", because those are
+    not the same and `test_cli.py` is the difference. It is a real catcher - the sweep prints it
+    alongside the named file for several `registry` and `legacy` mutations - while being no
+    mutation's `caught_by`, since that field records the file that has to object rather than every
+    file that does. So a change to it narrows to nothing and is honestly described as unmapped, not
+    as unmeasured. Tracked as #27.
     """
     if INSTRUMENT & set(paths):
         return sorted(TABLES), ["the sweep's own instrument changed, so every table is reswept"]
@@ -1336,7 +1350,10 @@ def targets(paths):
                     f"{name} changed and has no table yet, so this change goes unswept (#8)"
                 )
         elif parts[1] == "tests":
-            modules |= by_test.get(parts[2], set())
+            named = by_test.get(parts[2], set())
+            modules |= named
+            if not named:
+                notes.append(f"{parts[2]} is named by no mutation, so no table maps this change")
     return sorted(modules), notes
 
 

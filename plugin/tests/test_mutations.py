@@ -588,10 +588,12 @@ check(
     ),
     ([], []),
 )
+# This one used to assert `([], [])`, which was #24 written down as a rule: silence about a changed
+# test file nothing measures. It selects nothing, which was right, and said nothing, which was not.
 check(
-    "and a test file that catches no mutation selects nothing either",
+    "and a test file that catches no mutation selects nothing, but is not silent about it",
     targets_with(["plugin/tests/test_cli.py"]),
-    ([], []),
+    ([], ["test_cli.py is named by no mutation, so no table maps this change"]),
 )
 # The shape filter is three conditions and the probe found two of them deletable: with the `plugin`
 # test or the extension test gone, nothing in the suite objected. Both are the same failure, a path
@@ -630,6 +632,18 @@ check(
 modules, notes = targets_with(["plugin/lib/notyet.py"])
 check("a module still owed a table selects nothing", modules, [])
 check("and says the change went unswept", "goes unswept" in " ".join(notes), True)
+
+# The same hole one step over, and the one that shipped: a changed test file no `caught_by` names
+# mapped to nothing and said nothing, so a diff that added a whole test file printed "nothing that a
+# sweep can measure changed". The first of these two could not have failed before; the second is the
+# fix. `test_handlers.py` is the permanent instance, the handlers being shell.
+modules, notes = targets_with(["plugin/tests/test_store_claims.py"])
+check("a test file a mutation names selects its module", modules, ["store"])
+check("and says nothing, because it was measured", notes, [])
+modules, notes = targets_with(["plugin/tests/test_handlers.py"])
+check("a test file no mutation names selects nothing", modules, [])
+check("but says no table maps it", "named by no mutation" in " ".join(notes), True)
+check("and names the file, not just the fact", "test_handlers.py" in " ".join(notes), True)
 
 docs = (["README.md"], None)
 code, printed = run_main(["--since", "main"], tables=TWO, caught=True, changed=docs)
