@@ -846,6 +846,178 @@ CLAIMS = [
     ),
 ]
 
+# Written before `test_legacy.py` existed, on the assumption that the end-to-end files already held
+# most of this module up: `test_hook.py` has a whole `wire_legacy` fixture and `test_cli.py` drives
+# `doctor` through it. Five of the nineteen were caught by something other than the file named here,
+# which the harness scores as a survivor precisely so a guess like that cannot pass quietly, and in
+# all five the only objection came from the new unit file. What the end-to-end fixtures pin down is
+# the rendered warning; these five are the cases the fixtures never produce.
+#
+# The most instructive is `double_fire`. In `test_cli.py` the legacy script is on disk *and* wired
+# in every fixture that has one, so reading `on_disk` there gives the same answer as `wired` -
+# two inputs that agree cannot say which one was read. The distinction is the entire point of the
+# field: an unwired script is inert, a wired one doubles the SessionStart injection.
+LEGACY = [
+    Mutation(
+        module="legacy",
+        # The module's first documented rule, and the one a generalised tool has to keep: two of the
+        # scripts carry one environment's project prefix, so matching literals would either ship
+        # another workspace's name inside the plugin or stop matching the moment one is renamed.
+        rule="detection is by shape, not by literal name",
+        old="    return any(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)",
+        new="    return any(name == pattern for pattern in LEGACY_GLOBS)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="one glob matching is enough, since the scripts are four unrelated shapes",
+        old="    return any(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)",
+        new="    return all(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a hooks directory that is not there is empty, not an exception",
+        old="    if not hooks_dir.is_dir():",
+        new="    if False:",
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a legacy script has to be a file, not a directory named like one",
+        old=(
+            "    return sorted(p for p in hooks_dir.iterdir() "
+            "if p.is_file() and looks_legacy(p.name))"
+        ),
+        new="    return sorted(p for p in hooks_dir.iterdir() if looks_legacy(p.name))",
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="the user settings file is searched, because that is where the old pair was wired",
+        old=(
+            "    found = [user_settings] "
+            "if user_settings and pathlib.Path(user_settings).is_file() else []"
+        ),
+        new="    found = []",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a root's own settings.local.json is searched",
+        old='        root / ".claude" / "settings.local.json",',
+        new='        root / ".claude" / "never-a-real-file.json",',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        # The per-repo wiring being migrated away from lives exactly one level down, so losing this
+        # is losing the common case while the user-settings case goes on passing.
+        rule="and so is each repo one level under it",
+        old='        *sorted(root.glob("*/.claude/settings.local.json")),',
+        new='        *sorted(root.glob(".claude/settings.local.json")),',
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a string anywhere in settings is a string that was read",
+        old="    if isinstance(obj, str):\n        yield obj",
+        new='    if isinstance(obj, str):\n        yield ""',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="the walk goes into dicts, which is where every documented wiring is",
+        old="        for value in obj.values():",
+        new="        for value in []:",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="and into lists, which is the shape of a hooks array",
+        old="        for value in obj:\n            yield from _strings(value)",
+        new="        for value in []:\n            yield from _strings(value)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a settings file that is not there is not a problem worth reporting",
+        old="        except FileNotFoundError:\n            continue",
+        new=(
+            "        except FileNotFoundError:\n"
+            '            problems.append(f"{path} is missing")\n'
+            "            continue"
+        ),
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a settings file that cannot be read is reported as unknown, not as clean",
+        old=(
+            '            problems.append(f"{path} could not be read, '
+            'so wiring there is unknown: {exc}")'
+        ),
+        new="            pass",
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a command in quotes is still split into tokens",
+        old='            for token in text.replace(\'"\', " ").replace("\'", " ").split():',
+        new="            for token in text.split():",
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="a token is reduced to its basename, or a path never matches a glob",
+        old="                name = pathlib.PurePath(token).name",
+        new="                name = token",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        # The privacy rule, and the only one here whose failure is a diagnostic quoting another
+        # environment's arguments back at a log to establish a fact the basename already makes.
+        rule="only the script's name is reported, never the command string it sat in",
+        old="                    names.add(name)",
+        new="                    names.add(text)",
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="something that is not a legacy script is not a wiring",
+        old="                if looks_legacy(name):",
+        new="                if True:",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="what is on disk is reported",
+        old='        "on_disk": on_disk,',
+        new='        "on_disk": [],',
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        # The distinction the whole guard turns on: an unwired script on disk is inert, a wired one
+        # fires alongside the plugin and doubles the SessionStart injection.
+        rule="a doubled fire is a wiring, not a file on disk",
+        old='        "double_fire": bool(wired),',
+        new='        "double_fire": bool(on_disk),',
+        caught_by="test_legacy.py",
+    ),
+    Mutation(
+        module="legacy",
+        rule="no root means no settings to search, rather than a crash",
+        old=(
+            "    wired, problems = wirings(settings_files(root, user_settings)) "
+            "if root else ([], [])"
+        ),
+        new="    wired, problems = wirings(settings_files(root, user_settings))",
+        caught_by="test_legacy.py",
+    ),
+]
+
 REGISTRY = [
     Mutation(
         module="registry",
@@ -1070,6 +1242,7 @@ TABLES = {
     "exchange_root": EXCHANGE_ROOT,
     "hook": HOOK,
     "hookio": HOOKIO,
+    "legacy": LEGACY,
     "registry": REGISTRY,
     "store": STORE,
     "validate": VALIDATE,
@@ -1079,9 +1252,15 @@ TABLES = {
 # to look at and a new module cannot join it by accident. `test_mutations.py` asserts these two sets
 # plus the keys of TABLES are exactly what is in `plugin/lib`, so adding a module without deciding
 # which of the three it belongs in fails the build. Tracked as issue #8.
-NOT_YET = {
-    "legacy",
-}
+#
+# Empty as of the table below, which closes #8: the five modules it was narrowed to all have one,
+# and the other three are in `DECLINED` with a reason rather than here. It stays as an empty set
+# rather than being deleted, because it is where the next module lands: a new file in `plugin/lib`
+# fails
+# the accounting in `test_mutations.py` until someone puts its name in one of the three, and that
+# forced decision is the whole mechanism. The checks that read this are given fixtures rather than
+# real members, so they can still fail with nothing in here.
+NOT_YET = set()
 
 # Not "not yet". Decided against, with the reason next to the name, because a debt list that
 # silently contains permanent entries stops being a debt list. These three are 1100 of the 1300
