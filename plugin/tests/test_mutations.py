@@ -546,13 +546,25 @@ MAPPED = {
 }
 
 
-def targets_with(paths):
-    real = mutate.TABLES
+def targets_with(paths, not_yet=None, declined=None):
+    """`targets` against fixtures rather than against the real tables and the real debt list.
+
+    The debt lists are swapped for the same reason `TABLES` is: they are meant to empty out. Keyed
+    on a real member, the two checks below stop being able to fail the moment the last table owed
+    under #8 is written, and what they would report then is a pass.
+    """
+    real = (mutate.TABLES, mutate.NOT_YET, mutate.DECLINED)
     mutate.TABLES = MAPPED
+    mutate.NOT_YET = {"notyet"} if not_yet is None else not_yet
+    mutate.DECLINED = (
+        {"declined": "asserted here, not read from the real reason"}
+        if declined is None
+        else declined
+    )
     try:
         return mutate.targets(paths)
     finally:
-        mutate.TABLES = real
+        mutate.TABLES, mutate.NOT_YET, mutate.DECLINED = real
 
 
 check("a changed lib module is swept", targets_with(["plugin/lib/hookio.py"]), (["hookio"], []))
@@ -609,10 +621,13 @@ check(
 
 # An unswept module has to leave a line behind. Silence here is a PR whose only changed module was
 # never swept by anything, reported as a clean sweep, which is this repo's whole subject.
-modules, notes = targets_with(["plugin/lib/cli.py"])
+modules, notes = targets_with(["plugin/lib/declined.py"])
 check("a declined module selects nothing", modules, [])
 check("but says it was declined, and why", "deliberately not swept" in " ".join(notes), True)
-modules, notes = targets_with(["plugin/lib/registry.py"])
+check(
+    "and the reason is the one on the entry, not a generic line", "asserted here" in notes[0], True
+)
+modules, notes = targets_with(["plugin/lib/notyet.py"])
 check("a module still owed a table selects nothing", modules, [])
 check("and says the change went unswept", "goes unswept" in " ".join(notes), True)
 
