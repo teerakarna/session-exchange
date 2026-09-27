@@ -209,11 +209,19 @@ buys is the round trip, a format failure found in under a second rather than two
 log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: eight tables was 144 mutations and eight and a half
-minutes locally, measured, where six tables was just over four, and nine is 177. That is already past
-what a push should carry to re-answer a question the last push answered about code it did not touch,
-and it grows with every table added. So `ci` sweeps only the modules the change could have affected, and the full
+taste. A sweep is one full suite run per mutation: six tables was just over four minutes locally,
+eight was 144 mutations and eight and a half, and nine is 177 mutations and 14m51s. All measured, and
+the last one is why the figures are worth keeping: scaling the 144 would have predicted ten and a half.
+The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
+and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
+from 3.5s to 5.0s when the ninth table landed. That is already well past what a push should carry to
+re-answer a question the last push answered about code it did not touch, and each table added makes it
+worse than the one before. So `ci` sweeps only the modules the change could have affected, and the full
 sweep runs weekly where the length of it does not matter.
+
+The narrowing is not a ceiling, though, and the workflow has to be written for that: a change to
+`run.py` or `mutate.py` widens `--since` to every table, so `ci`'s sweep job carries the same
+`timeout-minutes` as the weekly one rather than a tighter number sized for the usual case.
 
 That narrowing is in `mutate.py --since`, not in the workflow, so the command CI runs is the command
 you run. It is wider than "the lib modules that changed", and the extra width is the part that

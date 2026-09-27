@@ -239,6 +239,13 @@ jobs:
   # above are still the 138 ones and are labelled with the count they were taken at, because a figure
   # that quietly re-labels itself as the tables grow is the thing this paragraph exists to stop.
   #
+  # Nine tables is 177 mutations, measured at 14m51s locally. Scaling the 144 figure would have said
+  # ten and a half, and the gap is the more useful half of the measurement: a sweep costs mutations
+  # times suite length, not mutations. The ninth table added 31 mutations and also added a test file
+  # and nineteen subprocess-spawning checks to the suite that all 177 then run, so per-mutation cost
+  # went from 3.5s to 5.0s and every existing table got slower. Each table added is therefore worse
+  # than linear, and the "linear in the size of the tables" line above is the optimistic reading.
+  #
   # Read the step duration, not the first log line. The 138 run printed its `sweeping ...` line four
   # minutes in, which is stdout block-buffering flushing rather than the sweep starting late, and taking
   # it at face value would have made the sweep look like half its cost with four minutes of setup in
@@ -254,9 +261,22 @@ jobs:
   # to sweep exits 0 with a printed reason instead, which is a job that ran and said so.
   #
   # The full sweep lives in `sweep.yml`, weekly, where the length of it does not matter.
+  #
+  # Which is why the limit below is `sweep.yml`'s number and not a smaller one sized for the narrow
+  # case. The narrowing is not a bound: any change to `run.py` or `mutate.py` widens it to every
+  # table, so this job runs the weekly sweep several times a quarter and has to be able to finish it.
+  # Sizing it for the common case instead cost a day here. At 15 minutes against a 14m51s sweep, the
+  # first PR to touch the harness after the ninth table was added got `The operation was canceled` at
+  # 15m15s, which arrives as a red `mutate` and takes the `ci` aggregate with it - indistinguishable
+  # at a glance from a survived mutation, and the log's last line before the cancel was an `ok`. A
+  # timeout that trips on a passing sweep does not report a slow job, it reports a broken rule that
+  # is not broken, and it made a harness change unmergeable rather than slow.
+  #
+  # So: the two numbers are the same by construction. If the full sweep outgrows 45 minutes, both
+  # move together, and the one to raise first is this one.
   mutate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
