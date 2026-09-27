@@ -164,11 +164,113 @@ with tempfile.TemporaryDirectory() as tmp:
     default, candidates = exchange_root.init_candidates(base / "orphan")
     check("nothing to mark returns None rather than guessing", (default, candidates), (None, []))
 
+print("init from an area directory, which is the documented way to launch")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # "Launch Claude from the relevant workspace root" is what the workspace's own CLAUDE.md says to
+    # do, and it was the one place the default came back empty: with no enclosing repo the ceiling
+    # was cwd, so cwd was excluded by the strictness that exists to stop a repo-scoped exchange.
+    base = tree(
+        tmp,
+        areas=["container/alpha", "container/beta", "container/gamma"],
+        repos_in=["container/alpha/repo", "container/alpha/other-repo"],
+    )
+    (base / "container/CLAUDE.md").write_text("areas\n")
+
+    # Stated as a precondition rather than assumed. This is the only block whose right answers need
+    # `git_root` to come back None, so a `.git` above the tempdir - where a tempdir lands when
+    # `TMPDIR` points inside a checkout - quietly changes three answers below. Asserted, so that
+    # environment fails as a named assumption instead of as three mysterious wrong roots.
+    check(
+        "no enclosing repo above the fixture",
+        exchange_root.git_root(base / "container/alpha"),
+        None,
+    )
+
+    default, candidates = exchange_root.init_candidates(base / "container/alpha")
+    check("an area directory marks itself", default, base / "container/alpha")
+    check("and is offered, not just chosen", base / "container/alpha" in candidates, True)
+    # The directory of areas above it is refused on its own merits. Asserted directly rather than as
+    # `default != container`, which is implied by the check above and also passes when default is
+    # None: it was written that way first and stubbing the merge-point rule out left it green.
+    check(
+        "the directory of areas above it is a merge point",
+        exchange_root.is_merge_point(base / "container"),
+        True,
+    )
+    # And with the nearer answer taken away, the refusal is what decides the outcome: nothing is
+    # offered below `container`, `container` is offered and still not chosen. Three areas in the
+    # fixture rather than two, so dropping alpha's marker leaves the container over the threshold -
+    # with two it fell under it, and the check passed for the wrong reason.
+    (base / "container/alpha/CLAUDE.md").unlink()
+    default, candidates = exchange_root.init_candidates(base / "container/alpha")
+    check(
+        "so with nothing nearer, init has no answer rather than falling back to it",
+        (default, base / "container" in candidates),
+        (None, True),
+    )
+    (base / "container/alpha/CLAUDE.md").write_text("area\n")
+
+    # Considered, not taken: cwd still has to carry a `CLAUDE.md`. Without this, marking whatever
+    # directory the shell happened to be in would pass every check above.
+    (base / "container/alpha/scratch").mkdir()
+    default, candidates = exchange_root.init_candidates(base / "container/alpha/scratch")
+    check(
+        "a cwd with no CLAUDE.md is not a candidate",
+        base / "container/alpha/scratch" in candidates,
+        False,
+    )
+    check("and the walk still answers the area above it", default, base / "container/alpha")
+
+print("the merge-point shape is read from the children alone, .git at the top changing nothing")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #33 asked for a git root to be exempted, on the grounds that a repo *storing* `CLAUDE.md`
+    # files has the same shape as a directory of areas. It was implemented and reverted: exempting
+    # git roots also exempted a git root holding two real areas, so `init` marked it with no
+    # `--force` and each area saw the other's claims. Both readings of the shape are asserted below,
+    # because the point is that this function cannot distinguish them and does not try.
+    base = pathlib.Path(tmp).resolve()
+    (base / "stores" / ".git").mkdir(parents=True)
+    (base / "stores" / "CLAUDE.md").write_text("repo\n")
+    for stored in ("stored-a", "stored-b"):
+        (base / "stores" / stored).mkdir()
+        (base / "stores" / stored / "CLAUDE.md").write_text("stored copy\n")
+
+    check(
+        "a repo storing two CLAUDE.md files still reads as a merge point",
+        exchange_root.is_merge_point(base / "stores"),
+        True,
+    )
+
+    # The arrangement the refusal exists for, wearing the same `.git`. If a git-root exemption comes
+    # back, this is the check that fails, and it is the one worth failing: the two trees differ only
+    # in whether the children hold repos, which is not what an exemption looks at.
+    (base / "areas" / ".git").mkdir(parents=True)
+    (base / "areas" / "CLAUDE.md").write_text("repo\n")
+    for area in ("area-a", "area-b"):
+        (base / "areas" / area / "repo" / ".git").mkdir(parents=True)
+        (base / "areas" / area / "CLAUDE.md").write_text("area\n")
+    check(
+        "and a repo holding two real areas is one too, which is why there is no exemption",
+        exchange_root.is_merge_point(base / "areas"),
+        True,
+    )
+
+    # Break it in the other direction: one stored child is not two, so a `return True` here would
+    # pass both checks above and assert nothing about the threshold.
+    (base / "stores" / "stored-b" / "CLAUDE.md").unlink()
+    check(
+        "one stored child is not a merge point, .git or no .git",
+        exchange_root.is_merge_point(base / "stores"),
+        False,
+    )
+
 print("the rules a sweep found nothing asserting")
 
 # Every check below exists because a mutation of the rule it names survived. `exchange_root` got its
-# table after four other modules had one, and ten of its twenty-two rules turned out to be
-# asserted by nothing: good coverage of the answers it gives, almost none of the reasons.
+# table after four other modules had one, and ten of the twenty-two rules it held then turned out to
+# be asserted by nothing: good coverage of the answers it gives, almost none of the reasons.
 
 with tempfile.TemporaryDirectory() as tmp:
     base = tree(tmp, areas=["work"], marker_at="work")

@@ -53,7 +53,13 @@ def cmd_init(args):
     else:
         target, candidates = exchange_root.init_candidates(args.cwd)
         if target is None:
-            print("Nothing above here looks like an environment root.")
+            # Which directories were looked at is not the same in both branches, and the message has
+            # to say the one that ran. Inside a repo the search starts strictly above it and cwd is
+            # never considered, so "here" would send someone hunting in a directory the tool did not
+            # look at; with no enclosing repo cwd does count, so "above" would do the reverse.
+            repo = exchange_root.git_root(args.cwd)
+            looked = f"above {repo}" if repo else "here or above"
+            print(f"Nothing {looked} looks like an environment root.")
             if candidates:
                 print("Refused as a root, because marking one would merge separate workspaces:")
                 for candidate in candidates:
@@ -76,6 +82,18 @@ def cmd_init(args):
             "exchange across them would show each the others' sessions and handoffs. "
             "Mark them individually, or pass --force if this really is one workspace."
         )
+        if (target / ".git").exists():
+            # #33: a repo that *stores* `CLAUDE.md` files rather than being described by one has
+            # exactly the shape of a directory of areas, and from outside the two are identical.
+            # Said here rather than decided in `is_merge_point`, because exempting git roots there
+            # also exempted a git root holding two real areas, which is the one arrangement the
+            # refusal exists for. A note costs a reader one line; the exemption was silent.
+            print(
+                "Note: it is also a git root, so those subdirectories may be its own stored "
+                "contents rather than sibling workspaces - a repo holding managed copies of "
+                "CLAUDE.md files looks the same from here. Nothing can tell the two apart "
+                "automatically, so --force is the answer when you know it is one workspace."
+            )
         return 1
 
     marker = target / ".claude" / "exchange.json"

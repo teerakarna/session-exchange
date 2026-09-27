@@ -108,20 +108,26 @@ def git_root(start):
 def init_candidates(cwd):
     """Where `exchange init` would mark, and what else it could have.
 
-    The default is the nearest ancestor directory holding a `CLAUDE.md`, *strictly above* the
-    enclosing git root. Skipping the git root is deliberate: a repo-scoped exchange coordinates
-    nothing, because the sessions that need to see each other are in sibling repos.
+    The default is the nearest directory holding a `CLAUDE.md`, *strictly above* the enclosing git
+    root. Skipping the git root is deliberate: a repo-scoped exchange coordinates nothing, because
+    the sessions that need to see each other are in sibling repos. With no enclosing repo there is
+    no repo-scoped exchange to skip, and `cwd` itself is considered like any other directory.
 
     Returns `(default, candidates)`. `default` may be None, in which case there is nothing
     sensible to mark and `init` should say so rather than pick something.
     """
     start = pathlib.Path(cwd).expanduser().resolve()
     repo = git_root(start)
-    # `parents` is strict, which is the whole point: never the git root itself, and never `cwd`.
-    ceiling = repo if repo else start
+    # Inside a repo, `parents` is strict and that is the whole point: never the git root itself, and
+    # never a directory below it. With no enclosing repo there is no repo-scoped exchange to stop,
+    # so `cwd` is looked at like any ancestor - and that is the case that matters, because launching
+    # from the area directory is the documented way to start a session and it was the one place the
+    # default came back empty. Nothing else is loosened: cwd still has to carry a `CLAUDE.md`, still
+    # has to not be home, and still has to survive `is_merge_point`.
+    searched = [start, *start.parents] if repo is None else list(repo.parents)
 
     home = pathlib.Path.home().resolve()
-    candidates = [d for d in ceiling.parents if (d / "CLAUDE.md").is_file() and d != home]
+    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]
     default = next((d for d in candidates if not is_merge_point(d)), None)
     return default, candidates
 
@@ -136,6 +142,15 @@ def is_merge_point(path):
     other. Children that are *not* git roots but still carry a `CLAUDE.md` make this a directory of
     areas, and marking it would give a session in one area sight of another's presence and handoffs.
     That is the one thing root resolution exists to prevent.
+
+    Deliberately says nothing about whether `path` is itself a git root. A repo that *stores*
+    `CLAUDE.md` files rather than being described by one - a dotfiles repo holding managed copies, a
+    docs or template repo - has the same shape as a directory of areas and is reported as one, which
+    is #33. Skipping the check for a git root was tried and reverted: it also cleared the one shape
+    this function exists to catch, so `init` would mark a git root holding two real areas with no
+    `--force` and each area would then see the other's claims and handoffs. A false refusal prints
+    its reason and offers a documented override; a false yes is silent. `cmd_init` names the case it
+    may be looking at instead, because nothing here can tell the two apart and a human can.
     """
     path = pathlib.Path(path)
     try:
