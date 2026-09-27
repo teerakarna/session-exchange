@@ -497,9 +497,10 @@ HOOK = [
 
 # Root resolution, which the plan calls the test that must never regress: every other module is
 # handed a root and does not look for one, so a wrong answer here is the one bug that can show a
-# session in one area the presence and handoffs of another. Ten of the twenty-two rules below had
-# nothing asserting them when this table was written, which is the arithmetic that made it worth
-# writing rather than a suspicion about it.
+# session in one area the presence and handoffs of another. Ten of the twenty-two rules this table
+# held when it was written had nothing asserting them, which is the arithmetic that made it worth
+# writing rather than a suspicion about it. It has grown since, and the twenty-two stays as the
+# count that figure was measured against rather than re-pointed at whatever the table holds today.
 EXCHANGE_ROOT = [
     Mutation(
         module="exchange_root",
@@ -602,33 +603,40 @@ EXCHANGE_ROOT = [
     Mutation(
         module="exchange_root",
         rule="init marks strictly above the repo: a repo-scoped exchange coordinates nothing",
-        old=(
-            "    candidates = [d for d in ceiling.parents "
-            'if (d / "CLAUDE.md").is_file() and d != home]'
-        ),
-        new=(
-            "    candidates = [\n"
-            "        d for d in [ceiling, *ceiling.parents]\n"
-            '        if (d / "CLAUDE.md").is_file() and d != home\n'
-            "    ]"
-        ),
+        old="    searched = [start, *start.parents] if repo is None else list(repo.parents)",
+        new="    searched = [start, *start.parents]",
         caught_by="test_exchange_root.py",
     ),
     Mutation(
         module="exchange_root",
         rule="the ceiling is the repo, not cwd, so init from a subdirectory answers the same",
-        old="    ceiling = repo if repo else start",
-        new="    ceiling = start",
+        old="    searched = [start, *start.parents] if repo is None else list(repo.parents)",
+        new="    searched = [start, *start.parents] if repo is None else list(start.parents)",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        # The two branches want a mutation each. They were one line reading `ceiling = repo if repo
+        # else start`, and the no-repo half was wrong for as long as it existed: cwd was excluded by
+        # the strictness that exists to skip the git root, so `init` in an area directory - which is
+        # the documented launch point - offered nothing and refused the merge point above it.
+        rule="with no enclosing repo, cwd is a candidate: an area directory can mark itself",
+        old="    searched = [start, *start.parents] if repo is None else list(repo.parents)",
+        new="    searched = list(start.parents) if repo is None else list(repo.parents)",
         caught_by="test_exchange_root.py",
     ),
     Mutation(
         module="exchange_root",
         rule="home is never a candidate, however many CLAUDE.md files are above it",
-        old=(
-            "    candidates = [d for d in ceiling.parents "
-            'if (d / "CLAUDE.md").is_file() and d != home]'
-        ),
-        new='    candidates = [d for d in ceiling.parents if (d / "CLAUDE.md").is_file()]',
+        old=('    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]'),
+        new='    candidates = [d for d in searched if (d / "CLAUDE.md").is_file()]',
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a candidate has to carry a CLAUDE.md, cwd included",
+        old=('    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]'),
+        new="    candidates = [d for d in searched if d != home]",
         caught_by="test_exchange_root.py",
     ),
     Mutation(
@@ -645,16 +653,27 @@ EXCHANGE_ROOT = [
         # so every check on the default passes and the only thing lost is a human's ability to
         # override the suggestion with the answer the tool declined to pick.
         rule="a merge point is still offered, so the suggestion can be overridden",
-        old=(
-            "    candidates = [d for d in ceiling.parents "
-            'if (d / "CLAUDE.md").is_file() and d != home]'
-        ),
+        old=('    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]'),
         new=(
             "    candidates = [\n"
-            "        d for d in ceiling.parents\n"
+            "        d for d in searched\n"
             '        if (d / "CLAUDE.md").is_file() and d != home and not is_merge_point(d)\n'
             "    ]"
         ),
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="a git root is one workspace, so what it stores cannot make it a directory of areas",
+        old='    if (path / ".git").exists():',
+        new="    if False:",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="and a worktree is a git root too, .git being a file there",
+        old='    if (path / ".git").exists():',
+        new='    if (path / ".git").is_dir():',
         caught_by="test_exchange_root.py",
     ),
     Mutation(

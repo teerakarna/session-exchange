@@ -53,7 +53,9 @@ def cmd_init(args):
     else:
         target, candidates = exchange_root.init_candidates(args.cwd)
         if target is None:
-            print("Nothing above here looks like an environment root.")
+            # "here or above", because this directory is now considered too when it is not in a
+            # repo. Saying "above" would send someone looking one level up for a fault that is here.
+            print("Nothing here or above it looks like an environment root.")
             if candidates:
                 print("Refused as a root, because marking one would merge separate workspaces:")
                 for candidate in candidates:

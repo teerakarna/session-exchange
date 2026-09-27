@@ -108,20 +108,25 @@ def git_root(start):
 def init_candidates(cwd):
     """Where `exchange init` would mark, and what else it could have.
 
-    The default is the nearest ancestor directory holding a `CLAUDE.md`, *strictly above* the
-    enclosing git root. Skipping the git root is deliberate: a repo-scoped exchange coordinates
-    nothing, because the sessions that need to see each other are in sibling repos.
+    The default is the nearest directory holding a `CLAUDE.md`, *strictly above* the enclosing git
+    root. Skipping the git root is deliberate: a repo-scoped exchange coordinates nothing, because
+    the sessions that need to see each other are in sibling repos.
 
     Returns `(default, candidates)`. `default` may be None, in which case there is nothing
     sensible to mark and `init` should say so rather than pick something.
     """
     start = pathlib.Path(cwd).expanduser().resolve()
     repo = git_root(start)
-    # `parents` is strict, which is the whole point: never the git root itself, and never `cwd`.
-    ceiling = repo if repo else start
+    # Inside a repo, `parents` is strict and that is the whole point: never the git root itself, and
+    # never a directory below it. With no enclosing repo there is no repo-scoped exchange to stop,
+    # so `cwd` is looked at like any ancestor - and that is the case that matters, because launching
+    # from the area directory is the documented way to start a session and it was the one place the
+    # default came back empty. Nothing else is loosened: cwd still has to carry a `CLAUDE.md`, still
+    # has to not be home, and still has to survive `is_merge_point`.
+    searched = [start, *start.parents] if repo is None else list(repo.parents)
 
     home = pathlib.Path.home().resolve()
-    candidates = [d for d in ceiling.parents if (d / "CLAUDE.md").is_file() and d != home]
+    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]
     default = next((d for d in candidates if not is_merge_point(d)), None)
     return default, candidates
 
@@ -138,6 +143,16 @@ def is_merge_point(path):
     That is the one thing root resolution exists to prevent.
     """
     path = pathlib.Path(path)
+    if (path / ".git").exists():
+        # A git root is one workspace by definition, so its subdirectories are its own contents and
+        # not sibling areas. Without this, a repo that *stores* `CLAUDE.md` files rather than being
+        # described by one reads as a directory of areas and `init` refuses inside it: a dotfiles
+        # repo holding managed copies, a docs or template repo, a monorepo with a file per package
+        # and no nested `.git`. `.exists()` rather than `.is_dir()` because a worktree and a
+        # submodule spell `.git` as a file, and both worktrees this plugin was built in are that
+        # kind. Nothing that used to be caught stops being caught: a child that is a repo was
+        # already excluded by the filter below.
+        return False
     try:
         children = [p for p in path.iterdir() if p.is_dir()]
     except OSError:

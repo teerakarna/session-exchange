@@ -164,11 +164,81 @@ with tempfile.TemporaryDirectory() as tmp:
     default, candidates = exchange_root.init_candidates(base / "orphan")
     check("nothing to mark returns None rather than guessing", (default, candidates), (None, []))
 
+print("init from an area directory, which is the documented way to launch")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # "Launch Claude from the relevant workspace root" is what the workspace's own CLAUDE.md says to
+    # do, and it was the one place the default came back empty: with no enclosing repo the ceiling
+    # was cwd, so cwd was excluded by the strictness that exists to stop a repo-scoped exchange.
+    base = tree(
+        tmp,
+        areas=["container/alpha", "container/beta"],
+        repos_in=["container/alpha/repo", "container/alpha/other-repo"],
+    )
+    (base / "container/CLAUDE.md").write_text("areas\n")
+
+    default, candidates = exchange_root.init_candidates(base / "container/alpha")
+    check("an area directory marks itself", default, base / "container/alpha")
+    check("and is offered, not just chosen", base / "container/alpha" in candidates, True)
+    # The directory of areas above it is still refused, which is what makes the answer above the
+    # right one rather than merely a nearer one.
+    check("the directory of areas above it is still refused", default == base / "container", False)
+
+    # Considered, not taken: cwd still has to carry a `CLAUDE.md`. Without this, marking whatever
+    # directory the shell happened to be in would pass every check above.
+    (base / "container/alpha/scratch").mkdir()
+    default, candidates = exchange_root.init_candidates(base / "container/alpha/scratch")
+    check(
+        "a cwd with no CLAUDE.md is not a candidate",
+        base / "container/alpha/scratch" in candidates,
+        False,
+    )
+    check("and the walk still answers the area above it", default, base / "container/alpha")
+
+print("a repo that stores CLAUDE.md files is not a directory of areas")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # Found on the first real root this plugin marked. A dotfiles repo holds managed copies of other
+    # `CLAUDE.md` files, so two of its own subdirectories look exactly like sibling areas and `init`
+    # refused inside it, citing workspaces that would be merged when there was only ever one.
+    base = pathlib.Path(tmp).resolve()
+    (base / "dots" / ".git").mkdir(parents=True)
+    (base / "dots" / "CLAUDE.md").write_text("repo\n")
+    for stored in ("dot_claude", "projects"):
+        (base / "dots" / stored).mkdir()
+        (base / "dots" / stored / "CLAUDE.md").write_text("stored copy\n")
+
+    check(
+        "a git root is one workspace, whatever it stores",
+        exchange_root.is_merge_point(base / "dots"),
+        False,
+    )
+
+    # The same repo as a worktree, where `.git` is a file. Both worktrees this plugin was built in
+    # are that kind, so testing for a directory here would be wrong in the checkout this was written
+    # in and right everywhere it was demonstrated.
+    (base / "dots" / ".git").rmdir()
+    (base / "dots" / ".git").write_text("gitdir: /somewhere/.git/worktrees/dots\n")
+    check(
+        "including a worktree, where .git is a file",
+        exchange_root.is_merge_point(base / "dots"),
+        False,
+    )
+
+    # Break it: the same two children under a directory that is *not* a repo is the shape the check
+    # exists for. Without this, returning False unconditionally would pass both checks above.
+    (base / "dots" / ".git").unlink()
+    check(
+        "and with no .git, those same two children are a merge point",
+        exchange_root.is_merge_point(base / "dots"),
+        True,
+    )
+
 print("the rules a sweep found nothing asserting")
 
 # Every check below exists because a mutation of the rule it names survived. `exchange_root` got its
-# table after four other modules had one, and ten of its twenty-two rules turned out to be
-# asserted by nothing: good coverage of the answers it gives, almost none of the reasons.
+# table after four other modules had one, and ten of the twenty-two rules it held then turned out to
+# be asserted by nothing: good coverage of the answers it gives, almost none of the reasons.
 
 with tempfile.TemporaryDirectory() as tmp:
     base = tree(tmp, areas=["work"], marker_at="work")
