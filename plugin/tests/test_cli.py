@@ -54,13 +54,13 @@ def fixture(tmp):
     return tmp / "home", area, area / "repo"
 
 
-def run(home, cwd, *args):
+def run(home, cwd, *args, exchange_root=""):
     done = subprocess.run(
         [sys.executable, str(CLI), "--cwd", str(cwd), *args],
         capture_output=True,
         text=True,
         timeout=30,
-        env={**os.environ, "HOME": str(home)} | {"CC_EXCHANGE_ROOT": ""},
+        env={**os.environ, "HOME": str(home)} | {"CC_EXCHANGE_ROOT": str(exchange_root)},
     )
     return done.returncode, done.stdout + done.stderr
 
@@ -160,6 +160,24 @@ with tempfile.TemporaryDirectory() as tmp:
         (False, "other work"),
     )
 
+    # Every list field, not just paths. These three are accepted, validated and written, so a
+    # reader that renders one of them reports a subset of the claim as if it were the claim.
+    run(home, repo, "claim", "--repo", "one", "--ticket", "T-1", "--ticket", "T-2")
+    code, out = run(home, repo, "show")
+    check(
+        "show renders every claimed list, not only paths",
+        ("repos: one" in out, "tickets: T-1, T-2" in out),
+        (True, True),
+    )
+
+    # The cap is real and so is what it hides. Counting the remainder is the difference between a
+    # short render and a render that looks complete.
+    marker = area / ".claude" / "exchange.json"
+    marker.write_text(json.dumps({"name": "area", "max_hot_paths": 2}))
+    code, out = run(home, repo, "show")
+    check("a capped list counts what it left out", "paths: a, b, +1 more" in out, True)
+
+    marker.write_text(json.dumps({"name": "area"}))
     code, out = run(home, repo, "show")
     check("show lists both claims", (code, "claims    2" in out), (0, True))
     check(
@@ -183,6 +201,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("prints the checks it cannot answer rather than skipping them", "[?]" in out, True)
     check("says why each one is unanswerable", "not checkable here" in out, True)
     check("no legacy scripts in this synthetic home", "0 script(s) on disk" in out, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, area, repo = fixture(tmp)
+    # The override is the only way to a root with no marker, since the walk finds a root by finding
+    # one. `store.config` hands back the defaults and no problem, which is correct for a renderer
+    # and must not be printed as a marker that was read.
+    code, out = run(home, repo, "doctor", exchange_root=area)
+    check(
+        "a root with no marker is reported absent, not valid",
+        ("marker    absent" in out, "marker    valid" in out),
+        (True, False),
+    )
+    check("and it agrees with step 5 instead of contradicting it", "[ ] 5." in out, True)
+    check("an unconfigured root is not a fault on its own", code, 0)
 
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)

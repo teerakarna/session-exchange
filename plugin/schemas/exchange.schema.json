@@ -28,7 +28,7 @@
       "type": "integer",
       "minimum": 0,
       "default": 6,
-      "description": "How many claimed paths to render per session."
+      "description": "How many entries of each claimed list - repos, paths, tickets - to render per session. Anything beyond the cap is counted, never silently dropped. The key keeps its original name because renaming it would break every marker already written."
     },
     "max_handoffs_listed": {
       "type": "integer",
