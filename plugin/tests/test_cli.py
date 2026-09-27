@@ -30,6 +30,19 @@ def check(name, got, want):
         failures.append(name)
 
 
+def scope_of(text, script):
+    """The scope marker on `doctor`'s `wired:` line for `script`.
+
+    Returns a description instead of raising when there is not exactly one such line, so a missing
+    or duplicated line is a failed check with the count in it rather than a traceback that stops the
+    rest of the file running.
+    """
+    lines = [line for line in text.splitlines() if "wired:" in line and script in line]
+    if len(lines) != 1:
+        return f"{len(lines)} wired lines naming {script}"
+    return lines[0].rsplit("(", 1)[-1].strip().rstrip(")")
+
+
 def fixture(tmp):
     """A synthetic HOME whose registry knows this test process, and an unmarked area with a repo."""
     tmp = pathlib.Path(tmp).resolve()
@@ -244,9 +257,59 @@ with tempfile.TemporaryDirectory() as tmp:
 
     code, out = run(home, repo, "doctor")
     check("a wired legacy script is a fault, not a note", code, 1)
-    check("and is called what it is", "DOUBLE FIRE" in out, True)
+    # The wiring is in the user's own settings and `home` is not under `area`, so this is the
+    # machine-wide fault rather than this root being rendered twice. Matching on `DOUBLE FIRE:` with
+    # the colon rather than bare: the CROSS ROOT message names DOUBLE FIRE to say it is *not* that
+    # one, so the bare substring passed against the wrong message for as long as it was written that
+    # way, which is a check that had stopped being able to fail.
+    check(
+        "a machine-wide wiring is called that, and not a doubled fire",
+        ("CROSS ROOT" in out, "DOUBLE FIRE:" in out),
+        (True, False),
+    )
+    check(
+        "the wiring is marked with the scope it has",
+        scope_of(out, "session_exchange_handoffs.py"),
+        "machine-wide",
+    )
     check("the unrelated hook is left out of it", "review-requests" in out, False)
     check("step 7 is outstanding while it is wired", "next      step 4" in out, True)
+
+    # The same script, wired again in a settings file under the root. Now both faults are live, and
+    # each warning has to name only the wiring that is its own - a DOUBLE FIRE naming the user's
+    # settings sends the reader hunting through files under the root that never mention it.
+    (area / ".claude" / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'bash "$HOME/.claude/hooks/alpha-session-lane.sh"',
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "both faults are reported, not whichever was found first",
+        (code, "DOUBLE FIRE:" in out, "CROSS ROOT" in out),
+        (1, True, True),
+    )
+    # Read off each script's own line rather than from the whole output: two markers present
+    # somewhere is what a swap of the two would also look like, and the marker is the only thing
+    # here that says which file to go and edit.
+    check(
+        "and each wiring line carries the scope of its own settings file",
+        (scope_of(out, "alpha-session-lane.sh"), scope_of(out, "session_exchange_handoffs.py")),
+        ("this root", "machine-wide"),
+    )
 
 print("what is not built yet says so, and does not look like a failure")
 

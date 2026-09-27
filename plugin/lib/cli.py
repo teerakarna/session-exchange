@@ -286,16 +286,26 @@ def cmd_doctor(args):
     for path in state["on_disk"]:
         print(f"          on disk: {path.name}")
     for settings, name in state["wired"]:
-        print(f"          wired:   {name}  in {settings}")
+        scope = "machine-wide" if (settings, name) in state["machine_wide"] else "this root"
+        print(f"          wired:   {name}  in {settings}  ({scope})")
     for problem in state["problems"]:
         faults += 1
         print(f"problem   {problem}")
     if state["double_fire"]:
         faults += 1
         print(
-            "DOUBLE FIRE: legacy hooks are still wired and will render alongside this plugin. "
-            "Until they are unwired, presence and handoffs appear twice and a stalled migration "
-            "is indistinguishable from a finished one."
+            "DOUBLE FIRE: legacy hooks are still wired under this root and will render alongside "
+            "this plugin. Until they are unwired, presence and handoffs appear twice and a stalled "
+            "migration is indistinguishable from a finished one."
+        )
+    if state["machine_wide"]:
+        faults += 1
+        print(
+            "CROSS ROOT: a legacy wiring in the user's own settings fires for every session on "
+            "this machine, whatever root it belongs to, so it can inject another environment's "
+            "presence here. Which root it renders cannot be read from here - run `doctor` there. "
+            "Reported separately from DOUBLE FIRE because it is a different fault: not this "
+            "root's rendering twice, but another root's rendering at all."
         )
 
     print("steps")

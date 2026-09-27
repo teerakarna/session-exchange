@@ -111,6 +111,18 @@ def wirings(settings_paths):
     return found, problems
 
 
+def under(root, path):
+    """Is `path` inside `root`?
+
+    Both sides resolved, because they arrive from different places - the root from
+    `exchange_root.resolve`, which has already resolved it, and the settings path from a glob under
+    the root or from `$HOME` - and comparing a real path against a symlinked one answers no in
+    silence. A wrong no here files a wiring under the wrong fault, which is the thing this function
+    was added to stop.
+    """
+    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())
+
+
 def report(root, hooks_dir=HOOKS_DIR, user_settings=USER_SETTINGS):
     """Everything known about the legacy half, from live state only.
 
@@ -119,11 +131,24 @@ def report(root, hooks_dir=HOOKS_DIR, user_settings=USER_SETTINGS):
     """
     on_disk = scripts_on_disk(hooks_dir)
     wired, problems = wirings(settings_files(root, user_settings)) if root else ([], [])
+    # Where a wiring lives decides what it does wrong, and the two are not the same fault. One in a
+    # settings file under this root fires for this root and doubles its rendering. One in the user's
+    # own settings fires for every session on the machine whatever root it belongs to, so what it
+    # injects here is some other environment's presence - the failure root resolution exists to
+    # prevent, arriving through the legacy half. Observed that way round on the first real
+    # migration rather than guessed: the machine-wide wiring rendered another root's rows into a
+    # session under this one.
+    scoped = [(path, name) for path, name in wired if under(root, path)] if root else []
     return {
         "on_disk": on_disk,
         "wired": wired,
         "problems": problems,
         # The condition worth a warning is a wiring, not a file. An unwired script on disk is
         # inert; a wired one fires alongside the plugin and doubles the injection.
-        "double_fire": bool(wired),
+        "double_fire": bool(scoped),
+        # Both halves named, rather than one and "the rest": each warning names the scripts that
+        # belong to its own fault, so neither sends a reader to a settings file that does not
+        # mention them.
+        "scoped": scoped,
+        "machine_wide": [pair for pair in wired if pair not in scoped],
     }

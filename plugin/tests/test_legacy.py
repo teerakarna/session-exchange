@@ -173,6 +173,34 @@ with tempfile.TemporaryDirectory() as tmp:
     # off the traceback rather than off the assertion, and the rest of the file would not run.
     check("and the report names the file", problems and "broken" in problems[0], True)
 
+print("whether a settings file belongs to this root")
+
+with tempfile.TemporaryDirectory() as tmp:
+    real = pathlib.Path(tmp).resolve() / "real-area"
+    (real / ".claude").mkdir(parents=True)
+    link = pathlib.Path(tmp).resolve() / "linked-area"
+    link.symlink_to(real)
+    outside = pathlib.Path(tmp).resolve() / "elsewhere"
+    outside.mkdir()
+
+    inside = real / ".claude" / "x.json"
+    check("a file under the root is under it", legacy.under(real, inside), True)
+    check("a file beside it is not", legacy.under(real, outside / "x.json"), False)
+    # Both directions of the same mistake, one per `resolve` call. The root arrives already resolved
+    # and the settings paths are globbed from it, so in the ordinary case the two sides agree; these
+    # are the cases where they do not, and an unresolved comparison answers no to both - which files
+    # a root's own wiring as machine-wide and then warns about the wrong fault.
+    check(
+        "a real path is under the symlink that points at its root",
+        legacy.under(link, real / ".claude" / "s.json"),
+        True,
+    )
+    check(
+        "and a path reached through the symlink is under the real root",
+        legacy.under(real, link / ".claude" / "s.json"),
+        True,
+    )
+
 print("and the report the session start acts on")
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -194,13 +222,46 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("but on its own it is not a doubled fire", report["double_fire"], False)
 
+    # Where a wiring lives decides which fault it is, and the two are not interchangeable. In the
+    # user's own settings it fires for every session on the machine whatever root that session
+    # belongs to, so what it injects here is another environment's presence rather than this one's
+    # twice. Found on the first real migration, where the machine-wide wiring put another root's
+    # rows into a session under this one, and the warning called that a doubled fire.
     settings(user, "python3 $HOME/.claude/hooks/session_exchange_handoffs.py")
     report = legacy.report(root, hooks_dir=hooks, user_settings=user)
-    check("wired, it is", report["double_fire"], True)
+    # Asserted as a pair throughout, because `double_fire` alone read True for both cases before the
+    # split and would read True for both again if they collapsed back into one.
+    check(
+        "a wiring in the user's own settings is machine-wide, not this root doubling",
+        (report["double_fire"], [name for _, name in report["machine_wide"]]),
+        (False, ["session_exchange_handoffs.py"]),
+    )
     check(
         "and the wiring names the script",
         [name for _, name in report["wired"]],
         ["session_exchange_handoffs.py"],
+    )
+
+    # The other arm: a wiring in a settings file under the root is this root's rendering doubled.
+    # With both in place, each is reported as what it is rather than one shadowing the other.
+    local = root / ".claude" / "settings.local.json"
+    settings(local, "python3 .claude/hooks/session_exchange_handoffs.py")
+    report = legacy.report(root, hooks_dir=hooks, user_settings=user)
+    check(
+        "a wiring under the root doubles this root, while the machine-wide one stays machine-wide",
+        (report["double_fire"], [str(path) for path, _ in report["machine_wide"]]),
+        (True, [str(user)]),
+    )
+
+    # And the root-scoped wiring on its own, which is the state a half-finished step 7 leaves: the
+    # machine-wide one gone, this root's still there. Nothing to be machine-wide about, so an empty
+    # list rather than a wiring that quietly stayed in the wrong bucket.
+    settings(user, "true")
+    report = legacy.report(root, hooks_dir=hooks, user_settings=user)
+    check(
+        "with the machine-wide one gone, only the root's own wiring is left",
+        (report["double_fire"], report["machine_wide"], [name for _, name in report["wired"]]),
+        (True, [], ["session_exchange_handoffs.py"]),
     )
 
     # `doctor` run from outside any root, which is the one caller that has no root to search.
