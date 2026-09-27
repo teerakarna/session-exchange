@@ -19,6 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import claims
 import exchange_root
+import handoffs
 import legacy
 import registry
 import store
@@ -171,9 +172,12 @@ def cmd_show(args):
     for problem in problems:
         print(f"problem   {problem}")
 
-    handoffs, handoff_problems = store.read_all(store.handoffs_dir(root), validate.load("handoff"))
-    open_count = sum(1 for h in handoffs if h.get("status") != "closed")
-    print(f"handoffs  {len(handoffs)} stored, {open_count} not closed")
+    # `handoffs.load_all` rather than `store.read_all`, so the status/history disagreement is
+    # reported here too. `show` is the command people actually run, and a check that only one reader
+    # performs is a check most readers do not get.
+    stored, handoff_problems = handoffs.load_all(root)
+    open_count = sum(1 for h in stored if h.get("status") != handoffs.CLOSED)
+    print(f"handoffs  {len(stored)} stored, {open_count} not closed")
     for problem in handoff_problems:
         print(f"problem   {problem}")
     return 1 if problem or problems or handoff_problems else 0
@@ -235,7 +239,9 @@ def cmd_claim(args):
 # migration that can be wrong about it, and the half-done state is the dangerous one.
 def _steps(root):
     plugin = pathlib.Path(__file__).resolve().parents[1]
-    handoffs, _ = store.read_all(store.handoffs_dir(root), validate.load("handoff"))
+    # Named `stored`, not `handoffs`: that would shadow the module for the rest of this function,
+    # which is a trap rather than a bug today only because nothing else in here calls it.
+    stored, _ = handoffs.load_all(root)
     state = legacy.report(root)
     return [
         (
@@ -257,7 +263,7 @@ def _steps(root):
         (
             4,
             "open handoffs imported out of the markdown ledger",
-            any("imported" in h for h in handoffs) if handoffs else False,
+            any("imported" in h for h in stored) if stored else False,
             None,
         ),
         (5, "this root marked", (pathlib.Path(root) / ".claude" / "exchange.json").is_file(), None),
@@ -352,6 +358,100 @@ def cmd_doctor(args):
     return 1 if faults else 0
 
 
+def _body(args):
+    """The body text, or a printed complaint and None.
+
+    `-` reads stdin, because a handoff body is markdown and the useful ones are several paragraphs
+    with backticks in them. Passing that through a shell argument is a quoting exercise nobody
+    completes correctly on the first try, and a body mangled in transit is a handoff that says
+    something its sender did not.
+    """
+    if args.body != "-":
+        return args.body
+    text = sys.stdin.read()
+    if not text.strip():
+        print("problem: nothing arrived on stdin, so there is no body to post")
+        return None
+    return text
+
+
+def cmd_handoff_post(args):
+    resolution = _resolved(args)
+    if resolution is None:
+        return 1
+    to, problem = handoffs.to_scope(repo=args.repo, paths=args.path, session_id=args.session)
+    if problem:
+        print(f"problem: {problem}")
+        return 1
+    body = _body(args)
+    if body is None:
+        return 1
+
+    own = registry.own_entry() or {}
+    record, problem = handoffs.post(
+        resolution.root,
+        to,
+        body,
+        args.cwd,
+        session_id=own.get("sessionId"),
+        name=own.get("name"),
+    )
+    if problem:
+        print(f"problem: {problem}")
+        return 1
+    print(f"posted {record['id']} to {handoffs.describe(record['to'])}")
+    if not record["from"].get("session_id"):
+        # Said out loud rather than left as an absent field. The recipient sees a handoff from a cwd
+        # and no name, and "who sent this" is the first thing they will ask.
+        print(
+            "  note: the registry has no entry for this process, so it is recorded as coming from "
+            f"{args.cwd} with no session or name."
+        )
+    return 0
+
+
+def _transition(args, status):
+    resolution = _resolved(args)
+    if resolution is None:
+        return 1
+    own = registry.own_entry() or {}
+    record, problem = handoffs.set_status(
+        resolution.root, args.id, status, by=own.get("name"), note=args.note
+    )
+    if problem:
+        print(f"problem: {problem}")
+        return 1
+    print(f"{record['id']} is now {record['status']}")
+    return 0
+
+
+def cmd_handoff_accept(args):
+    # Accepting is explicitly not closing, in the CLI as well as in the schema. Two subcommands
+    # rather than `--status`, so taking something on cannot be typed as finishing it.
+    return _transition(args, handoffs.ACCEPTED)
+
+
+def cmd_handoff_close(args):
+    return _transition(args, handoffs.CLOSED)
+
+
+def cmd_handoff_list(args):
+    resolution = _resolved(args)
+    if resolution is None:
+        return 1
+    records, problems = handoffs.load_all(resolution.root)
+    shown = [h for h in records if args.all or h.get("status") != handoffs.CLOSED]
+    print(f"handoffs  {len(records)} stored, {len(shown)} shown")
+    for record in shown:
+        sender = record["from"].get("name") or record["from"]["cwd"]
+        print(f"  {record['id']}  {record['status']}")
+        print(f"    to {handoffs.describe(record['to'])}, from {sender}, {record['created']}")
+        print(f"    {record['body'].splitlines()[0]}")
+    for problem in problems:
+        print(f"problem   {problem}")
+    return 1 if problems else 0
+
+
 def cmd_not_built(args):
     print(
         f"`exchange {args.command}` is not built yet: it arrives with migration step "
@@ -397,8 +497,31 @@ def build_parser():
     doctor = sub.add_parser("doctor", help="live state, with evidence, and what is outstanding")
     doctor.set_defaults(func=cmd_doctor)
 
-    handoff = sub.add_parser("handoff", help="post or answer a handoff (not built yet)")
-    handoff.set_defaults(func=cmd_not_built, step=4)
+    handoff = sub.add_parser("handoff", help="post or answer a handoff")
+    # `required=True` rather than defaulting to one of them. `exchange handoff` with no verb is
+    # ambiguous between posting and listing, and picking either would make a typo do something.
+    hsub = handoff.add_subparsers(dest="handoff_command", required=True)
+
+    hpost = hsub.add_parser("post", help="post a handoff to a scope or to one session")
+    hpost.add_argument("--repo", help="root-relative repository directory")
+    hpost.add_argument("--path", action="append", default=[], help="repeatable; narrows --repo")
+    hpost.add_argument("--session", help="address one live session instead of a scope")
+    hpost.add_argument("--body", required=True, help="markdown; `-` reads stdin")
+    hpost.set_defaults(func=cmd_handoff_post)
+
+    haccept = hsub.add_parser("accept", help="take a handoff on, which is not closing it")
+    haccept.add_argument("id")
+    haccept.add_argument("--note")
+    haccept.set_defaults(func=cmd_handoff_accept)
+
+    hclose = hsub.add_parser("close", help="record a handoff as finished")
+    hclose.add_argument("id")
+    hclose.add_argument("--note")
+    hclose.set_defaults(func=cmd_handoff_close)
+
+    hlist = hsub.add_parser("list", help="handoffs under this root, open ones by default")
+    hlist.add_argument("--all", action="store_true", help="include closed ones")
+    hlist.set_defaults(func=cmd_handoff_list)
 
     migrate = sub.add_parser("migrate", help="run a migration step (not built yet)")
     migrate.set_defaults(func=cmd_not_built, step=4)

@@ -15,6 +15,16 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 - `SessionEnd` clears the claim, so a stale row is not something anybody has to remember to delete.
 - `exchange init | show | claim | doctor`. `init` refuses a directory whose sibling children are
   themselves workspaces, because marking that would show each of them the others' sessions.
+- `exchange handoff post | accept | close | list`, the first thing here that writes state a
+  *different* session reads. Two rules carry it. Posting never overwrites: an id already on disk is a
+  refusal, because a dropped handoff is invisible at both ends - the sender saw it posted and the
+  recipient never had it to miss. And `status` is derived from `history` in one write rather than
+  maintained beside it, so a record whose two halves disagree is reported and left alone rather than
+  repaired: nothing here wrote it, and guessing which half is stale is how a closed handoff comes
+  back open. `accept` and `close` are separate verbs rather than a `--status` flag, so taking
+  something on cannot be typed as finishing it, and `handoff` has no default verb at all, so a typo
+  cannot post or list by accident. `--body -` reads stdin, because a body with backticks in it does
+  not survive being a shell argument.
 - JSON schemas for the marker, claims and handoffs, with a validator that covers only the subset of
   JSON Schema they use and raises on any keyword it does not implement.
 - `doctor` derives all seven migration steps from live state, and prints `[?]` with a reason for the
@@ -23,13 +33,13 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   gitleaks, a gate asserting the runtime imports nothing but the standard library, and dependabot.
 - A mutation sweep as a CI gate. `plugin/tests/mutate.py` breaks one rule at a time and requires the
   suite to notice; `test_mutations.py` is the cheap half that keeps the tables from drifting away
-  from the source they claim to patch. A hundred and thirty-eight mutations across `claims`,
-  `exchange_root`, `hook`, `hookio`, `legacy`, `registry`, `store` and `validate`; the three modules
-  with no table are all in `DECLINED`, with the reason recorded next to each. Every table has found
-  live rules on its first run: two guards in `hookio.payload` wide enough to let a hook exit 1 with a
-  traceback, ten unasserted rules in root resolution, every failure path of `seed`, `update` and
-  `clear` in `claims`, and five rules in `legacy` that the end-to-end fixtures were assumed to hold
-  up and do not. `registry` had no test file at all, and now has forty checks.
+  from the source they claim to patch. A hundred and seventy-seven mutations across `claims`,
+  `exchange_root`, `handoffs`, `hook`, `hookio`, `legacy`, `registry`, `store` and `validate`; the
+  three modules with no table are all in `DECLINED`, with the reason recorded next to each. Every
+  table has found live rules on its first run: two guards in `hookio.payload` wide enough to let a
+  hook exit 1 with a traceback, ten unasserted rules in root resolution, every failure path of
+  `seed`, `update` and `clear` in `claims`, and five rules in `legacy` that the end-to-end fixtures
+  were assumed to hold up and do not. `registry` had no test file at all, and now has forty checks.
 
 ### Fixed
 
@@ -44,7 +54,7 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 
 ### Not built yet
 
-- `exchange handoff` and `exchange migrate` exit 2 and name the step that builds them. Exit 2 is
-  neither success nor failure: a command that does not exist must not report either.
+- `exchange migrate` exits 2 and names the step that builds it. Exit 2 is neither success nor
+  failure: a command that does not exist must not report either.
 - `Stop` is deliberately unwired. Its only job is catching handoffs posted mid-session, and until the
   matcher exists it could only spawn a process per turn to do nothing.

@@ -67,12 +67,13 @@ def fixture(tmp):
     return tmp / "home", area, area / "repo"
 
 
-def run(home, cwd, *args, exchange_root=""):
+def run(home, cwd, *args, exchange_root="", stdin=None):
     done = subprocess.run(
         [sys.executable, str(CLI), "--cwd", str(cwd), *args],
         capture_output=True,
         text=True,
         timeout=30,
+        input=stdin,
         env={**os.environ, "HOME": str(home)} | {"CC_EXCHANGE_ROOT": str(exchange_root)},
     )
     return done.returncode, done.stdout + done.stderr
@@ -348,18 +349,148 @@ with tempfile.TemporaryDirectory() as tmp:
         ("this root", "machine-wide"),
     )
 
+print("handoff")
+
+
+def posted_id(text):
+    """The id out of `posted <id> to ...`, or a description of why there is not one."""
+    lines = [line for line in text.splitlines() if line.startswith("posted ")]
+    if len(lines) != 1:
+        return f"{len(lines)} posted lines in {text!r}"
+    return lines[0].split()[1]
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    store_dir = area / ".claude" / "exchange" / "handoffs"
+
+    code, out = run(home, repo, "handoff", "post", "--body", "look at the hooks manifest")
+    check(
+        "post with no addressing refuses and says which flags exist",
+        (code, "--repo" in out and "--session" in out),
+        (1, True),
+    )
+    check("and writes nothing", list(store_dir.iterdir()), [])
+
+    code, out = run(home, repo, "handoff", "post", "--repo", "one", "--session", "s", "--body", "x")
+    check("a scope and a session at once is refused", (code, "not both" in out), (1, True))
+
+    code, out = run(home, repo, "handoff", "post", "--path", "a", "--body", "x")
+    check("--path without --repo is refused too", (code, "needs --repo" in out), (1, True))
+
+    code, out = run(home, repo, "handoff", "post", "--repo", "one", "--body", "   ")
+    check("an empty body is refused", (code, "says nothing" in out), (1, True))
+
+    code, out = run(
+        home,
+        repo,
+        "handoff",
+        "post",
+        "--repo",
+        "repo",
+        "--path",
+        "plugin/lib",
+        "--body",
+        "-",
+        stdin="the manifest is wired twice\n\nsee `doctor`\n",
+    )
+    first = posted_id(out)
+    check("a body on stdin is posted", (code, (store_dir / f"{first}.json").is_file()), (0, True))
+    written = json.loads((store_dir / f"{first}.json").read_text())
+    check(
+        "recorded whole, as the caller, with no history yet",
+        (
+            written["status"],
+            written["from"]["name"],
+            written["to"],
+            "history" in written,
+            written["body"].endswith("see `doctor`"),
+        ),
+        ("open", "the-caller", {"repo": "repo", "paths": ["plugin/lib"]}, False, True),
+    )
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "list shows it with its scope and first line",
+        (code, first in out, "repo: plugin/lib" in out, "the manifest is wired twice" in out),
+        (0, True, True, True),
+    )
+
+    code, out = run(home, repo, "handoff", "accept", first, "--note", "taking it")
+    check("accept moves it without closing it", (code, "is now accepted" in out), (0, True))
+    written = json.loads((store_dir / f"{first}.json").read_text())
+    check(
+        "and the move is recorded once, with status read off the entry",
+        (written["status"], [e["status"] for e in written["history"]], written["history"][0]["by"]),
+        ("accepted", ["accepted"], "the-caller"),
+    )
+
+    code, out = run(home, repo, "handoff", "close", first)
+    check("close then hides it from the default list", (code, "is now closed" in out), (0, True))
+    code, out = run(home, repo, "handoff", "list")
+    check("which counts what it is not showing", "1 stored, 0 shown" in out, True)
+    code, out = run(home, repo, "handoff", "list", "--all")
+    check("--all brings it back", first in out, True)
+
+    # Closing a closed handoff is not absorbed as a no-op: it means a stale render or two sessions
+    # answering the same thing, and a second identical history entry would hide both.
+    code, out = run(home, repo, "handoff", "close", first)
+    check("closing it again is refused", (code, "already closed" in out), (1, True))
+    written = json.loads((store_dir / f"{first}.json").read_text())
+    check("and no second entry was appended", len(written["history"]), 2)
+
+    code, out = run(home, repo, "handoff", "accept", "no-such-id")
+    check("an unknown id is named, not swallowed", (code, "no handoff" in out), (1, True))
+
+with tempfile.TemporaryDirectory() as tmp:
+    # A record whose `status` and last history entry disagree was not written by this plugin. It is
+    # reported rather than resolved in favour of either half, and the row is still shown: dropping
+    # it would hide a handoff, which is worse than showing one whose state is in question.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "first")
+    handoff_id = posted_id(out)
+    run(home, repo, "handoff", "close", handoff_id)
+    path = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json"
+    tampered = json.loads(path.read_text())
+    tampered["status"] = "open"
+    path.write_text(json.dumps(tampered))
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "a status that contradicts its history is a fault, and the row is still shown",
+        (code, "something other than `exchange` wrote it" in out, handoff_id in out),
+        (1, True, True),
+    )
+    code, out = run(home, repo, "handoff", "accept", handoff_id)
+    check(
+        "and a move is refused rather than appending to a history it cannot vouch for",
+        (code, "which half is stale" in out),
+        (1, True),
+    )
+    code, out = run(home, repo, "show")
+    check("show reports it too, rather than rendering a count over it", code, 1)
+
 print("what is not built yet says so, and does not look like a failure")
 
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
-    for command in ("handoff", "migrate"):
-        code, out = run(home, repo, command)
-        check(
-            f"{command} exits 2 and names the step",
-            (code, "step 4" in out, "Nothing was changed" in out),
-            (2, True, True),
-        )
+    code, out = run(home, repo, "migrate")
+    check(
+        "migrate exits 2 and names the step",
+        (code, "step 4" in out, "Nothing was changed" in out),
+        (2, True, True),
+    )
+    # `handoff` is built now, but it has no default verb: guessing between posting and listing would
+    # make a typo do something. Argparse's own exit 2, not the not-built one.
+    code, out = run(home, repo, "handoff")
+    check(
+        "handoff with no verb is a usage error naming the verbs",
+        (code, "post" in out, "not built yet" in out),
+        (2, True, False),
+    )
 
 print()
 if failures:
