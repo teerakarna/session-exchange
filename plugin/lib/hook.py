@@ -51,12 +51,28 @@ def session_start(data, root, lines):
     # to a finished one at the output, and this line is the only thing that distinguishes them.
     state = legacy.report(root)
     if state["double_fire"]:
-        wired = sorted({name for _, name in state["wired"]})
+        # `scoped`, not `wired`. With a machine-wide wiring in place too, naming everything here
+        # would put a script into this warning whose wiring is not under this root at all, and send
+        # whoever reads it looking through settings files that do not mention it.
+        scoped = sorted({name for _, name in state["scoped"]})
         lines.append(
             hookio.problem(
-                f"{len(wired)} legacy hook script(s) still wired: {', '.join(wired)}. "
+                f"{len(scoped)} legacy hook script(s) still wired: {', '.join(scoped)}. "
                 "They fire alongside this plugin, so presence and handoffs are rendered twice. "
                 "Run `exchange doctor` for where the wiring is."
+            )
+        )
+    if state["machine_wide"]:
+        # Separate line, not a softer version of the one above. A machine-wide wiring is not this
+        # root being rendered twice, it is another root being rendered here at all, and a session
+        # that has just been handed a list of somebody else's claims needs to be told which of the
+        # two it is looking at.
+        names = sorted({name for _, name in state["machine_wide"]})
+        lines.append(
+            hookio.problem(
+                f"{len(names)} legacy hook script(s) wired machine-wide: {', '.join(names)}. "
+                "They fire for every session on this machine whatever root it belongs to, so "
+                "presence shown above them may belong to a different environment."
             )
         )
     for problem in state["problems"]:

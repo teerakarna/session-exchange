@@ -40,8 +40,16 @@ def check(name, got, want):
         failures.append(name)
 
 
-def fixture(tmp, *, wire_legacy):
-    """A synthetic HOME, a marked root, and a repo inside it."""
+def fixture(tmp, *, wire_legacy, wire_under_root=False):
+    """A synthetic HOME, a marked root, and a repo inside it.
+
+    `wire_legacy` wires the user's own settings, which is a machine-wide wiring: it fires for every
+    session on the machine whatever root that session belongs to. `wire_under_root` wires a
+    `settings.local.json` under the root instead, which fires for this root only. The two are
+    different faults and the hook says different things about them, so a fixture that can only
+    produce one of them can only ever assert half of it - which is how the machine-wide case came to
+    be asserted as a doubled fire for as long as it was.
+    """
     tmp = pathlib.Path(tmp).resolve()
     home = tmp / "home"
     hooks = home / ".claude" / "hooks"
@@ -56,29 +64,29 @@ def fixture(tmp, *, wire_legacy):
     # anything and every positive check below would still pass.
     (hooks / "review-requests-check.sh").write_text("# unrelated, working, staying\n")
 
-    wiring = (
-        {
-            "hooks": {
-                "SessionStart": [
-                    {
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": LEGACY_COMMAND,
-                            }
-                        ]
-                    }
-                ]
-            }
+    wiring = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": LEGACY_COMMAND,
+                        }
+                    ]
+                }
+            ]
         }
-        if wire_legacy
-        else {"hooks": {}}
+    }
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps(wiring if wire_legacy else {"hooks": {}})
     )
-    (home / ".claude" / "settings.json").write_text(json.dumps(wiring))
 
     root = tmp / "area"
     (root / ".claude").mkdir(parents=True)
     (root / ".claude" / "exchange.json").write_text(json.dumps({"name": "area"}))
+    if wire_under_root:
+        (root / ".claude" / "settings.local.json").write_text(json.dumps(wiring))
     repo = root / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
@@ -130,7 +138,15 @@ with tempfile.TemporaryDirectory() as tmp:
         (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
         "SessionStart",
     )
-    check("warns that legacy hooks are still wired", "still wired" in context, True)
+    # The wiring here is in the user's own settings, so what it warns about is a hook that fires for
+    # every session on this machine - not this root being rendered twice. Asserted as a pair so that
+    # the two cannot silently collapse back into one message: the machine-wide half read as a
+    # doubled fire until a real migration showed a session handed another root's rows.
+    check(
+        "warns that a legacy hook is wired machine-wide, and does not call it a doubled fire",
+        ("wired machine-wide" in context, "rendered twice" in context),
+        (True, False),
+    )
     check("names the wired script", "session-exchange-active-now.sh" in context, True)
     # The one on disk but not wired is inert, so it is not what the warning is about.
     check(
@@ -167,6 +183,85 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("exits 0 and says nothing", (code, out), (0, None))
     check("the claim is gone, with nobody having had to remember", claim.exists(), False)
+
+print("session start, with a legacy hook wired under this root")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The other fault: a wiring in a `settings.local.json` under the root fires for this root, so
+    # this root really is rendered twice. Nothing machine-wide here, which is the half that has to
+    # stay out of the message - a session told both things at once learns neither.
+    home, root, repo = fixture(tmp, wire_legacy=False, wire_under_root=True)
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-4", "cwd": str(repo)},
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check(
+        "warns that this root is rendered twice, and says nothing about machine-wide",
+        ("rendered twice" in context, "machine-wide" in context),
+        (True, False),
+    )
+    check("and names the script it found", "session-exchange-active-now.sh" in context, True)
+
+print("session start, with one wired each way")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # Both faults at once, which is the state a half-finished step 7 leaves, and the only one where
+    # the two warnings can be told apart by what they name. Two different scripts on purpose: with
+    # the same one wired twice, a warning naming everything it found reads identically to one naming
+    # only its own half, and two inputs that agree cannot say which was read.
+    home, root, repo = fixture(tmp, wire_legacy=True, wire_under_root=True)
+    (root / ".claude" / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'bash "$HOME/.claude/hooks/alpha-session-lane.sh"',
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-5", "cwd": str(repo)},
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    doubled = [line for line in context.splitlines() if "rendered twice" in line]
+    crossing = [line for line in context.splitlines() if "machine-wide" in line]
+    check(
+        "both faults are warned about, not the first one found",
+        (len(doubled), len(crossing)),
+        (1, 1),
+    )
+    check(
+        "the doubled-fire line names only the wiring under this root",
+        doubled
+        and (
+            "alpha-session-lane.sh" in doubled[0],
+            "session-exchange-active-now.sh" in doubled[0],
+            "1 legacy hook" in doubled[0],
+        ),
+        (True, False, True),
+    )
+    check(
+        "and the machine-wide line names only the one in the user's own settings",
+        crossing
+        and (
+            "session-exchange-active-now.sh" in crossing[0],
+            "alpha-session-lane.sh" in crossing[0],
+        ),
+        (True, False),
+    )
 
 print("session start, with nothing wired and nothing wrong")
 
@@ -305,9 +400,14 @@ with tempfile.TemporaryDirectory() as tmp:
 # One script, wired in two settings files, is one script. Counted as a list it reads "2 legacy hook
 # script(s) still wired" and names the same file twice, which is a migration report nobody can act
 # on: the reader goes looking for a second wiring that is not there.
+#
+# Both wirings have to sit in the same bucket for this to be the assertion it is meant to be. With
+# one machine-wide and one under the root, the script is named once per warning because it is two
+# faults, and counting two names would be counting the two warnings rather than the dedupe.
 with tempfile.TemporaryDirectory() as tmp:
-    home, root, repo = fixture(tmp, wire_legacy=True)
-    (root / ".claude" / "settings.local.json").write_text(
+    home, root, repo = fixture(tmp, wire_legacy=False, wire_under_root=True)
+    (repo / ".claude").mkdir(parents=True)
+    (repo / ".claude" / "settings.local.json").write_text(
         json.dumps(
             {"hooks": {"SessionEnd": [{"hooks": [{"type": "command", "command": LEGACY_COMMAND}]}]}}
         )
