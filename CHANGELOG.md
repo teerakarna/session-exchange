@@ -23,12 +23,13 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   gitleaks, a gate asserting the runtime imports nothing but the standard library, and dependabot.
 - A mutation sweep as a CI gate. `plugin/tests/mutate.py` breaks one rule at a time and requires the
   suite to notice; `test_mutations.py` is the cheap half that keeps the tables from drifting away
-  from the source they claim to patch. Eighty-seven mutations across `claims`, `exchange_root`, `hook`,
-  `hookio`, `store` and `validate`; of the five modules with no table, `NOT_YET` names two and
-  `DECLINED` names three with the reason recorded next to each. Every table so far has found live
-  rules on its first run: two guards in `hookio.payload` wide enough to let a hook exit 1 with a
-  traceback, ten unasserted rules in root resolution, and every failure path of `seed`, `update` and
-  `clear` in `claims`.
+  from the source they claim to patch. A hundred and thirty-eight mutations across `claims`,
+  `exchange_root`, `hook`, `hookio`, `legacy`, `registry`, `store` and `validate`; the three modules
+  with no table are all in `DECLINED`, with the reason recorded next to each. Every table has found
+  live rules on its first run: two guards in `hookio.payload` wide enough to let a hook exit 1 with a
+  traceback, ten unasserted rules in root resolution, every failure path of `seed`, `update` and
+  `clear` in `claims`, and five rules in `legacy` that the end-to-end fixtures were assumed to hold
+  up and do not. `registry` had no test file at all, and now has forty checks.
 
 ### Not built yet
 

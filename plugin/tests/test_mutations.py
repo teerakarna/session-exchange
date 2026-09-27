@@ -11,7 +11,7 @@ untested while hiding a fake one. Asserted here rather than only inside the swee
 that moves a line turns the table red on the cheap job instead of on the slow one.
 
 **A module with no table at all.** None of the eleven had one in the repo before this file existed,
-and four do now, which is exactly how the suite came to read as thorough: the modules that got
+and eight do now, which is exactly how the suite came to read as thorough: the modules that got
 swept are thorough. So `TABLES` and `UNSWEPT` together have to account for every module in
 `plugin/lib`, and a new module joins neither by accident.
 
@@ -546,13 +546,25 @@ MAPPED = {
 }
 
 
-def targets_with(paths):
-    real = mutate.TABLES
+def targets_with(paths, not_yet=None, declined=None):
+    """`targets` against fixtures rather than against the real tables and the real debt list.
+
+    The debt lists are swapped for the same reason `TABLES` is: they are meant to empty out. Keyed
+    on a real member, the two checks below stop being able to fail the moment the last table owed
+    under #8 is written, and what they would report then is a pass.
+    """
+    real = (mutate.TABLES, mutate.NOT_YET, mutate.DECLINED)
     mutate.TABLES = MAPPED
+    mutate.NOT_YET = {"notyet"} if not_yet is None else not_yet
+    mutate.DECLINED = (
+        {"declined": "asserted here, not read from the real reason"}
+        if declined is None
+        else declined
+    )
     try:
         return mutate.targets(paths)
     finally:
-        mutate.TABLES = real
+        mutate.TABLES, mutate.NOT_YET, mutate.DECLINED = real
 
 
 check("a changed lib module is swept", targets_with(["plugin/lib/hookio.py"]), (["hookio"], []))
@@ -576,10 +588,12 @@ check(
     ),
     ([], []),
 )
+# This one used to assert `([], [])`, which was #24 written down as a rule: silence about a changed
+# test file nothing measures. It selects nothing, which was right, and said nothing, which was not.
 check(
-    "and a test file that catches no mutation selects nothing either",
+    "and a test file that catches no mutation selects nothing, but is not silent about it",
     targets_with(["plugin/tests/test_cli.py"]),
-    ([], []),
+    ([], ["test_cli.py is named by no mutation, so no table maps this change"]),
 )
 # The shape filter is three conditions and the probe found two of them deletable: with the `plugin`
 # test or the extension test gone, nothing in the suite objected. Both are the same failure, a path
@@ -609,12 +623,27 @@ check(
 
 # An unswept module has to leave a line behind. Silence here is a PR whose only changed module was
 # never swept by anything, reported as a clean sweep, which is this repo's whole subject.
-modules, notes = targets_with(["plugin/lib/cli.py"])
+modules, notes = targets_with(["plugin/lib/declined.py"])
 check("a declined module selects nothing", modules, [])
 check("but says it was declined, and why", "deliberately not swept" in " ".join(notes), True)
-modules, notes = targets_with(["plugin/lib/registry.py"])
+check(
+    "and the reason is the one on the entry, not a generic line", "asserted here" in notes[0], True
+)
+modules, notes = targets_with(["plugin/lib/notyet.py"])
 check("a module still owed a table selects nothing", modules, [])
 check("and says the change went unswept", "goes unswept" in " ".join(notes), True)
+
+# The same hole one step over, and the one that shipped: a changed test file no `caught_by` names
+# mapped to nothing and said nothing, so a diff that added a whole test file printed "nothing that a
+# sweep can measure changed". The first of these two could not have failed before; the second is the
+# fix. `test_handlers.py` is the permanent instance, the handlers being shell.
+modules, notes = targets_with(["plugin/tests/test_store_claims.py"])
+check("a test file a mutation names selects its module", modules, ["store"])
+check("and says nothing, because it was measured", notes, [])
+modules, notes = targets_with(["plugin/tests/test_handlers.py"])
+check("a test file no mutation names selects nothing", modules, [])
+check("but says no table maps it", "named by no mutation" in " ".join(notes), True)
+check("and names the file, not just the fact", "test_handlers.py" in " ".join(notes), True)
 
 docs = (["README.md"], None)
 code, printed = run_main(["--since", "main"], tables=TWO, caught=True, changed=docs)

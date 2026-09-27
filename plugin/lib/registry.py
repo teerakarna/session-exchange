@@ -71,11 +71,17 @@ def by_session_id(session_id, sessions_dir=SESSIONS_DIR):
     return None
 
 
-def _parents(pid, limit=12):
+def _parents(pid, limit=12, run=subprocess.run):
     """This process and its ancestors, nearest first.
 
     `ps` rather than `/proc`, because macOS has no `/proc` and this is the one place the plugin has
     to care which kernel it is on. Bounded, so a cycle or a lie cannot hang a command.
+
+    `run` is a seam, not a feature. Nothing overrides it in the plugin, and the two ways the call
+    below fails for real - no `ps` on PATH in a minimal image, and a `ps` that hangs past the
+    timeout - are not reachable from a test on a machine that has a working one. Without the seam
+    the `except` was unfalsifiable: deleting it left the suite green, which is the state this repo
+    treats as a defect rather than as coverage.
     """
     chain = []
     current = int(pid)
@@ -90,7 +96,7 @@ def _parents(pid, limit=12):
             # gain. Ruff's S603/S607 are answered in ruff.toml rather than inline, because an
             # inline suppression binds to a physical line and the formatter decides which line
             # this call ends up on.
-            out = subprocess.run(
+            out = run(
                 ["ps", "-o", "ppid=", "-p", str(current)],
                 capture_output=True,
                 text=True,
