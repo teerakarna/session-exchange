@@ -231,10 +231,15 @@ jobs:
   # minutes and a quarter-minute range was never supported by them - it was the tightest reading of
   # three samples that happened to cluster.
   #
-  # The figure for the eight tables is one measurement rather than a range or a scaling: 7m50s, from
-  # this branch's own resweep of 135 mutations (06:01:25 to 06:09:15, job total 7m55s). Quoted as the
-  # single sample it is. Scaling 1.55x off the range above would have been arithmetic dressed as a
-  # measurement, and the three mutations added after that run are not in it.
+  # The figures for the eight tables are measurements rather than a range or a scaling. Two full
+  # resweeps on this branch: 7m50s for 135 mutations, then 7m32s for all 138 (job totals 7m55s and
+  # 7m41s, run 36281802966). Scaling 1.55x off the range above would have been arithmetic dressed as a
+  # measurement, and it would have landed near enough to look right for the wrong reason.
+  #
+  # Read the step duration, not the first log line. The 138 run printed its `sweeping ...` line four
+  # minutes in, which is stdout block-buffering flushing rather than the sweep starting late, and taking
+  # it at face value would have made the sweep look like half its cost with four minutes of setup in
+  # front of it. Setup is six seconds: checkout two, `setup-python` under one, the rest is the sweep.
   #
   # The narrowing is in `mutate.py --since`, not in this file, so the same command is the local one.
   # `targets` there derives the module list, and it is wider than "the lib files that changed": a test
