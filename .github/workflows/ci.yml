@@ -192,13 +192,12 @@ jobs:
   #
   # Its own job rather than a step in `checks`, which the cost rule in CONTRIBUTING.md would otherwise
   # say. Three reasons, and the arithmetic was measured rather than assumed. It runs the full suite
-  # once per mutation, plus the baseline - a hundred and thirty-six runs and seven minutes ten seconds
-  # locally for the eight tables there are now - so as a step it would sit behind or in front of a
-  # lint that takes
-  # under a second, and either order is wrong: last means slow feedback on a typo, first means the
-  # cheap checks wait on it. Its failure is
-  # also categorically different from any other step's, naming a rule nothing asserts rather than a
-  # rule broken, and merging it in would report that as "checks failed".
+  # once per mutation, plus the baseline - a hundred and thirty-nine runs and seven and a half minutes
+  # locally for the eight tables there are now - so as a step it would sit behind or in front
+  # of a lint that takes under a second, and either order is wrong: last means slow feedback on a typo,
+  # first means the cheap checks wait on it. Its failure is also categorically different from any other
+  # step's, naming a rule nothing asserts rather than a rule broken, and merging it in would report
+  # that as "checks failed".
   #
   # What it is not is free, and the first version of this comment claimed it was. `checks` comes in
   # between fifteen and thirty seconds and the sweep between one and one and a half minutes, so a
@@ -220,7 +219,7 @@ jobs:
   #
   # Narrowed to what the change could have broken, rather than every table, and that is the one tier
   # in this workflow. A sweep is one full suite run per mutation, so its cost is linear in the size of
-  # the tables: eight modules is 135 mutations and seven minutes ten seconds locally, where six was
+  # the tables: eight modules is 138 mutations and seven and a half minutes locally, where six was
   # just over four. That is already past what a push should carry to re-answer a question the last push
   # answered about code it did not touch, and every table added makes it worse. Nothing else here grows
   # that way, which is why nothing else here is tiered - the matrix is four fixed legs, and making the
@@ -230,9 +229,12 @@ jobs:
   # quarters", and the correction is about the range rather than the number. Four full resweeps of the
   # 87-mutation set came in at 3:02, 4:26, 4:40 and 4:57, so the spread is more like three to five
   # minutes and a quarter-minute range was never supported by them - it was the tightest reading of
-  # three samples that happened to cluster. No runner measurement exists for 135 yet, the full sweep
-  # being weekly and this job narrowing on every push, so none is quoted here: scaling 1.55x off a
-  # range that wide would be arithmetic dressed as a measurement.
+  # three samples that happened to cluster.
+  #
+  # The figure for the eight tables is one measurement rather than a range or a scaling: 7m50s, from
+  # this branch's own resweep of 135 mutations (06:01:25 to 06:09:15, job total 7m55s). Quoted as the
+  # single sample it is. Scaling 1.55x off the range above would have been arithmetic dressed as a
+  # measurement, and the three mutations added after that run are not in it.
   #
   # The narrowing is in `mutate.py --since`, not in this file, so the same command is the local one.
   # `targets` there derives the module list, and it is wider than "the lib files that changed": a test

@@ -168,7 +168,10 @@ with tempfile.TemporaryDirectory() as tmp:
     # And says so. Silence here is the failure this module exists to prevent, one step removed: a
     # file that might wire a legacy hook, reported as clean because it could not be read.
     check("but is reported as unknown rather than as clean", len(problems), 1)
-    check("and the report names the file", "broken" in problems[0], True)
+    # `problems[0]` bare is an IndexError under the mutation that stops the append, which is the
+    # check above failing and then this one crashing instead of failing - the sweep would score that
+    # off the traceback rather than off the assertion, and the rest of the file would not run.
+    check("and the report names the file", problems and "broken" in problems[0], True)
 
 print("and the report the session start acts on")
 

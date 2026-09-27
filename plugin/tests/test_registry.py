@@ -62,7 +62,9 @@ print("liveness is checked, not trusted")
 check("this process is alive", registry.alive(LIVE), True)
 check("a reaped process is not", registry.alive(DEAD), False)
 # JSON holds whatever was written, and a pid is as likely to arrive as a string as an int. Coercing
-# is the whole reason `int()` is in there, and without it every row would read as dead.
+# is the whole reason `int()` is in there, and without it a row whose pid arrived as a string reads
+# as dead - an int pid signals fine either way, which is what makes this the case worth writing
+# down.
 check("a pid that arrives as a string is still a pid", registry.alive(str(LIVE)), True)
 for junk in (None, "", "not-a-pid", [LIVE]):
     # Called inside a try rather than bare in the argument list, because "and not a crash either"
@@ -110,14 +112,31 @@ with tempfile.TemporaryDirectory() as tmp:
     sessions = pathlib.Path(tmp) / "sessions"
     write(sessions, "good", sessionId="good-one", pid=LIVE, name="zulu")
     # Named to sort before the readable row on purpose. Called `truncated.json` it sorts after, and
-    # then skipping the rest of the directory rather than this one file passes just the same.
+    # then `continue` becoming `break` leaves the good row already appended and the check passes.
+    #
+    # Which means this catch depends on the `sorted()` around the glob in `entries`, and that line
+    # has no mutation and no check of its own. Recorded rather than fixed, because both obvious
+    # fixes are wrong. Adding a second bad file sorting after the good row does nothing: I tried it,
+    # and with `sorted()` removed as well the suite stayed green, because raw `glob` order happened
+    # to yield `good.json` first and neither bad file preceded it. And no fixture can be made
+    # order-independent here - catching `break` needs a bad file read before some good row in
+    # *every* possible order, which no set of names guarantees when the order is the filesystem's
+    # business. Asserting the read order directly has the same problem from the other end: the only
+    # observable it affects is which of two equally-named rows wins a stable-sort tie, so a check on
+    # it would pass or fail by filesystem, which is worse than no check.
+    #
+    # So `sorted()` there is a third category, alongside the unfalsifiable lines noted below:
+    # removing it changes no answer this suite can see, and quietly weakens this check. That is
+    # written down here because it is the only place it can be, and it is the reason to leave the
+    # line alone.
     (sessions / "a-truncated.json").write_text("{ nope")
     (sessions / "a-list.json").write_text('["not a row"]')
-    write(sessions, "nameless-id", pid=LIVE, name="no id at all")
+    write(sessions, "named-no-id", pid=LIVE, name="no id at all")
     (sessions / "ignored.txt").write_text(json.dumps({"sessionId": "wrong-suffix", "pid": LIVE}))
 
-    # Four different ways of being unreadable, and none of them is allowed to take the readable row
-    # down with it or to arrive as a row. A hook that raises here is a session start that failed, so
+    # Four files that must not arrive as rows: one that will not parse, one that parses to a list,
+    # one with no `sessionId`, and one whose suffix is not `.json`. None of them may take the
+    # readable row down with it either. A hook that raises here is a session start that failed, so
     # the raise is caught and named here rather than being allowed to end the file.
     try:
         ids = [str(r.get("sessionId")) for r in registry.entries(sessions)]
@@ -148,10 +167,11 @@ with tempfile.TemporaryDirectory() as tmp:
         ["alpha", "bravo", "charlie"],
     )
 
-    # A row with no name sorts by its id, not by the string "None" that a bare `r.get("name")` key
-    # would produce. The id has to sort *after* every name for that to be visible: "None" is
-    # capitalised, so it sorts before every lowercase name, and an id like "aaa-unnamed" lands in
-    # the same place the bug does and reads as correct.
+    # A row with no name sorts by its id, not by the string "None" that `str(r.get("name"))`
+    # produces. A bare `r.get("name")` makes `sorted` raise on the mix of None and str; the string
+    # is what the mutation of this line actually does. The id has to sort *after* every name to be
+    # visible: "None" is capitalised, so it sorts before every lowercase name, and an id like
+    # "aaa-unnamed" lands in the same place the bug does and reads as correct.
     write(sessions, 4, sessionId="zulu-unnamed", pid=LIVE)
     check(
         "a row with no name sorts by its id",
@@ -195,21 +215,29 @@ with tempfile.TemporaryDirectory() as tmp:
     # Exact, not a prefix or a substring: two sessions whose ids share a prefix are the normal case,
     # and resolving one to the other would attribute a claim to the wrong session.
     check("a prefix of a real id is not that id", registry.by_session_id("sess", sessions), None)
-    # These two are the second unfalsifiable guard, for the same reason as the `is_dir` one above.
-    # `entries` never yields a row with a falsy `sessionId`, so removing `if not session_id` returns
-    # None anyway: what the guard buys is a directory read skipped, not a different answer. It earns
-    # its place the moment the comparison below stops being `==`, which is why both are here.
+    # These two were written up as a second unfalsifiable guard, on the grounds that `entries` never
+    # yields a row with a falsy `sessionId` so removing `if not session_id` returns None anyway.
+    # That is true of the answer and not of the behaviour, and the write-up named the difference
+    # without following it: what the guard buys is a directory read skipped, which is observable.
     for empty in ("", None):
         check(
             f"{empty!r} matches nothing rather than the first row",
             registry.by_session_id(empty, sessions),
             None,
         )
+    # So here is the observation, and the guard is falsifiable after all. The sentinel is not a
+    # path, so `entries` raises on it: with the guard an empty id is answered without the directory
+    # ever being reached, and without it the raise is the proof that it was. Asserted because a
+    # caller that has no id yet is the ordinary case for a hook whose payload carried none, and
+    # doing a directory read per call to return None regardless is the kind of cost nothing would
+    # report.
+    try:
+        unread = registry.by_session_id("", object())
+    except Exception as exc:
+        unread = f"raised {type(exc).__name__}"
+    check("an empty id is answered without reading the directory at all", unread, None)
 
 print("finding the session this process is running inside")
-
-with tempfile.TemporaryDirectory() as tmp:
-    sessions = pathlib.Path(tmp) / "sessions"
 
 
 def owner(sessions):
@@ -221,11 +249,20 @@ def owner(sessions):
     return row and row.get("sessionId")
 
 
-# The third unfalsifiable line: `own_entry` reads `entries(..., live_only=False)`, and every pid it
-# can match is an ancestor of a live process and therefore alive. Filtering on liveness there would
-# change no answer. It is honest about not caring rather than relying on that, and no mutation of it
-# would fail, so none is offered.
-ANCESTOR = registry._parents(os.getpid())[1]
+# The second unfalsifiable line: `own_entry` reads `entries(..., live_only=False)`, and no registry
+# row it can match carries a pid that `alive` answers False for, because every pid in the chain came
+# out of `ps` as the parent of a live process. Filtering on liveness there would change no answer,
+# and no mutation of it would fail, so none is offered. The reason is "no row can carry such a pid"
+# rather than "an ancestor is alive", which would conflate existing with signalable: `alive` uses
+# signal 0, so it answers False for a process that is running and not ours, and over SSH the chain
+# really does contain a root-owned `sshd`.
+CHAIN = registry._parents(os.getpid())
+# `CHAIN[1]` unguarded is an `IndexError` a dozen checks below here, naming nothing about process
+# trees and taking the rest of the file with it. Reachable rather than theoretical: run the suite as
+# a container's entry point, which is the natural way to exercise the 3.9 floor without installing a
+# 3.9, and the interpreter is pid 1 with no ancestor to find. Named and failed rather than skipped,
+# because these checks not having run is exactly what a skip hides.
+ANCESTOR = CHAIN[1] if len(CHAIN) > 1 else None
 
 with tempfile.TemporaryDirectory() as tmp:
     sessions = pathlib.Path(tmp) / "sessions"
@@ -240,20 +277,36 @@ with tempfile.TemporaryDirectory() as tmp:
     write(sessions, "absent", sessionId="no-pid", name="absent")
     check("a row with an unusable pid is skipped", owner(sessions), "mine")
 
-with tempfile.TemporaryDirectory() as tmp:
-    sessions = pathlib.Path(tmp) / "sessions"
-    # Only an ancestor has a row, which is the real arrangement: a command run through a tool call
-    # is several processes below the session, and matching on its own pid alone finds nothing.
-    write(sessions, ANCESTOR, sessionId="above-me", pid=ANCESTOR, name="ancestor")
-    check("a row belonging to an ancestor is found by walking up", owner(sessions), "above-me")
+if ANCESTOR is None:
+    check("this process has an ancestor, or the three checks below cannot run", ANCESTOR, "a pid")
+else:
+    with tempfile.TemporaryDirectory() as tmp:
+        sessions = pathlib.Path(tmp) / "sessions"
+        # Only an ancestor has a row, which is the real arrangement: a command run through a tool
+        # call is several processes below the session, and matching on its own pid alone finds
+        # nothing.
+        write(sessions, ANCESTOR, sessionId="above-me", pid=ANCESTOR, name="ancestor")
+        check("a row belonging to an ancestor is found by walking up", owner(sessions), "above-me")
 
-with tempfile.TemporaryDirectory() as tmp:
-    sessions = pathlib.Path(tmp) / "sessions"
-    # And with both, the nearest one wins. Walking the chain the other way round would hand a nested
-    # command the outermost session's row, which is the wrong session rather than no session.
-    write(sessions, LIVE, sessionId="mine", pid=LIVE, name="self")
-    write(sessions, ANCESTOR, sessionId="above-me", pid=ANCESTOR, name="ancestor")
-    check("the nearest match wins, not the outermost", owner(sessions), "mine")
+    with tempfile.TemporaryDirectory() as tmp:
+        sessions = pathlib.Path(tmp) / "sessions"
+        # And with both, the nearest one wins. Walking the chain the other way round would hand a
+        # nested command the outermost session's row, the wrong session rather than no session.
+        write(sessions, LIVE, sessionId="mine", pid=LIVE, name="self")
+        write(sessions, ANCESTOR, sessionId="above-me", pid=ANCESTOR, name="ancestor")
+        check("the nearest match wins, not the outermost", owner(sessions), "mine")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        sessions = pathlib.Path(tmp) / "sessions"
+        # The pid as a string, which is how JSON carries whatever was written. `alive` is asserted
+        # against exactly this one function up, and `own_entry` builds its own dict of rows keyed on
+        # `int(r["pid"])`, so the rule has to hold twice. Every other fixture in this file writes an
+        # int, and against an int an int-keyed lookup and a raw-keyed one agree - two inputs that
+        # agree cannot say which was read. The row is put on an ancestor rather than on this process
+        # because a string pid matching `os.getpid()` would be caught by the nearest-match check
+        # above by accident.
+        write(sessions, ANCESTOR, sessionId="string-pid", pid=str(ANCESTOR), name="ancestor")
+        check("a string pid still matches the chain", owner(sessions), "string-pid")
 
 with tempfile.TemporaryDirectory() as tmp:
     sessions = pathlib.Path(tmp) / "sessions"
@@ -262,10 +315,9 @@ with tempfile.TemporaryDirectory() as tmp:
 
 print("the walk up the process tree")
 
-chain = registry._parents(os.getpid())
-check("the walk starts with this process", chain[0], os.getpid())
-check("and goes further than one level, or it would find nothing", len(chain) > 1, True)
-check("nothing in it is pid 1 or below", [p for p in chain if p <= 1], [])
+check("the walk starts with this process", CHAIN[0], os.getpid())
+check("and goes further than one level, or it would find nothing", len(CHAIN) > 1, True)
+check("nothing in it is pid 1 or below", [p for p in CHAIN if p <= 1], [])
 # Bounded, so a cycle or a lying `ps` cannot hang a command. Asserted at 2 rather than at the
 # default, because the real depth varies by how the suite was invoked.
 check("the limit is a limit", len(registry._parents(os.getpid(), limit=2)), 2)
@@ -300,6 +352,38 @@ for label, boom in (
     except Exception as exc:
         got = f"raised {type(exc).__name__}"
     check(f"{label} ends the walk rather than raising", got, [os.getpid()])
+
+# And the other half of the seam, which the two above cannot reach. `explodes` raises whatever it is
+# handed regardless of how the call was made, so "a ps that hangs ends the walk" passes whether the
+# real call is bounded or not: it asserts the `except` arm, not the thing that gets there. Deleting
+# `timeout=5` left all of this green, which is the same defect one layer in - a seam introduced to
+# make something assertable, with only the easy side of it asserted.
+seen = {}
+
+
+def record(argv, **kwargs):
+    """A stand-in that answers like `ps` and keeps how it was asked."""
+    seen["argv"] = argv
+    seen.update(kwargs)
+    return subprocess.CompletedProcess(argv, 0, "1\n", "")
+
+
+registry._parents(os.getpid(), run=record)
+# Slices and `get` rather than subscripts, for the reason the `alive` loop above gives: where the
+# walk ends before it calls `run` at all - a container entry point, pid 1 - `seen` is empty, and a
+# subscript here is a KeyError that takes the rest of the file with it rather than four named
+# failures. Found by simulating that case, having written the guard for it a few checks up and then
+# repeated the mistake.
+argv = seen.get("argv", [])
+check("the ps call is bounded, not just guarded", seen.get("timeout"), 5)
+# Unqualified on purpose, and the module says so at length: /bin/ps on macOS, /usr/bin/ps on most
+# Linux, and hardcoding either breaks the other. A claim that load-bearing with nothing reading it
+# is how the comment and the code drift apart.
+check("ps is left unqualified for PATH to resolve", argv[:1], ["ps"])
+# `ppid=` rather than `ppid`: the trailing `=` is what suppresses the header, and without it the
+# first line read back is the word PPID, which is not a number and ends the walk at once.
+check("and it asks for the parent pid with no header", argv[1:3], ["-o", "ppid="])
+check("output is captured rather than inherited", seen.get("capture_output"), True)
 
 print()
 if failures:

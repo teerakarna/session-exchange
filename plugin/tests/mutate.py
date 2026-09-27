@@ -1235,6 +1235,40 @@ REGISTRY = [
         new="            return rows[pid]\n    return next(iter(rows.values()), None)",
         caught_by="test_registry.py",
     ),
+    # The three a review of this table found, each a line no mutation here offered and no check
+    # read, all three verified green before the checks went in. Two of them are rules
+    # `test_registry.py` already asserts correctly one function over, which is the shape worth
+    # naming: a file can carry a rule and drop it a few lines later, and a table written from the
+    # same reading drops it twice.
+    Mutation(
+        module="registry",
+        # The seam that made the `except` assertable did not make the timeout assertable, because a
+        # stand-in that raises unconditionally reaches the same arm whether the call is bounded or
+        # not. A hung `ps` is the failure the bound exists for and it hangs a session start.
+        rule="the ps call is bounded, not merely guarded",
+        old="                timeout=5,\n",
+        new="",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        # Asserted for `alive` one function up and silently dropped here, where it decides whether a
+        # command can learn its own session id at all. Every fixture in the file wrote an int, so an
+        # int-keyed dict and a raw-keyed one agreed on all of them.
+        rule="a pid that arrives as a string keys the same row as an int",
+        old='        int(r["pid"]): r',
+        new='        r["pid"]: r',
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        # Written up as unfalsifiable on the grounds that the answer is None either way. True of the
+        # answer, false of the behaviour: what it skips is a directory read, which is observable.
+        rule="an empty id is answered without reading the directory",
+        old="    if not session_id:\n        return None",
+        new="    if False:\n        return None",
+        caught_by="test_registry.py",
+    ),
 ]
 
 TABLES = {
@@ -1253,13 +1287,12 @@ TABLES = {
 # plus the keys of TABLES are exactly what is in `plugin/lib`, so adding a module without deciding
 # which of the three it belongs in fails the build. Tracked as issue #8.
 #
-# Empty as of the table below, which closes #8: the five modules it was narrowed to all have one,
-# and the other three are in `DECLINED` with a reason rather than here. It stays as an empty set
-# rather than being deleted, because it is where the next module lands: a new file in `plugin/lib`
-# fails
-# the accounting in `test_mutations.py` until someone puts its name in one of the three, and that
-# forced decision is the whole mechanism. The checks that read this are given fixtures rather than
-# real members, so they can still fail with nothing in here.
+# Empty as of the table below, which closes #8: eight of the eleven modules have a table now, and
+# the other three are in `DECLINED` with a reason rather than here. It stays as an empty set rather
+# than being deleted, because it is where the next module lands: a new file in `plugin/lib` fails
+# the accounting in `test_mutations.py` until someone puts its name in one of the three - a table,
+# this, or `DECLINED` - and that forced decision is the whole mechanism. The checks that read this
+# are given fixtures rather than real members, so they can still fail with nothing in here.
 NOT_YET = set()
 
 # Not "not yet". Decided against, with the reason next to the name, because a debt list that

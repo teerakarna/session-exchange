@@ -68,7 +68,8 @@ which is a cheaper feedback loop than a sweep whose cost is linear in the size o
 exists because a debt list that quietly contains permanent entries stops being read as a debt list.
 Reversing one of those decisions is an edit to a dict, which is the point of writing the reason down.
 `NOT_YET` stays as an empty set rather than being deleted, because a new module in `plugin/lib` fails
-the accounting until its name goes into one of the two, and that forced choice is the mechanism.
+the accounting until it gets one of the three - a table, a place in `NOT_YET`, or a recorded reason in
+`DECLINED` - and that forced choice is the mechanism.
 
 Writing it down cost two more instances of the defect, in the harness, both found by probing it
 rather than by reading it. The scratch copy was `plugin/` alone while `test_plugin_layout.py` reads
@@ -208,8 +209,8 @@ buys is the round trip, a format failure found in under a second rather than two
 log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: eight tables is 135 mutations and seven minutes ten
-seconds locally, measured, where six tables was just over four. That is already past what a push
+taste. A sweep is one full suite run per mutation: eight tables is 138 mutations and seven and a half
+minutes locally, measured, where six tables was just over four. That is already past what a push
 should carry to re-answer a question the last push answered about code it did not touch, and it grows
 with every table added. So `ci` sweeps only the modules the change could have affected, and the full
 sweep runs weekly where the length of it does not matter.
