@@ -68,7 +68,10 @@ State under a root:
 | Humans and sessions | Markdown | `<root>/.claude/exchange/EXCHANGE.md` |
 
 One file per writer, never a shared append target: concurrent writers otherwise contend, and it is also
-why no write needs a lock, since the only writer of a session's claim is that session. No regex ever
+why a claim needs no lock, since the only writer of a session's claim is that session. That last part
+stops at claims. A handoff has two writers - the sender, and whichever session accepts or closes it -
+so the argument does not cover the handoff directory, and #44 is the open question of what it needs
+instead. No regex ever
 parses hand-typed structure again. The markdown keeps narrative, decisions and history, which is what a
 ledger is genuinely good at.
 

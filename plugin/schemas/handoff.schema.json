@@ -69,7 +69,7 @@
     },
     "history": {
       "type": "array",
-      "description": "Append-only. Status changes in place - the ledger's own convention was acknowledge-in-place and it was the right one - so the previous state has to live somewhere or it is simply lost.",
+      "description": "Append-only by intent, and not yet by construction: see #44. Status changes in place - the ledger's own convention was acknowledge-in-place and it was the right one - so the previous state has to live somewhere or it is simply lost.",
       "items": {
         "type": "object",
         "additionalProperties": false,

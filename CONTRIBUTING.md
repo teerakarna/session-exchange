@@ -264,7 +264,10 @@ implement it and the meta-test will tell you when you have not.
   That split is the portability, and a hardcoded path anywhere in here is the bug class being removed.
 - **Roots never read each other**, in either direction. This is the test that must never regress.
 - **One file per writer**, never a shared append target. Concurrent sessions on one file contend, and
-  it is also why no write needs a lock: the only writer of a session's claim is that session.
+  it is also why a claim needs no lock: the only writer of a session's claim is that session. Read the
+  second half narrowly - it is an argument about claims, not a property of the store. A handoff has two
+  writers, the sender and whoever accepts or closes it, so `set_status` is a read-modify-write that two
+  sessions can interleave. See #44; do not cite this bullet as licence for a new unlocked writer.
 - **A hook must never fail a session start.** Everything is wrapped, exits 0, and reports the problem
   in the injected context instead. A bad root resolves to no root and says why.
 - **Silence is a real answer.** No root means no output and no files, ever. An empty section injected

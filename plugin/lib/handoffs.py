@@ -1,9 +1,12 @@
 """Writing handoffs, and reading them back with the one disagreement that cannot be tolerated.
 
-The first thing in this plugin that writes state a *different* session will read. A claim is written
-and read by one session, so a wrong claim misinforms nobody but its author; a handoff is addressed
-to whoever works in a scope next, which may be a session that does not exist yet. Two rules follow
-from that and everything else here is detail.
+The first thing in this plugin that writes state a *different* session will read, and also the first
+thing a different session will write. A claim is written and read by one session, so a wrong claim
+misinforms nobody but its author; a handoff is addressed to whoever works in a scope next, which may
+be a session that does not exist yet, and is then transitioned by that other session rather than by
+its author. The second half is why the store's "no write needs a lock" argument does not reach this
+module, which is #44 and is not yet resolved. Two rules follow from the first half and everything
+else here is detail.
 
 **Posting never overwrites.** `post` refuses an id that is already on disk rather than replacing it.
 An id collision means two handoffs, and silently keeping one is the failure mode this project is
@@ -135,6 +138,12 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     Refuses a move to the status it already has. "Close a closed handoff" is not a no-op worth
     absorbing: either the caller is looking at a stale render, or two sessions are answering the
     same thing, and both are worth one line of output rather than a second identical history entry.
+
+    That catches the second session only when the two runs are serialised. There is no lock around
+    the read, the append and the write, so two genuinely concurrent moves both pass the guard and
+    the later write drops the earlier entry. Worse, the surviving file is internally consistent, so
+    `state_of` reports nothing: the invariant this module polices is the one a lost update happens
+    to preserve. See #44.
     """
     if status not in STATUSES:
         return None, f"{status!r} is not a handoff status; one of {', '.join(STATUSES)}"
