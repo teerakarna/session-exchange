@@ -63,6 +63,11 @@ check(
     True,
 )
 check(
+    "paths with a session are refused rather than dropped on the way past",
+    handoffs.to_scope(session_id="s", paths=["a"]),
+    (None, "--path narrows a repo scope, so it cannot go with --session"),
+)
+check(
     "nothing at all names the flags rather than failing schema validation later",
     handoffs.to_scope()[1],
     "say who it is for: --repo (optionally with --path) or --session",
@@ -192,9 +197,12 @@ with tempfile.TemporaryDirectory() as tmp:
         handoffs.set_status(root, "h1", "done")[1],
         "'done' is not a handoff status; one of open, accepted, closed",
     )
+    # `or ""` for the same reason as the overwrite check above - and this one was missed when
+    # that one was fixed. The rules that make this return a problem are the rules a mutation
+    # breaks, and a `TypeError` here would stop the file before the disagreement section runs.
     check(
         "an id with no record is named",
-        "no handoff with id h2" in handoffs.set_status(root, "h2", handoffs.OPEN)[1],
+        "no handoff with id h2" in (handoffs.set_status(root, "h2", handoffs.OPEN)[1] or ""),
         True,
     )
 

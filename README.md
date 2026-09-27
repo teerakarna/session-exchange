@@ -10,10 +10,13 @@ registry Claude Code already maintains, and the only files it writes are its own
 deliberately.
 
 **Status: early, installable, not yet load-bearing.** Root resolution, both hooks, and
-`init | show | claim | doctor | handoff` work end to end. The import out of the existing markdown
-ledger is not built, and `Stop` is deliberately unwired until it is. Seven migration steps, three
-done; `doctor` prints all seven derived from live state, and the design lives with the plan (see
-[Docs](#docs)).
+`init | show | claim | doctor | handoff` all work. Presence is delivered end to end; handoffs are
+not. Nothing matches a handoff to a recipient yet, so a posted one is only seen by somebody who
+thinks to run `exchange handoff list`, which is the failure this project replaces rather than a use
+of it. Handoff matching and the import out of the existing markdown ledger are both unbuilt, and
+`Stop` stays deliberately unwired until the matcher gives it something to read. Seven migration
+steps, three done; `doctor` prints all seven derived from live state, and the design lives with the
+plan (see [Docs](#docs)).
 
 ## Why
 
@@ -225,7 +228,8 @@ back in through the test suite.
 python3 plugin/tests/run.py
 ```
 
-554 checks, plus one per mutation from the table accounting, and no install step.
+555 checks, plus 841 more from the table accounting - about five per mutation, not one - and no
+install step.
 `test_handoff_parser.py` exercises the legacy hook still running on one machine and **skips** if it is
 absent, so the suite is green on a machine that never had it. It is here because the port has to keep
 it passing.

@@ -210,8 +210,9 @@ log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
 taste. A sweep is one full suite run per mutation: six tables was just over four minutes locally,
-eight was 144 mutations and eight and a half, and nine is 177 mutations and 14m51s. All measured, and
-the last one is why the figures are worth keeping: scaling the 144 would have predicted ten and a half.
+eight was 144 mutations and eight and a half, and nine is 178 mutations, 14m51s of it measured at 177.
+All measured, and the last one is why the figures are worth keeping: scaling the 144 would have
+predicted ten and a half.
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
 from 3.5s to 5.0s when the ninth table landed. That is already well past what a push should carry to

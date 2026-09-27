@@ -1415,6 +1415,20 @@ HANDOFFS = [
     ),
     Mutation(
         module="handoffs",
+        # The mutation is the bug that was there. `to_scope` returned on `session_id` before
+        # the paths-without-repo refusal below it, so `--session` with `--path` posted, exited
+        # 0, and left the narrowing out of the record. Nothing in the table covered the
+        # combination, so the sweep was green on it - which is why this is a table entry and
+        # not only a check.
+        rule="--path with --session is refused rather than silently dropped",
+        old="""        if paths:
+            return None, "--path narrows a repo scope, so it cannot go with --session"
+        return {"session_id": session_id}, None""",
+        new='        return {"session_id": session_id}, None',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
         rule="no addressing at all is a refusal, not an empty scope",
         old='    return None, "say who it is for: --repo (optionally with --path) or --session"',
         new="    return {}, None",

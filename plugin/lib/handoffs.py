@@ -74,6 +74,13 @@ def to_scope(repo=None, paths=(), session_id=None):
     if repo and session_id:
         return None, "a handoff goes to a scope or to one session, not both"
     if session_id:
+        # Before the `session_id` return rather than after it. `--path` has no meaning for a session
+        # scope, and the first version of this function returned here and left the paths behind: the
+        # handoff posted, exit 0, and the narrowing the caller typed was simply not in the record.
+        # There was already a refusal written for paths-with-no-repo four lines below, which this
+        # return jumped over - a silent truncation next to the error message for it.
+        if paths:
+            return None, "--path narrows a repo scope, so it cannot go with --session"
         return {"session_id": session_id}, None
     if repo:
         scope = {"repo": repo}
@@ -137,8 +144,10 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     record, problem = store.read_json(path(root, handoff_id), SCHEMA)
     if record is None:
         return None, problem or f"no handoff with id {handoff_id} under this root"
-    if problem:
-        return None, problem
+    # No second `if problem` after that. `read_json`'s contract is that every failure returns a
+    # `None` record, so a record in hand means there is no problem to check for, and the check that
+    # used to be here was unfalsifiable: mutating it to `if False:` left the suite green, which this
+    # repo treats as a defect rather than as coverage.
 
     current, disagreement = state_of(record)
     if disagreement:

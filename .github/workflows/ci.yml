@@ -239,10 +239,11 @@ jobs:
   # above are still the 138 ones and are labelled with the count they were taken at, because a figure
   # that quietly re-labels itself as the tables grow is the thing this paragraph exists to stop.
   #
-  # Nine tables is 177 mutations, measured at 14m51s locally. Scaling the 144 figure would have said
-  # ten and a half, and the gap is the more useful half of the measurement: a sweep costs mutations
-  # times suite length, not mutations. The ninth table added 31 mutations and also added a test file
-  # and nineteen subprocess-spawning checks to the suite that all 177 then run, so per-mutation cost
+  # Nine tables is 178 mutations, and 14m51s locally is the figure at 177 - one short, and labelled
+  # that way for the reason the paragraph above gives. Scaling the 144 figure would have said ten and
+  # a half, and the gap is the more useful half of the measurement: a sweep costs mutations times
+  # suite length, not mutations. The ninth table added 32 mutations and also added a test file and
+  # nineteen subprocess-spawning checks to the suite that all of them then run, so per-mutation cost
   # went from 3.5s to 5.0s and every existing table got slower. Each table added is therefore worse
   # than linear, and the "linear in the size of the tables" line above is the optimistic reading.
   #

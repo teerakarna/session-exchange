@@ -24,7 +24,11 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   back open. `accept` and `close` are separate verbs rather than a `--status` flag, so taking
   something on cannot be typed as finishing it, and `handoff` has no default verb at all, so a typo
   cannot post or list by accident. `--body -` reads stdin, because a body with backticks in it does
-  not survive being a shell argument.
+  not survive being a shell argument. Addressing refuses every combination it cannot honour rather
+  than honouring part of one: `--repo` with `--session`, `--path` without `--repo`, `--path` with
+  `--session`, and nothing at all. The third of those was a silent truncation until review found it -
+  the paths were dropped and the handoff posted, four lines above the refusal written for exactly
+  that mistake.
 - JSON schemas for the marker, claims and handoffs, with a validator that covers only the subset of
   JSON Schema they use and raises on any keyword it does not implement.
 - `doctor` derives all seven migration steps from live state, and prints `[?]` with a reason for the
@@ -33,7 +37,7 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   gitleaks, a gate asserting the runtime imports nothing but the standard library, and dependabot.
 - A mutation sweep as a CI gate. `plugin/tests/mutate.py` breaks one rule at a time and requires the
   suite to notice; `test_mutations.py` is the cheap half that keeps the tables from drifting away
-  from the source they claim to patch. A hundred and seventy-seven mutations across `claims`,
+  from the source they claim to patch. A hundred and seventy-eight mutations across `claims`,
   `exchange_root`, `handoffs`, `hook`, `hookio`, `legacy`, `registry`, `store` and `validate`; the
   three modules with no table are all in `DECLINED`, with the reason recorded next to each. Every
   table has found live rules on its first run: two guards in `hookio.payload` wide enough to let a
