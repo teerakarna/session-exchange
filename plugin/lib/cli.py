@@ -104,6 +104,20 @@ def cmd_init(args):
     return 0
 
 
+def _capped(values, cap):
+    """The first `cap` values, with anything beyond it counted rather than dropped.
+
+    A silent truncation is the failure this repo keeps finding in other shapes: the output looks
+    complete, so nobody goes looking for the rest. The caps themselves stay, because the row that
+    went into every session at 23 KB is why they exist.
+    """
+    shown = ", ".join(values[:cap])
+    extra = len(values) - cap
+    if extra <= 0:
+        return shown
+    return f"{shown}, +{extra} more" if shown else f"+{extra} more"
+
+
 def cmd_show(args):
     resolution = _resolved(args)
     if resolution is None:
@@ -127,8 +141,13 @@ def cmd_show(args):
         focus = claim.get("focus") or "(no focus stated)"
         shown = focus[: config["max_focus_chars"]]
         print(f" {mark} {claim.get('name') or claim['session_id']}  {shown}")
-        if claim.get("paths"):
-            print(f"     paths: {', '.join(claim['paths'][: config['max_hot_paths']])}")
+        # Every list field a claim can hold, not just paths. `claim --repo` and `--ticket` were
+        # accepted, validated and written, and then no reader rendered them: a write that succeeds
+        # and cannot be read back is indistinguishable from one that was dropped, and handoffs are
+        # addressed to repo-and-path scope, so half the scope was invisible to the people it is for.
+        for field in claims.LIST_FIELDS:
+            if claim.get(field):
+                print(f"     {field}: {_capped(claim[field], config['max_hot_paths'])}")
     if any(claim["session_id"] not in live for claim in held):
         print("  ! marks a claim whose session is no longer in the registry: stale, not current.")
     for problem in problems:
@@ -246,8 +265,18 @@ def cmd_doctor(args):
     if problem:
         faults += 1
         print(f"problem   {problem}")
-    else:
+    elif resolution.marker and resolution.marker.is_file():
         print(f"marker    valid, name {config['name']!r}")
+    else:
+        # `store.config` returns the schema defaults and no problem when the marker is absent,
+        # which is right for a renderer and wrong to print as "valid". Reachable only by the
+        # override, since the walk finds a root by finding the marker - and it contradicted step 5
+        # two lines below, which is the kind of disagreement that teaches people to stop reading
+        # the output.
+        print(
+            f"marker    absent, so name {config['name']!r} and every cap are defaults. "
+            "This root came from the override rather than from a marker; step 5 writes one."
+        )
 
     state = legacy.report(root)
     print(

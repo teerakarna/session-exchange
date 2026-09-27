@@ -31,6 +31,17 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   `clear` in `claims`, and five rules in `legacy` that the end-to-end fixtures were assumed to hold
   up and do not. `registry` had no test file at all, and now has forty checks.
 
+### Fixed
+
+- `show` renders every list a claim holds. `claim --repo` and `--ticket` were accepted, validated and
+  written, and no reader displayed them, so half the scope a handoff is addressed to was invisible to
+  the people it is addressed to. Each list is capped by `max_hot_paths` as paths already were, and
+  what the cap leaves out is now counted rather than dropped in silence.
+- `doctor` says `marker absent` instead of `marker valid` when there is no marker. `store.config`
+  returns the schema defaults and no problem in that case, which is right for a renderer and was
+  being printed as though a file had been read; the line also contradicted step 5 immediately below
+  it. Reachable only through `CC_EXCHANGE_ROOT`, since the walk finds a root by finding the marker.
+
 ### Not built yet
 
 - `exchange handoff` and `exchange migrate` exit 2 and name the step that builds them. Exit 2 is
