@@ -110,7 +110,8 @@ def init_candidates(cwd):
 
     The default is the nearest directory holding a `CLAUDE.md`, *strictly above* the enclosing git
     root. Skipping the git root is deliberate: a repo-scoped exchange coordinates nothing, because
-    the sessions that need to see each other are in sibling repos.
+    the sessions that need to see each other are in sibling repos. With no enclosing repo there is
+    no repo-scoped exchange to skip, and `cwd` itself is considered like any other directory.
 
     Returns `(default, candidates)`. `default` may be None, in which case there is nothing
     sensible to mark and `init` should say so rather than pick something.
@@ -141,18 +142,17 @@ def is_merge_point(path):
     other. Children that are *not* git roots but still carry a `CLAUDE.md` make this a directory of
     areas, and marking it would give a session in one area sight of another's presence and handoffs.
     That is the one thing root resolution exists to prevent.
+
+    Deliberately says nothing about whether `path` is itself a git root. A repo that *stores*
+    `CLAUDE.md` files rather than being described by one - a dotfiles repo holding managed copies, a
+    docs or template repo - has the same shape as a directory of areas and is reported as one, which
+    is #33. Skipping the check for a git root was tried and reverted: it also cleared the one shape
+    this function exists to catch, so `init` would mark a git root holding two real areas with no
+    `--force` and each area would then see the other's claims and handoffs. A false refusal prints
+    its reason and offers a documented override; a false yes is silent. `cmd_init` names the case it
+    may be looking at instead, because nothing here can tell the two apart and a human can.
     """
     path = pathlib.Path(path)
-    if (path / ".git").exists():
-        # A git root is one workspace by definition, so its subdirectories are its own contents and
-        # not sibling areas. Without this, a repo that *stores* `CLAUDE.md` files rather than being
-        # described by one reads as a directory of areas and `init` refuses inside it: a dotfiles
-        # repo holding managed copies, a docs or template repo, a monorepo with a file per package
-        # and no nested `.git`. `.exists()` rather than `.is_dir()` because a worktree and a
-        # submodule spell `.git` as a file, and both worktrees this plugin was built in are that
-        # kind. Nothing that used to be caught stops being caught: a child that is a repo was
-        # already excluded by the filter below.
-        return False
     try:
         children = [p for p in path.iterdir() if p.is_dir()]
     except OSError:

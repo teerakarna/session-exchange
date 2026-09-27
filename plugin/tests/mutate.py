@@ -664,20 +664,6 @@ EXCHANGE_ROOT = [
     ),
     Mutation(
         module="exchange_root",
-        rule="a git root is one workspace, so what it stores cannot make it a directory of areas",
-        old='    if (path / ".git").exists():',
-        new="    if False:",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="and a worktree is a git root too, .git being a file there",
-        old='    if (path / ".git").exists():',
-        new='    if (path / ".git").is_dir():',
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
         rule="two sibling areas is already a merge point, not three",
         old="    return len(areas) >= 2",
         new="    return len(areas) >= 3",

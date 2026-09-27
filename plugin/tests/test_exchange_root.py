@@ -172,17 +172,44 @@ with tempfile.TemporaryDirectory() as tmp:
     # was cwd, so cwd was excluded by the strictness that exists to stop a repo-scoped exchange.
     base = tree(
         tmp,
-        areas=["container/alpha", "container/beta"],
+        areas=["container/alpha", "container/beta", "container/gamma"],
         repos_in=["container/alpha/repo", "container/alpha/other-repo"],
     )
     (base / "container/CLAUDE.md").write_text("areas\n")
 
+    # Stated as a precondition rather than assumed. This is the only block whose right answers need
+    # `git_root` to come back None, so a `.git` above the tempdir - where a tempdir lands when
+    # `TMPDIR` points inside a checkout - quietly changes three answers below. Asserted, so that
+    # environment fails as a named assumption instead of as three mysterious wrong roots.
+    check(
+        "no enclosing repo above the fixture",
+        exchange_root.git_root(base / "container/alpha"),
+        None,
+    )
+
     default, candidates = exchange_root.init_candidates(base / "container/alpha")
     check("an area directory marks itself", default, base / "container/alpha")
     check("and is offered, not just chosen", base / "container/alpha" in candidates, True)
-    # The directory of areas above it is still refused, which is what makes the answer above the
-    # right one rather than merely a nearer one.
-    check("the directory of areas above it is still refused", default == base / "container", False)
+    # The directory of areas above it is refused on its own merits. Asserted directly rather than as
+    # `default != container`, which is implied by the check above and also passes when default is
+    # None: it was written that way first and stubbing the merge-point rule out left it green.
+    check(
+        "the directory of areas above it is a merge point",
+        exchange_root.is_merge_point(base / "container"),
+        True,
+    )
+    # And with the nearer answer taken away, the refusal is what decides the outcome: nothing is
+    # offered below `container`, `container` is offered and still not chosen. Three areas in the
+    # fixture rather than two, so dropping alpha's marker leaves the container over the threshold -
+    # with two it fell under it, and the check passed for the wrong reason.
+    (base / "container/alpha/CLAUDE.md").unlink()
+    default, candidates = exchange_root.init_candidates(base / "container/alpha")
+    check(
+        "so with nothing nearer, init has no answer rather than falling back to it",
+        (default, base / "container" in candidates),
+        (None, True),
+    )
+    (base / "container/alpha/CLAUDE.md").write_text("area\n")
 
     # Considered, not taken: cwd still has to carry a `CLAUDE.md`. Without this, marking whatever
     # directory the shell happened to be in would pass every check above.
@@ -195,43 +222,48 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("and the walk still answers the area above it", default, base / "container/alpha")
 
-print("a repo that stores CLAUDE.md files is not a directory of areas")
+print("the merge-point shape is read from the children alone, .git at the top changing nothing")
 
 with tempfile.TemporaryDirectory() as tmp:
-    # Found on the first real root this plugin marked. A dotfiles repo holds managed copies of other
-    # `CLAUDE.md` files, so two of its own subdirectories look exactly like sibling areas and `init`
-    # refused inside it, citing workspaces that would be merged when there was only ever one.
+    # #33 asked for a git root to be exempted, on the grounds that a repo *storing* `CLAUDE.md`
+    # files has the same shape as a directory of areas. It was implemented and reverted: exempting
+    # git roots also exempted a git root holding two real areas, so `init` marked it with no
+    # `--force` and each area saw the other's claims. Both readings of the shape are asserted below,
+    # because the point is that this function cannot distinguish them and does not try.
     base = pathlib.Path(tmp).resolve()
-    (base / "dots" / ".git").mkdir(parents=True)
-    (base / "dots" / "CLAUDE.md").write_text("repo\n")
-    for stored in ("dot_claude", "projects"):
-        (base / "dots" / stored).mkdir()
-        (base / "dots" / stored / "CLAUDE.md").write_text("stored copy\n")
+    (base / "stores" / ".git").mkdir(parents=True)
+    (base / "stores" / "CLAUDE.md").write_text("repo\n")
+    for stored in ("stored-a", "stored-b"):
+        (base / "stores" / stored).mkdir()
+        (base / "stores" / stored / "CLAUDE.md").write_text("stored copy\n")
 
     check(
-        "a git root is one workspace, whatever it stores",
-        exchange_root.is_merge_point(base / "dots"),
-        False,
-    )
-
-    # The same repo as a worktree, where `.git` is a file. Both worktrees this plugin was built in
-    # are that kind, so testing for a directory here would be wrong in the checkout this was written
-    # in and right everywhere it was demonstrated.
-    (base / "dots" / ".git").rmdir()
-    (base / "dots" / ".git").write_text("gitdir: /somewhere/.git/worktrees/dots\n")
-    check(
-        "including a worktree, where .git is a file",
-        exchange_root.is_merge_point(base / "dots"),
-        False,
-    )
-
-    # Break it: the same two children under a directory that is *not* a repo is the shape the check
-    # exists for. Without this, returning False unconditionally would pass both checks above.
-    (base / "dots" / ".git").unlink()
-    check(
-        "and with no .git, those same two children are a merge point",
-        exchange_root.is_merge_point(base / "dots"),
+        "a repo storing two CLAUDE.md files still reads as a merge point",
+        exchange_root.is_merge_point(base / "stores"),
         True,
+    )
+
+    # The arrangement the refusal exists for, wearing the same `.git`. If a git-root exemption comes
+    # back, this is the check that fails, and it is the one worth failing: the two trees differ only
+    # in whether the children hold repos, which is not what an exemption looks at.
+    (base / "areas" / ".git").mkdir(parents=True)
+    (base / "areas" / "CLAUDE.md").write_text("repo\n")
+    for area in ("area-a", "area-b"):
+        (base / "areas" / area / "repo" / ".git").mkdir(parents=True)
+        (base / "areas" / area / "CLAUDE.md").write_text("area\n")
+    check(
+        "and a repo holding two real areas is one too, which is why there is no exemption",
+        exchange_root.is_merge_point(base / "areas"),
+        True,
+    )
+
+    # Break it in the other direction: one stored child is not two, so a `return True` here would
+    # pass both checks above and assert nothing about the threshold.
+    (base / "stores" / "stored-b" / "CLAUDE.md").unlink()
+    check(
+        "one stored child is not a merge point, .git or no .git",
+        exchange_root.is_merge_point(base / "stores"),
+        False,
     )
 
 print("the rules a sweep found nothing asserting")

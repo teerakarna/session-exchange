@@ -140,6 +140,43 @@ with tempfile.TemporaryDirectory() as tmp:
         (0, True),
     )
 
+with tempfile.TemporaryDirectory() as tmp:
+    # The same container, wearing a `.git`. #33 asked for that to be an automatic pass, on the
+    # grounds that a repo storing `CLAUDE.md` files looks like a directory of areas; it was built
+    # and reverted, because the exemption also let this tree through with no `--force`. The refusal
+    # stays and a note says which case it may be, since only a human can tell. This check is the one
+    # that was missing when the exemption shipped: the fixture above has no `.git`, so it passed.
+    home, area, repo = fixture(tmp)
+    container = pathlib.Path(tmp) / "container"
+    for name in ("one", "two"):
+        (container / name).mkdir(parents=True)
+        (container / name / "CLAUDE.md").write_text("area\n")
+    (container / "CLAUDE.md").write_text("container\n")
+    (container / ".git").mkdir()
+    inner = container / "one" / "repo"
+    (inner / ".git").mkdir(parents=True)
+
+    code, out = run(home, inner, "init", str(container))
+    check(
+        "a container that is also a git root is still refused",
+        (code, "Refusing to mark" in out, (container / ".claude").exists()),
+        (1, True, False),
+    )
+    check(
+        "and the refusal says it is a git root, rather than only repeating itself",
+        "git root" in out,
+        True,
+    )
+
+    # And the default never offers it either, which is the route that would have marked it silently.
+    code, out = run(home, inner, "init")
+    check(
+        "and the default is the area, not the container it sits in",
+        (code, (container / "one" / ".claude" / "exchange.json").is_file()),
+        (0, True),
+    )
+    check("still nothing in the container", (container / ".claude").exists(), False)
+
 print("claim")
 
 with tempfile.TemporaryDirectory() as tmp:
