@@ -192,7 +192,7 @@ jobs:
   #
   # Its own job rather than a step in `checks`, which the cost rule in CONTRIBUTING.md would otherwise
   # say. Three reasons, and the arithmetic was measured rather than assumed. It runs the full suite
-  # once per mutation, plus the baseline - a hundred and thirty-nine runs and seven and a half minutes
+  # once per mutation, plus the baseline - a hundred and forty-five runs and eight and a half minutes
   # locally for the eight tables there are now - so as a step it would sit behind or in front
   # of a lint that takes under a second, and either order is wrong: last means slow feedback on a typo,
   # first means the cheap checks wait on it. Its failure is also categorically different from any other
@@ -219,7 +219,7 @@ jobs:
   #
   # Narrowed to what the change could have broken, rather than every table, and that is the one tier
   # in this workflow. A sweep is one full suite run per mutation, so its cost is linear in the size of
-  # the tables: eight modules is 138 mutations and seven and a half minutes locally, where six was
+  # the tables: eight modules is 144 mutations and eight and a half minutes locally, where six was
   # just over four. That is already past what a push should carry to re-answer a question the last push
   # answered about code it did not touch, and every table added makes it worse. Nothing else here grows
   # that way, which is why nothing else here is tiered - the matrix is four fixed legs, and making the
@@ -232,9 +232,12 @@ jobs:
   # three samples that happened to cluster.
   #
   # The figures for the eight tables are measurements rather than a range or a scaling. Two full
-  # resweeps on this branch: 7m50s for 135 mutations, then 7m32s for all 138 (job totals 7m55s and
-  # 7m41s, run 36281802966). Scaling 1.55x off the range above would have been arithmetic dressed as a
-  # measurement, and it would have landed near enough to look right for the wrong reason.
+  # resweeps on the branch that filled them: 7m50s for 135 mutations, then 7m32s for all 138 (job
+  # totals 7m55s and 7m41s, run 36281802966). Scaling 1.55x off the range above would have been
+  # arithmetic dressed as a measurement, and it would have landed near enough to look right for the
+  # wrong reason. The tables have since grown to 144, measured at 8m24s locally; the runner figures
+  # above are still the 138 ones and are labelled with the count they were taken at, because a figure
+  # that quietly re-labels itself as the tables grow is the thing this paragraph exists to stop.
   #
   # Read the step duration, not the first log line. The 138 run printed its `sweeping ...` line four
   # minutes in, which is stdout block-buffering flushing rather than the sweep starting late, and taking
