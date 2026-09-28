@@ -171,10 +171,14 @@ check(
 # file, which is the symptom three steps along, and this one says the set is empty.
 #
 # From `__file__` rather than typed out, so this is one fact and not a copy of one. `relpath` rather
-# than `relative_to`, which raises when the path is not underneath: this file reached through a
-# symlink, or a tests tree copied somewhere `mutate.py` does not sit above, would be a traceback out
-# of the check written to avoid exactly that. `relpath` returns a `../..` path instead, which is not
-# in the set, so the check goes red naming it. Which is also why it is written as a list rather than
+# than `relative_to`, and no scenario is being guarded here - two were claimed and both were wrong,
+# which is worth the lines it takes to say so. `REPO` comes from the resolved location of the
+# `mutate.py` this file imports off its own resolved parent, so the two paths are derived from one
+# place and move together: reaching this file through a symlink resolves the import root along with
+# it, and a copied tests tree brings its own `mutate.py`. Probed both. Splitting them needs a
+# symlinked `mutate.py`, which does not get as far as this check because `mutate` imports `tables`
+# off the entry point's path and fails first. So `relpath` costs nothing and cannot raise where
+# `relative_to` can, on a check whose job is to name a path. Same reason it is a list rather than
 # `in`: `got False, want True` does not say which path went missing after a rename.
 SELF = os.path.relpath(pathlib.Path(__file__).resolve(), mutate.REPO)
 check(

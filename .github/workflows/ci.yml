@@ -253,9 +253,9 @@ jobs:
   # than linear.
   #
   # 16m30s at 191 mutations is the most recent local full resweep, on the #50 branch - the runner has
-  # swept that count three times since, in the paragraph below. The sweep prints its
-  # own per-mutation figure from #43 onwards, so the next correction to this paragraph comes off a log
-  # line rather than off someone dividing a job total by a count read out of the summary.
+  # swept that count three times since, in the paragraph below. The sweep prints its own per-mutation
+  # figure from #43 onwards, so the next correction to this paragraph comes off a log line rather than
+  # off someone dividing a job total by a count read out of the summary.
   #
   # That one is a laptop, and so is every figure above it except the runner paragraphs that say so.
   # This job swept the same 191 three times over three consecutive commits: 1244s (6.5s each, run
@@ -265,10 +265,10 @@ jobs:
   # reading of the first two said the machine was worth half a second per mutation and the added
   # checks the rest - two samples read as two causes, the same mistake the "four and a half to four
   # and three quarters" paragraph above records, made against that paragraph. Nothing here supports
-  # attributing a per-mutation figure to anything. The limit below is `sweep.yml`'s number
-  # rather than anything derived from these, and what they are for is the floor it has to clear: the
-  # slowest full resweep observed, never a laptop figure. 15 minutes came from one of those, against
-  # a sweep that then ran to 15m15s and was canceled.
+  # attributing a per-mutation figure to anything. The limit below is `sweep.yml`'s number rather than
+  # anything derived from these, and what they are for is the floor it has to clear: the slowest full
+  # resweep observed, never a laptop figure. 15 minutes came from one of those, against a sweep that
+  # then ran to 15m15s and was canceled.
   #
   # And the narrowing did not narrow anything until #36, which is the change worth knowing about here
   # rather than any of the figures. The tables lived in `mutate.py`, `mutate.py` is instrument, and the
