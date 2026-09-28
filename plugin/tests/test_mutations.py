@@ -172,17 +172,16 @@ check(
 #
 # From `__file__` rather than typed out, so this is one fact and not a copy of one. `relpath` rather
 # than `relative_to`, which raises rather than reports when the resolved file is not under `REPO`.
-# The condition for that is one thing - the resolved `mutate.py` and the resolved `__file__` sitting
-# in different trees - and stating the condition is the point here, because three wordings of this
-# comment enumerated arrangements instead and all three were wrong. Two arrangements do reach this
-# line: `mutate` found on `PYTHONPATH` with this file run from outside the tree, and a symlinked
-# `mutate.py` with `tables` beside it. Both probed, both red naming a `../..` path. With
-# `relative_to` the same line raises `ValueError` and nothing after it in this file prints - a sixth
-# of the file's checks today, and no figure here because a count that re-labels itself as checks are
-# added is the mistake `ci.yml` spends a paragraph on. The wording before this one said "~750", the
-# count before this line rather than after it. Two others cannot reach it, for one reason: a
-# symlinked entry point resolves the import root along with the file, and a copied tests tree brings
-# its own `mutate.py`, so `REPO` moves either way and the paths agree.
+# That is the whole condition and the line above is all of it. Four wordings tried to say more than
+# that - three as a list of arrangements, one as a looser restatement that made a file above `REPO`
+# sound safe - and each was wrong. So: examples below, not a set. `mutate` on `PYTHONPATH` with this
+# file run from outside the tree, and a symlinked `mutate.py` with `tables` beside it. Both probed,
+# both red. With `relative_to` the same line raises `ValueError` and nothing after it in this file
+# prints, which is the part worth knowing - not how much, because a count of that would re-label
+# itself as checks are added, and `ci.yml` spends a paragraph on why that is the bug. Two
+# arrangements cannot reach it, for one reason: a symlinked entry point resolves the import root
+# along with the file, and a copied `plugin/` tree brings its own `mutate.py`, so `REPO` moves
+# either way and the paths agree.
 #
 # Neither of the two that reach it is a supported way to run the suite - both die further down
 # reading `run.py` from `HERE` - so what this buys is #42's rule, a red line rather than a
