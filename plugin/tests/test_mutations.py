@@ -34,6 +34,7 @@ import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+TESTS_PARTS = ("plugin", "tests")
 
 import mutate  # noqa: E402
 
@@ -144,7 +145,12 @@ for name, table in sorted(mutate.TABLES.items()):
 # asserts. A false survivor rather than a false catch, so it costs somebody an afternoon proving the
 # rule is fine rather than shipping a hole - but the whole value of the summary is that a line in it
 # means something, and the set claimed this in a comment with nothing holding it up.
-UNSWEEPABLE_NAMES = {path.rpartition("/")[2] for path in mutate.UNSWEEPABLE}
+#
+# Relative to `plugin/tests` rather than by basename, because `caught_by` is resolved against that
+# directory and the set holds repo-relative paths. The shape check below makes the two the same
+# thing for anything the set is allowed to hold, so this is not a fix for a live bug - it is the
+# form that does not depend on the check two lines down still being there.
+UNSWEEPABLE_NAMES = {path.removeprefix("plugin/tests/") for path in mutate.UNSWEEPABLE}
 # `prepare` unlinks each of these out of the copy, so a path that does not exist is a
 # FileNotFoundError out of every sweep rather than a verdict - the crash-instead-of-a-report shape
 # again, and out of the set rather than out of a module. Cheap gate first, so a wrong entry is one
@@ -152,6 +158,30 @@ UNSWEEPABLE_NAMES = {path.rpartition("/")[2] for path in mutate.UNSWEEPABLE}
 check(
     "every path the sweep deletes is a path that exists",
     sorted(path for path in mutate.UNSWEEPABLE if not (mutate.REPO / path).is_file()),
+    [],
+)
+# And the set has to still name this file, which is what `prepare` deleting it turns on. Emptying
+# the set is a one-line edit that every check quantifying over the set is vacuously true of, and it
+# stops `prepare` deleting anything: the mutated copies keep a file that fails by construction,
+# every mutation reads as caught, `verdict`'s "the suite passed, so nothing asserts this rule"
+# branch goes unreachable, and the sweep is clean and worthless. That is the defect `prepare`'s
+# docstring records, and deriving the deletion from data moved it out of a diff a reviewer can see
+# and into the contents of a set. The `prepare` check further down does go red on it, so this is not
+# the only line between here and that outcome - but it goes red saying a mutated copy still has the
+# file, which is the symptom three steps along, and this one says the set is empty.
+#
+# From `__file__` rather than typed out, so this is one fact and not a copy of one.
+SELF = pathlib.Path(__file__).resolve().relative_to(mutate.REPO).as_posix()
+check(
+    "and the set names this file, which is the reason it exists", SELF in mutate.UNSWEEPABLE, True
+)
+# Shape as well as content. `targets` only reaches the "deleted from every mutated copy" note in its
+# `plugin/tests/<file>.py` branch, so an entry one directory deeper gets deleted from every copy and
+# reported as a module to resweep, with no note saying it cannot be swept - the drift the comment on
+# the set says is closed, in the direction it does not cover.
+check(
+    "and every entry is a file directly in plugin/tests, which is the shape targets notes",
+    sorted(p for p in mutate.UNSWEEPABLE if pathlib.PurePosixPath(p).parts[:-1] != TESTS_PARTS),
     [],
 )
 check(

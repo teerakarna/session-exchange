@@ -223,13 +223,14 @@ half. The ninth is why the figures are worth keeping: scaling the 144 at its own
 would have predicted ten and a half at 177, and it took fifteen.
 
 Every figure in that paragraph is a laptop, and the runner is a different measurement rather than the
-same one scaled. Two full resweeps of the same 191, two commits apart, came in at 20m44s and 17m08s -
-6.5s and 5.4s per mutation, the slower one on the shorter suite. A spread of a fifth that brackets every
-local figure at this count, so a per-mutation number here supports no attribution finer than "about six
-seconds on a runner", and the first reading of that pair claimed half a second of it was the machine and
-the rest the added checks. Size `timeout-minutes` off the slowest full resweep in the logs, not the
-latest one and not a laptop: 15 minutes was chosen off a laptop, and the sweep it was sized for ran to
-15m15s and was canceled.
+same one scaled. Three full resweeps of the same 191 over three consecutive commits came in at 20m44s,
+17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. A spread
+of nearly half, which swallows every local figure at this count, so a per-mutation number here supports
+no attribution finer than "five or six seconds on a runner". The first reading of the first two claimed
+half a second of the difference was the machine and the rest the added checks. `timeout-minutes` on the `ci` sweep is `sweep.yml`'s number by
+parity rather than anything derived from these, and what they are for is the floor it has to clear: the
+slowest full resweep in the logs, never the latest one and never a laptop. 15 minutes was chosen off a
+laptop, and the sweep it was sized for ran to 15m15s and was canceled.
 
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went

@@ -257,15 +257,17 @@ jobs:
   # line rather than off someone dividing a job total by a count read out of the summary.
   #
   # That one is a laptop, and so is every figure above it except the runner paragraphs that say so.
-  # This job swept 191 in 1244s, 6.5s each, on run 36395773935, and then 191 in 1028s, 5.4s each, on
-  # 36399785524 - two commits apart, the second with the longer suite. Which is the whole lesson and
-  # not the two numbers: the runner's own spread is a fifth, it brackets every local figure taken at
-  # this count, and the first reading of this pair said the machine was worth half a second and the
-  # added checks the rest. That was a difference of two samples read as two causes, which is the same
-  # mistake the "four and a half to four and three quarters" paragraph above records. Nothing here
-  # supports attributing a per-mutation figure to anything, so the limit below is sized off the
-  # slowest full resweep observed rather than the latest, and a laptop figure is not a candidate at
-  # all: 15 minutes came from one, against a sweep that then ran to 15m15s and was canceled.
+  # This job swept the same 191 three times over three consecutive commits: 1244s (6.5s each, run
+  # 36395773935), 1028s (5.4s, 36399785524), 855s (4.5s, 36402302410). Which is the whole lesson and
+  # not the numbers. The suite got longer across those three and the sweep got faster each time, so
+  # the runner's own spread is nearly half and it swallows every local figure at this count. The first
+  # reading of the first two said the machine was worth half a second per mutation and the added
+  # checks the rest - two samples read as two causes, the same mistake the "four and a half to four
+  # and three quarters" paragraph above records, made against that paragraph. Nothing here supports
+  # attributing a per-mutation figure to anything. The limit below is `sweep.yml`'s number
+  # rather than anything derived from these, and what they are for is the floor it has to clear: the
+  # slowest full resweep observed, never a laptop figure. 15 minutes came from one of those, against
+  # a sweep that then ran to 15m15s and was canceled.
   #
   # And the narrowing did not narrow anything until #36, which is the change worth knowing about here
   # rather than any of the figures. The tables lived in `mutate.py`, `mutate.py` is instrument, and the

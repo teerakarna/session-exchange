@@ -43,10 +43,11 @@ Not linear in the size of the tables, which is what this said until #43 and what
 without finishing: a slow check added to a shared test file multiplies by every mutation in every
 table, so a table written for one module makes the sweep of all the others dearer too. The run
 prints the per-mutation figure at the end, so the estimate is measured rather than remembered - on
-whichever machine ran it, and that is as fine as the figure goes. Two CI resweeps of the same 191
-mutations, two commits apart, read 6.5s and 5.4s each, so the
-runner's own spread is wider than any difference worth attributing to a change in the suite. The
-limit in `ci.yml` is therefore sized off the slowest full resweep in the logs rather than the last.
+whichever machine ran it, and that is as fine as the figure goes. Three CI resweeps of the same 191
+mutations over three consecutive commits read 6.5s, 5.4s and 4.5s each, getting faster while the
+suite got longer, so the runner's own spread is wider than anything worth attributing to the code.
+The figure is therefore a floor for the limits in `ci.yml` and `sweep.yml` to clear rather than the
+thing they are derived from, and the slowest resweep in the logs is the one to read, never the last.
 
 Narrowing it to the modules a change can actually have affected keeps the per-push cost flat, and
 the full sweep moves to a weekly schedule where the length of it does not matter. The narrowing only
