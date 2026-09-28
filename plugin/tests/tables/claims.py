@@ -1,0 +1,176 @@
+"""The rules `claims.py` has to keep, one broken way each."""
+
+from .shape import Mutation
+
+# Claims are the only genuinely new state this plugin keeps, and the only state another session
+# reads. The registry can say a session is alive; nothing but a claim can say what it is doing, and
+# a wrong claim is worse than none - it is a peer confidently reported as working somewhere it is
+# not, which is the failure the whole exchange exists to remove.
+MUTATIONS = [
+    Mutation(
+        module="claims",
+        rule="claims live in the store, not loose in the root",
+        old='    return store.sessions_dir(root) / f"{session_id}.json"',
+        new='    return pathlib.Path(root) / f"{session_id}.json"',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="the branch is found from a subdirectory, not only from the repo root",
+        old="    for candidate in (pathlib.Path(cwd), *pathlib.Path(cwd).parents):",
+        new="    for candidate in (pathlib.Path(cwd),):",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="the ref prefix is stripped, so the field holds a branch and not a ref",
+        old=(
+            '        return text[len("ref: refs/heads/") :] '
+            'if text.startswith("ref: refs/heads/") else None'
+        ),
+        new='        return text if text.startswith("ref: refs/heads/") else None',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a detached head is no branch, not a sha wearing the name of one",
+        old=(
+            '        return text[len("ref: refs/heads/") :] '
+            'if text.startswith("ref: refs/heads/") else None'
+        ),
+        new=(
+            '        return text[len("ref: refs/heads/") :] '
+            'if text.startswith("ref: refs/heads/") else text'
+        ),
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a HEAD that cannot be read is no branch, and not an exception either",
+        old="        except (OSError, UnicodeDecodeError):\n            return None",
+        new="        except (OSError, UnicodeDecodeError):\n            raise",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a HEAD that is not text is one of the ways it cannot be read",
+        old="        except (OSError, UnicodeDecodeError):",
+        new="        except OSError:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="re-seeding keeps what the session said about itself",
+        old="    claim = dict(existing) if existing else {}",
+        new="    claim = {}",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a seeded claim carries the session it is about",
+        old="    claim.update(session_id=session_id, cwd=str(cwd), updated_at=store.now())",
+        new="    claim.update(cwd=str(cwd), updated_at=store.now())",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a branch that has gone away is removed rather than left behind",
+        old='    elif "git_branch" in claim:\n        del claim["git_branch"]',
+        new='    elif "git_branch" in claim:\n        pass',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a seed that could not be written returns the problem, not the claim",
+        old=(
+            "    write_problem = store.write_json(path(root, session_id), claim, SCHEMA)\n"
+            "    return (None, write_problem) if write_problem else (claim, problem)"
+        ),
+        new=(
+            "    write_problem = store.write_json(path(root, session_id), claim, SCHEMA)\n"
+            "    return claim, problem"
+        ),
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="an unusable session id is refused by update too, not only by seed",
+        old=(
+            "    session_id = store.safe_id(session_id)\n"
+            "    if session_id is None:\n"
+            '        return None, "session id is not usable as a filename"'
+        ),
+        new=(
+            "    session_id = store.safe_id(session_id)\n"
+            "    if session_id is None:\n"
+            "        return None, None"
+        ),
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="updating a claim that is not there explains itself rather than half-succeeding",
+        old=(
+            "        return None, problem or "
+            '"no claim for this session yet; it is seeded at session start"'
+        ),
+        new="        return claim, None",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="an empty focus is a focus being cleared, not an argument that was not passed",
+        old="    if focus is not None:",
+        new="    if focus:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="replacing a list deduplicates it, the same as adding does",
+        old="        claim[field] = list(dict.fromkeys(values))",
+        new="        claim[field] = list(values)",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="adding keeps what was already there",
+        old="        claim[field] = list(dict.fromkeys(list(claim.get(field, [])) + list(values)))",
+        new="        claim[field] = list(dict.fromkeys(list(values)))",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="adding deduplicates rather than repeating a repo the session already named",
+        old="        claim[field] = list(dict.fromkeys(list(claim.get(field, [])) + list(values)))",
+        new="        claim[field] = list(claim.get(field, [])) + list(values)",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="clearing a field removes it rather than emptying it",
+        old="        claim.pop(field, None)",
+        new="        claim[field] = []",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="an update touches the timestamp, or a session that just spoke reads as stale",
+        old='    claim["updated_at"] = store.now()',
+        new="    pass",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="clearing a claim that is already gone is success, because session end fires twice",
+        old="        path(root, session_id).unlink(missing_ok=True)",
+        new="        path(root, session_id).unlink()",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a claim that could not be cleared says so, rather than looking like a live peer",
+        old='        return f"could not clear claim: {exc}"',
+        new="        return None",
+        caught_by="test_store_claims.py",
+    ),
+]

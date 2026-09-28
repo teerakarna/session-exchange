@@ -37,10 +37,23 @@ Line coverage measures execution. What matters here is whether a wrong answer ge
     python3 plugin/tests/mutate.py --since origin/main  # only what this change could have broken
 
 The third form is what CI runs per push, and the cost is why: a sweep is one full suite run per
-mutation, so its price is linear in the size of the tables and every table owed under issue #8 makes
-every future push slower. Narrowing it to the modules a change can actually have affected keeps that
-flat, and the full sweep moves to a weekly schedule where the length of it does not matter. See
-`targets` for the derivation, which is wider than "the lib files that changed" for a reason.
+mutation, so its price is the mutation count times the length of the suite, and both halves grow.
+Not linear in the size of the tables, which is what this said until #43 and what sized a job at
+15 minutes against a sweep measured at 14m51s, which then hit the limit and was canceled at 15m15s
+without finishing: a slow check added to a shared test file multiplies by every mutation in every
+table, so a table written for one module makes the sweep of all the others dearer too. The run
+prints the per-mutation figure at the end, so the estimate is measured rather than remembered - on
+whichever machine ran it, and that is as fine as the figure goes. Three CI resweeps of the same 191
+mutations over three consecutive commits read 6.5s, 5.4s and 4.5s each, getting faster while the
+suite got longer, so the runner's own spread is wider than anything worth attributing to the code.
+The figure is therefore a floor for the limits in `ci.yml` and `sweep.yml` to clear rather than the
+thing they are derived from, and the slowest resweep in the logs is the one to read, never the last.
+
+Narrowing it to the modules a change can actually have affected keeps the per-push cost flat, and
+the full sweep moves to a weekly schedule where the length of it does not matter. The narrowing only
+started working when the tables moved out of this file (#36): a fix in this repo adds a mutation,
+the tables lived here, and this file is in `INSTRUMENT`, so nearly every push paid the full sweep.
+See `targets` for the derivation, which is wider than "the lib files that changed" for a reason.
 
 Not named `test_*.py` on purpose, so `run.py` does not pick it up: one full suite run per mutation
 is seconds rather than milliseconds. `test_mutations.py` is the fast half that does run there, and
@@ -56,7 +69,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import NamedTuple
+import time
+
+# The tables are a sibling package rather than part of this file, so that a diff adding a mutation
+# narrows to the module it names instead of resweeping all nine - see `tables` for the derivation,
+# and `INSTRUMENT` below for the half that stays wide. Bound as module globals rather than read
+# through `tables.`, because `test_mutations.py` swaps all three for fixtures: the debt lists are
+# meant to empty out, so a check keyed on a real member stops being able to fail the day the last
+# table is written.
+#
+# `Mutation` is re-exported and not used here. The tables get it from `tables.shape`; a caller that
+# builds one to feed this harness gets the harness and the shape it operates on from one import.
+from tables import DECLINED, NOT_YET, TABLES, UNSWEPT, Mutation  # noqa: F401
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
 LIB = PLUGIN / "lib"
@@ -78,1733 +102,54 @@ IGNORE = shutil.ignore_patterns(".git", "__pycache__", ".ruff_cache")
 # reason to want one: the only honest answer to "start a sweep from inside a sweep" is no.
 SWEEPING = "CC_EXCHANGE_SWEEPING"
 
-
-class Mutation(NamedTuple):
-    """One rule, broken one way, and the test file that has to object.
-
-    `caught_by` is pinned to a file rather than an individual check name: a file is stable enough to
-    be worth asserting, while pinning the check name would turn every rename of a check into a red
-    build. Membership only, so a mutation caught by its named file *and* two others still passes -
-    which is the honest description, since nothing prints the extra names on a pass.
-    """
-
-    module: str
-    rule: str
-    old: str
-    new: str
-    caught_by: str
-
-
-HOOKIO = [
-    Mutation(
-        module="hookio",
-        rule="the event name is read from the payload, not from the wiring",
-        old="    return name if isinstance(name, str) and name else default",
-        new="    return default",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="a payload with no event name falls back to the wiring",
-        old="    return name if isinstance(name, str) and name else default",
-        new="    return name",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="a payload event name that is not a string falls back too",
-        old="    return name if isinstance(name, str) and name else default",
-        new="    return name if name else default",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="nothing to say means nothing printed, not an empty section",
-        old="    lines = [line for line in lines if line]\n    if not lines:\n        return",
-        new="    lines = [line for line in lines if line]\n    if False:\n        return",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="a handler run by hand on a terminal returns instead of waiting forever",
-        old="        if stream.isatty():\n            return {}",
-        new="        if False:\n            return {}",
-        caught_by="test_hook.py",
-    ),
-    # The three the first honest sweep found alive, in a module already recorded as swept. Each one
-    # is a rule the module's docstring or a function's docstring states, with nothing behind it.
-    Mutation(
-        module="hookio",
-        rule="a problem line is marked as coming from this plugin",
-        old='    return f"[{PREFIX}] {text}"',
-        new="    return text",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="lines are joined by a newline, not run together",
-        old='"\\n".join(lines)',
-        new='" ".join(lines)',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="an empty line is dropped rather than injected as a gap",
-        old="    lines = [line for line in lines if line]",
-        new="    lines = list(lines)",
-        caught_by="test_hook.py",
-    ),
-    # And the rest, found by review passes over this diff rather than by the first sweep, all in the
-    # same module again. The first is the worst of every survivor: it breaks the guarantee the
-    # project calls absolute.
-    Mutation(
-        module="hookio",
-        rule="valid JSON that is not an object is no payload, not an exit 1 with a traceback",
-        old="    return data if isinstance(data, dict) else {}",
-        new="    return data",
-        caught_by="test_hook.py",
-    ),
-    # And the half-fix this entry was first written against, worth its own mutation: `or {}` turns
-    # the falsy non-objects into `{}` and passes `5`, `true` and `[1]` straight through, so a suite
-    # that only ever feeds it `null` reads as cover for a guarantee still broken four ways.
-    Mutation(
-        module="hookio",
-        rule="a truthy non-object is caught too, not just the falsy half",
-        old="    return data if isinstance(data, dict) else {}",
-        new="    return data or {}",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="the stream argument is the stream that gets read",
-        old="    stream = sys.stdin if stream is None else stream",
-        new="    stream = sys.stdin",
-        caught_by="test_hook.py",
-    ),
-    # Named for what it breaks, which is the opposite of what its text said for two passes: this one
-    # makes `emit` return unconditionally and inject nothing ever, while the entry above is the one
-    # about an empty section. Two entries claiming the same rule reads as a duplicate and gets
-    # deleted, taking the rule nothing else covers with it.
-    Mutation(
-        module="hookio",
-        rule="having something to say means a reply is printed at all",
-        old="    if not lines:\n        return",
-        new="    return",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="a stream that cannot answer isatty is read rather than refused",
-        old="    except (AttributeError, ValueError):\n        pass",
-        new="    except ZeroDivisionError:\n        pass",
-        caught_by="test_hook.py",
-    ),
-    # And the read below that guard, which named its exception types and was wrong about them three
-    # passes running: `sys.stdin` is `None` when fd 0 is not open, a non-blocking stdin reads as
-    # `None`, and a deeply nested array raises `RecursionError`. The mutation is the list coming
-    # back, because the list is the defect rather than any one type missing from it.
-    Mutation(
-        module="hookio",
-        rule="anything at all going wrong on the read is no payload, not a traceback out of main",
-        old="    except Exception:\n        return {}",
-        new="    except (ValueError, OSError):\n        return {}",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="the reply is shaped the way Claude Code reads it, key included",
-        old='            "hookSpecificOutput": {',
-        new='            "hookSpecificOutputs": {',
-        caught_by="test_hook.py",
-    ),
-    # The reader half of the guarantee, one mutation per state of it, because the first version of
-    # this fix closed one of the three and the docstring claimed all three. A check fed back exactly
-    # the input that showed the bug is the `or {}` shape again, one file over.
-    #
-    # The body removed rather than weakened. The two weaker versions - catching the `OSError` and
-    # doing nothing, or flushing inside a wrapped `print` - both still exit 120, so either as a
-    # `new` would be caught for a reason that has nothing to do with the rule.
-    Mutation(
-        module="hookio",
-        rule="a stdout nobody is reading is silence, not an exit 120 on the way out",
-        old="            null = os.open(os.devnull, os.O_WRONLY)\n"
-        "            os.dup2(null, 1)\n"
-        "            os.close(null)",
-        new="            pass",
-        caught_by="test_hook.py",
-    ),
-    # The write inside the same `try` as the flush. Expressed as the whole block swapped for the
-    # version this was, with the `print` outside, because that is the shape of the defect: buffered,
-    # the write succeeds and the flush is where the pipe breaks, so a fix that only guards the flush
-    # passes every check written for the buffered case and raises on the unbuffered one.
-    Mutation(
-        module="hookio",
-        rule="an unbuffered stdout breaks during the write, which is inside the guard too",
-        old=(
-            "    try:\n"
-            "        print(reply, file=stream)\n"
-            "        stream.flush()\n"
-            "    except OSError:"
-        ),
-        new=(
-            "    print(reply, file=stream)\n    try:\n        stream.flush()\n    except OSError:"
-        ),
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hookio",
-        rule="no stdout at all is silence, not an AttributeError out of a hook",
-        old="    if stream is None:\n        return",
-        new="    if False:\n        return",
-        caught_by="test_hook.py",
-    ),
-    # The narrowing guard on the redirect, which had thirteen lines of comment defending it and
-    # nothing behind it: `if True` left the whole suite green, so the rule that `out=` is a seam and
-    # not an fd was protection that was not.
-    Mutation(
-        module="hookio",
-        rule="a stream the caller handed in is never fixed by redirecting fd 1",
-        old="        if stream is sys.__stdout__:",
-        new="        if True:",
-        caught_by="test_hook.py",
-    ),
-]
-
-STORE = [
-    Mutation(
-        module="store",
-        rule="an id that cannot be a filename is refused rather than sanitised",
-        old="    return value if isinstance(value, str) and SAFE_ID.fullmatch(value) else None",
-        new="    return value",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="store",
-        rule="fullmatch, because Python's $ also matches before a trailing newline",
-        old="    return value if isinstance(value, str) and SAFE_ID.fullmatch(value) else None",
-        new="    return value if isinstance(value, str) and SAFE_ID.match(value) else None",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="store",
-        rule="an invalid object never reaches disk",
-        old='            return None, f"refusing to write {path}: " + "; ".join(problems)',
-        new="            pass",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="store",
-        # The mutation is a writer that replaces, which is what `post` used to call under an
-        # `exists()` check. `os.link` is one syscall that either creates the name or fails, so there
-        # is no window between the check and the write for a second writer to fit into.
-        rule="create_json creates or fails, and never replaces",
-        old="        os.link(tmp, path)",
-        new="        os.replace(tmp, path)",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="store",
-        # The mutation is what this was first. An id may contain a dot, so an id of `note.json`
-        # put a moves directory at `handoffs/note.json` - exactly where a record of the id `note`
-        # goes - and `read_all`'s glob then tried to parse the directory as a record, for good.
-        # The suffix cannot be a record's name, so the two namespaces cannot overlap whatever the
-        # id is, which beats a rule that ids must not end in `.json` because nothing has to
-        # remember it.
-        rule="a handoff's moves live under a name no record could have",
-        old='    return handoffs_dir(root) / f"{handoff_id}.d"',
-        new="    return handoffs_dir(root) / handoff_id",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="store",
-        rule="a file that exists and does not parse is never reported as absent",
-        old=(
-            "    except (OSError, ValueError) as exc:\n"
-            '        return None, f"{path.name} could not be read: {exc}"'
-        ),
-        new="    except (OSError, ValueError):\n        return None, None",
-        caught_by="test_store_claims.py",
-    ),
-]
-
-VALIDATE = [
-    Mutation(
-        module="validate",
-        rule="a keyword the validator does not implement raises rather than not applying",
-        old="    unknown = set(schema) - IMPLEMENTED\n    if unknown:",
-        new="    unknown = set(schema) - IMPLEMENTED\n    if False:",
-        caught_by="test_validate.py",
-    ),
-    Mutation(
-        module="validate",
-        rule="true is not an integer, though Python thinks bool is a subclass of int",
-        old='        if expected in ("integer", "number") and isinstance(instance, bool):',
-        new="        if False:",
-        caught_by="test_validate.py",
-    ),
-    Mutation(
-        module="validate",
-        rule="a trailing $ means what JSON Schema means by it",
-        old=(
-            '    if pattern.endswith("$") and not pattern.endswith("\\\\$"):\n'
-            '        return pattern[:-1] + r"\\Z"'
-        ),
-        new='    if False:\n        return pattern[:-1] + r"\\Z"',
-        caught_by="test_validate.py",
-    ),
-    Mutation(
-        module="validate",
-        rule="a pattern is a partial match, so anchoring stays the schema's job",
-        old=(
-            '        if "pattern" in schema and not re.search('
-            '_end_anchored(schema["pattern"]), instance):'
-        ),
-        new=(
-            '        if "pattern" in schema and not re.match('
-            '_end_anchored(schema["pattern"]), instance):'
-        ),
-        caught_by="test_validate.py",
-    ),
-]
-
-HOOK = [
-    Mutation(
-        module="hook",
-        rule="the handler that runs is the one the payload named, not the one argv carried",
-        old="    event = hookio.event_name(data, default_event)",
-        new="    event = default_event",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="a payload with no cwd falls back to the directory the process is in",
-        old='        resolution = exchange_root.resolve(data.get("cwd") or os.getcwd())',
-        new='        resolution = exchange_root.resolve(data.get("cwd"))',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="a root that resolved to a problem is said out loud, not walked past",
-        old=(
-            "        if resolution.problem:\n"
-            "            lines.append(hookio.problem(resolution.problem))"
-        ),
-        new="        if resolution.problem:\n            pass",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="no root means no handler ran, rather than one running against a root of None",
-        old="        elif resolution.root is None:",
-        new="        elif False:",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="an event this plugin does not handle is reported, not dispatched to None",
-        old="            if handler is None:",
-        new="            if False:",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="both events are wired, so SessionEnd is not an unhandled event",
-        old='HANDLERS = {\n    "SessionStart": session_start,\n    "SessionEnd": session_end,\n}',
-        new='HANDLERS = {\n    "SessionStart": session_start,\n}',
-        caught_by="test_hook.py",
-    ),
-    # The wrapper, not any one type it catches. Narrowing it is the mutation because the list is
-    # what `hookio.payload` got wrong three times, and here there is no list to get wrong yet.
-    Mutation(
-        module="hook",
-        rule="whatever a handler raises is reported rather than raised out of main",
-        old="    except Exception as exc:",
-        new="    except ZeroDivisionError as exc:",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="a hook that had something to complain about still exits 0",
-        old="    hookio.emit(event, lines)\n    return 0",
-        new="    hookio.emit(event, lines)\n    return 1",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="a registry with nothing on this session is no name, not an AttributeError",
-        old="    known = registry.by_session_id(session_id) or {}",
-        new="    known = registry.by_session_id(session_id)",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="the claim records where the session actually is",
-        old='        root, session_id, data.get("cwd") or os.getcwd(), name=known.get("name")',
-        new='        root, session_id, None, name=known.get("name")',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="the claim carries the display name the registry knows this session by",
-        old='        root, session_id, data.get("cwd") or os.getcwd(), name=known.get("name")',
-        new='        root, session_id, data.get("cwd") or os.getcwd(), name=None',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="a claim that could not be seeded says so",
-        old=(
-            "    if problem:\n"
-            "        lines.append(hookio.problem(problem))\n"
-            "\n"
-            "    _, config_problem"
-        ),
-        new=(
-            "    if False:\n        lines.append(hookio.problem(problem))\n\n    _, config_problem"
-        ),
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="config that could not be read is reported rather than quietly defaulted",
-        old="    if config_problem:\n        lines.append(hookio.problem(config_problem))",
-        new="    if config_problem:\n        pass",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="the migration warning is conditional on legacy hooks being wired",
-        old='    if state["double_fire"]:',
-        new="    if True:",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="the warning names the scripts it found wired",
-        old='        scoped = sorted({name for _, name in state["scoped"]})',
-        new="        scoped = []",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="one script wired in two settings files is one script, not two",
-        old='        scoped = sorted({name for _, name in state["scoped"]})',
-        new='        scoped = sorted([name for _, name in state["scoped"]])',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        # The doubled-fire warning names the wirings under this root, not every wiring found. Naming
-        # all of them puts a machine-wide script into a warning about this root's own settings files
-        # and sends whoever reads it through files that never mention it.
-        rule="the doubled-fire warning names only the wirings that belong to this root",
-        old='        scoped = sorted({name for _, name in state["scoped"]})',
-        new='        scoped = sorted({name for _, name in state["wired"]})',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="whatever else the legacy scan found is injected too",
-        old='    for problem in state["problems"]:\n        lines.append(hookio.problem(problem))',
-        new='    for problem in state["problems"]:\n        pass',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="hook",
-        rule="a claim that could not be cleared is reported, not left looking like a live peer",
-        old='    problem = claims.clear(root, data.get("session_id"))\n    if problem:',
-        new='    problem = claims.clear(root, data.get("session_id"))\n    if False:',
-        caught_by="test_hook.py",
-    ),
-]
-
-# Root resolution, which the plan calls the test that must never regress: every other module is
-# handed a root and does not look for one, so a wrong answer here is the one bug that can show a
-# session in one area the presence and handoffs of another. Ten of the twenty-two rules this table
-# held when it was written had nothing asserting them, which is the arithmetic that made it worth
-# writing rather than a suspicion about it. It has grown since, and the twenty-two stays as the
-# count that figure was measured against rather than re-pointed at whatever the table holds today.
-EXCHANGE_ROOT = [
-    Mutation(
-        module="exchange_root",
-        rule="the override is consulted before the walk, not after",
-        old="    if override:",
-        new="    if False:",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="whitespace in the override means unset, not a directory named with spaces",
-        old='    override = (environ.get(OVERRIDE_VAR) or "").strip()',
-        new='    override = environ.get(OVERRIDE_VAR) or ""',
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="an override that is not a directory resolves to no root",
-        old="        if not path.is_dir():",
-        new="        if False:",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="and says which variable it was and what it was set to",
-        old='                f"{OVERRIDE_VAR} is set to {override!r}, which is not a directory.",',
-        new='                "the exchange root is not a directory.",',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="an override is resolved, so every root the plugin hands out is absolute and real",
-        old='        return Resolution(path.resolve(), "override")',
-        new='        return Resolution(path, "override")',
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="a cwd that is not a directory is a reported problem, not an unmarked walk",
-        old="    if not start.is_dir():",
-        new="    if False:",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="the walk goes up, so the nearest marker wins and nested roots do not leak",
-        old="    for candidate in (start.resolve(), *start.resolve().parents):",
-        new="    for candidate in reversed([start.resolve(), *start.resolve().parents]):",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="the walk starts at cwd, so a marked directory resolves to itself",
-        old="    for candidate in (start.resolve(), *start.resolve().parents):",
-        new="    for candidate in start.resolve().parents:",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="the marker has to be a file, so a directory of that name marks nothing",
-        old="        if (candidate / MARKER).is_file():",
-        new="        if (candidate / MARKER).exists():",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="nothing found is no root, not this directory by default",
-        old='    return Resolution(None, "unmarked")',
-        new='    return Resolution(pathlib.Path(cwd), "unmarked")',
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="a marker that is not there is a problem, not empty config",
-        old='        return None, f"{path} does not exist."',
-        new="        return {}, None",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="a marker that does not parse is a problem, not empty config",
-        old='        return None, f"{path} is not valid JSON: {exc}."',
-        new="        return {}, None",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="a marker holding something other than an object is a problem too",
-        old="    if not isinstance(config, dict):",
-        new="    if False:",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="a worktree is a repo, where .git is a file rather than a directory",
-        old='        if (candidate / ".git").exists():',
-        new='        if (candidate / ".git").is_dir():',
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="init marks strictly above the repo: a repo-scoped exchange coordinates nothing",
-        old="    searched = [start, *start.parents] if repo is None else list(repo.parents)",
-        new="    searched = [start, *start.parents]",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="the ceiling is the repo, not cwd, so init from a subdirectory answers the same",
-        old="    searched = [start, *start.parents] if repo is None else list(repo.parents)",
-        new="    searched = [start, *start.parents] if repo is None else list(start.parents)",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        # The two branches want a mutation each. They were one line reading `ceiling = repo if repo
-        # else start`, and the no-repo half was wrong for as long as it existed: cwd was excluded by
-        # the strictness that exists to skip the git root, so `init` in an area directory - which is
-        # the documented launch point - offered nothing and refused the merge point above it.
-        rule="with no enclosing repo, cwd is a candidate: an area directory can mark itself",
-        old="    searched = [start, *start.parents] if repo is None else list(repo.parents)",
-        new="    searched = list(start.parents) if repo is None else list(repo.parents)",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="home is never a candidate, however many CLAUDE.md files are above it",
-        old=('    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]'),
-        new='    candidates = [d for d in searched if (d / "CLAUDE.md").is_file()]',
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="a candidate has to carry a CLAUDE.md, cwd included",
-        old=('    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]'),
-        new="    candidates = [d for d in searched if d != home]",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="the default skips a merge point rather than taking the nearest candidate",
-        old="    default = next((d for d in candidates if not is_merge_point(d)), None)",
-        new="    default = candidates[0] if candidates else None",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        # Skipped for the default and still offered are two rules, not one, and the second had no
-        # mutation: filtering merge points out of `candidates` leaves `default` identical,
-        # so every check on the default passes and the only thing lost is a human's ability to
-        # override the suggestion with the answer the tool declined to pick.
-        rule="a merge point is still offered, so the suggestion can be overridden",
-        old=('    candidates = [d for d in searched if (d / "CLAUDE.md").is_file() and d != home]'),
-        new=(
-            "    candidates = [\n"
-            "        d for d in searched\n"
-            '        if (d / "CLAUDE.md").is_file() and d != home and not is_merge_point(d)\n'
-            "    ]"
-        ),
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="two sibling areas is already a merge point, not three",
-        old="    return len(areas) >= 2",
-        new="    return len(areas) >= 3",
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="children that are repos do not make their parent a merge point",
-        old=(
-            "    areas = [c for c in children "
-            'if (c / "CLAUDE.md").is_file() and not (c / ".git").exists()]'
-        ),
-        new='    areas = [c for c in children if (c / "CLAUDE.md").is_file()]',
-        caught_by="test_exchange_root.py",
-    ),
-    Mutation(
-        module="exchange_root",
-        rule="a path that cannot be listed is not a merge point, and is not an exception either",
-        old="    except OSError:\n        return False",
-        new="    except OSError:\n        raise",
-        caught_by="test_exchange_root.py",
-    ),
-]
-
-# Claims are the only genuinely new state this plugin keeps, and the only state another session
-# reads. The registry can say a session is alive; nothing but a claim can say what it is doing, and
-# a wrong claim is worse than none - it is a peer confidently reported as working somewhere it is
-# not, which is the failure the whole exchange exists to remove.
-CLAIMS = [
-    Mutation(
-        module="claims",
-        rule="claims live in the store, not loose in the root",
-        old='    return store.sessions_dir(root) / f"{session_id}.json"',
-        new='    return pathlib.Path(root) / f"{session_id}.json"',
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="the branch is found from a subdirectory, not only from the repo root",
-        old="    for candidate in (pathlib.Path(cwd), *pathlib.Path(cwd).parents):",
-        new="    for candidate in (pathlib.Path(cwd),):",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="the ref prefix is stripped, so the field holds a branch and not a ref",
-        old=(
-            '        return text[len("ref: refs/heads/") :] '
-            'if text.startswith("ref: refs/heads/") else None'
-        ),
-        new='        return text if text.startswith("ref: refs/heads/") else None',
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="a detached head is no branch, not a sha wearing the name of one",
-        old=(
-            '        return text[len("ref: refs/heads/") :] '
-            'if text.startswith("ref: refs/heads/") else None'
-        ),
-        new=(
-            '        return text[len("ref: refs/heads/") :] '
-            'if text.startswith("ref: refs/heads/") else text'
-        ),
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="a HEAD that cannot be read is no branch, and not an exception either",
-        old="        except (OSError, UnicodeDecodeError):\n            return None",
-        new="        except (OSError, UnicodeDecodeError):\n            raise",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="a HEAD that is not text is one of the ways it cannot be read",
-        old="        except (OSError, UnicodeDecodeError):",
-        new="        except OSError:",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="re-seeding keeps what the session said about itself",
-        old="    claim = dict(existing) if existing else {}",
-        new="    claim = {}",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="a seeded claim carries the session it is about",
-        old="    claim.update(session_id=session_id, cwd=str(cwd), updated_at=store.now())",
-        new="    claim.update(cwd=str(cwd), updated_at=store.now())",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="a branch that has gone away is removed rather than left behind",
-        old='    elif "git_branch" in claim:\n        del claim["git_branch"]',
-        new='    elif "git_branch" in claim:\n        pass',
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="a seed that could not be written returns the problem, not the claim",
-        old=(
-            "    write_problem = store.write_json(path(root, session_id), claim, SCHEMA)\n"
-            "    return (None, write_problem) if write_problem else (claim, problem)"
-        ),
-        new=(
-            "    write_problem = store.write_json(path(root, session_id), claim, SCHEMA)\n"
-            "    return claim, problem"
-        ),
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="an unusable session id is refused by update too, not only by seed",
-        old=(
-            "    session_id = store.safe_id(session_id)\n"
-            "    if session_id is None:\n"
-            '        return None, "session id is not usable as a filename"'
-        ),
-        new=(
-            "    session_id = store.safe_id(session_id)\n"
-            "    if session_id is None:\n"
-            "        return None, None"
-        ),
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="updating a claim that is not there explains itself rather than half-succeeding",
-        old=(
-            "        return None, problem or "
-            '"no claim for this session yet; it is seeded at session start"'
-        ),
-        new="        return claim, None",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="an empty focus is a focus being cleared, not an argument that was not passed",
-        old="    if focus is not None:",
-        new="    if focus:",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="replacing a list deduplicates it, the same as adding does",
-        old="        claim[field] = list(dict.fromkeys(values))",
-        new="        claim[field] = list(values)",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="adding keeps what was already there",
-        old="        claim[field] = list(dict.fromkeys(list(claim.get(field, [])) + list(values)))",
-        new="        claim[field] = list(dict.fromkeys(list(values)))",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="adding deduplicates rather than repeating a repo the session already named",
-        old="        claim[field] = list(dict.fromkeys(list(claim.get(field, [])) + list(values)))",
-        new="        claim[field] = list(claim.get(field, [])) + list(values)",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="clearing a field removes it rather than emptying it",
-        old="        claim.pop(field, None)",
-        new="        claim[field] = []",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="an update touches the timestamp, or a session that just spoke reads as stale",
-        old='    claim["updated_at"] = store.now()',
-        new="    pass",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="clearing a claim that is already gone is success, because session end fires twice",
-        old="        path(root, session_id).unlink(missing_ok=True)",
-        new="        path(root, session_id).unlink()",
-        caught_by="test_store_claims.py",
-    ),
-    Mutation(
-        module="claims",
-        rule="a claim that could not be cleared says so, rather than looking like a live peer",
-        old='        return f"could not clear claim: {exc}"',
-        new="        return None",
-        caught_by="test_store_claims.py",
-    ),
-]
-
-# Written before `test_legacy.py` existed, on the assumption that the end-to-end files already held
-# most of this module up: `test_hook.py` has a whole `wire_legacy` fixture and `test_cli.py` drives
-# `doctor` through it. Five of the first nineteen were caught by something other than the file named
-# here, which the harness scores as a survivor precisely so a guess like that cannot pass quietly,
-# and in all five the only objection came from the new unit file. What the end-to-end fixtures pin
-# down is the rendered warning; those five are the cases the fixtures never produce.
+# The files that decide what a sweep measures rather than being measured by it. `run.py` is what
+# "the suite" means, this file is how a mutation is applied and scored, `tables/shape.py` is what a
+# table entry is, and `tables/__init__.py` is which tables exist. A change to any of them makes the
+# last sweep's verdicts stale for every module at once, so `--since` resweeps the lot.
 #
-# The most instructive is `double_fire`. In `test_cli.py` the legacy script is on disk *and* wired
-# in every fixture that has one, so reading `on_disk` there gives the same answer as `wired` -
-# two inputs that agree cannot say which one was read. The distinction is the entire point of the
-# field: an unwired script is inert, a wired one doubles the SessionStart injection.
-#
-# The last five came with the scope split, and the same shape produced the bug they cover: with
-# the only wired fixture being the machine-wide one, `wired` and "wired under this root" agreed, and
-# `double_fire` off `bool(wired)` looked right for the same reason - until the first real migration,
-# where the machine-wide wiring rendered another root's rows and the warning called it a doubling.
-# Two of the five only fail against `under` called directly, which is why that helper is public.
-LEGACY = [
-    Mutation(
-        module="legacy",
-        # The module's first documented rule, and the one a generalised tool has to keep: two of the
-        # scripts carry one environment's project prefix, so matching literals would either ship
-        # another workspace's name inside the plugin or stop matching the moment one is renamed.
-        rule="detection is by shape, not by literal name",
-        old="    return any(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)",
-        new="    return any(name == pattern for pattern in LEGACY_GLOBS)",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="one glob matching is enough, since the scripts are four unrelated shapes",
-        old="    return any(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)",
-        new="    return all(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a hooks directory that is not there is empty, not an exception",
-        old="    if not hooks_dir.is_dir():",
-        new="    if False:",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a legacy script has to be a file, not a directory named like one",
-        old=(
-            "    return sorted(p for p in hooks_dir.iterdir() "
-            "if p.is_file() and looks_legacy(p.name))"
-        ),
-        new="    return sorted(p for p in hooks_dir.iterdir() if looks_legacy(p.name))",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="the user settings file is searched, because that is where the old pair was wired",
-        old=(
-            "    found = [user_settings] "
-            "if user_settings and pathlib.Path(user_settings).is_file() else []"
-        ),
-        new="    found = []",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a root's own settings.local.json is searched",
-        old='        root / ".claude" / "settings.local.json",',
-        new='        root / ".claude" / "never-a-real-file.json",',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        # The per-repo wiring being migrated away from lives exactly one level down, so losing this
-        # is losing the common case while the user-settings case goes on passing.
-        rule="and so is each repo one level under it",
-        old='        *sorted(root.glob("*/.claude/settings.local.json")),',
-        new='        *sorted(root.glob(".claude/settings.local.json")),',
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a string anywhere in settings is a string that was read",
-        old="    if isinstance(obj, str):\n        yield obj",
-        new='    if isinstance(obj, str):\n        yield ""',
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="the walk goes into dicts, which is where every documented wiring is",
-        old="        for value in obj.values():",
-        new="        for value in []:",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="and into lists, which is the shape of a hooks array",
-        old="        for value in obj:\n            yield from _strings(value)",
-        new="        for value in []:\n            yield from _strings(value)",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a settings file that is not there is not a problem worth reporting",
-        old="        except FileNotFoundError:\n            continue",
-        new=(
-            "        except FileNotFoundError:\n"
-            '            problems.append(f"{path} is missing")\n'
-            "            continue"
-        ),
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a settings file that cannot be read is reported as unknown, not as clean",
-        old=(
-            '            problems.append(f"{path} could not be read, '
-            'so wiring there is unknown: {exc}")'
-        ),
-        new="            pass",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a command in quotes is still split into tokens",
-        old='            for token in text.replace(\'"\', " ").replace("\'", " ").split():',
-        new="            for token in text.split():",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="a token is reduced to its basename, or a path never matches a glob",
-        old="                name = pathlib.PurePath(token).name",
-        new="                name = token",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        # The privacy rule, and the only one here whose failure is a diagnostic quoting another
-        # environment's arguments back at a log to establish a fact the basename already makes.
-        rule="only the script's name is reported, never the command string it sat in",
-        old="                    names.add(name)",
-        new="                    names.add(text)",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="something that is not a legacy script is not a wiring",
-        old="                if looks_legacy(name):",
-        new="                if True:",
-        caught_by="test_hook.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="what is on disk is reported",
-        old='        "on_disk": on_disk,',
-        new='        "on_disk": [],',
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        # The distinction the whole guard turns on: an unwired script on disk is inert, a wired one
-        # fires alongside the plugin and doubles the SessionStart injection.
-        rule="a doubled fire is a wiring, not a file on disk",
-        old='        "double_fire": bool(scoped),',
-        new='        "double_fire": bool(on_disk),',
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        # The fault a wiring is depends on where it lives, and before the split both arms read as
-        # a doubled fire. Which meant a session handed another root's presence was told its own had
-        # been rendered twice - the one thing root resolution exists to prevent, described as
-        # something else. Observed on the first real migration, not imagined.
-        rule="a wiring outside this root is not this root's rendering doubled",
-        old=(
-            "    scoped = [(path, name) for path, name in wired "
-            "if under(root, path)] if root else []"
-        ),
-        new="    scoped = list(wired)",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="and a wiring inside it is",
-        old=(
-            "    scoped = [(path, name) for path, name in wired "
-            "if under(root, path)] if root else []"
-        ),
-        new="    scoped = []",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        # `under` is compared against a root that arrives resolved and paths globbed from it, so the
-        # two sides agree in the ordinary case and neither of these shows up end to end. Unresolved,
-        # both answer no, and a no here puts a root's own wiring in the machine-wide bucket.
-        rule="a path is resolved before it is compared, so a symlinked route is the same file",
-        old="    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())",
-        new="    return pathlib.Path(path).is_relative_to(pathlib.Path(root).resolve())",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="and so is the root, so a symlinked root is still that root",
-        old="    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())",
-        new="    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root))",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        # The other half of the same split. Reported as machine-wide too, this root's own wiring
-        # produces a warning about some other root that does not exist, which sends whoever reads it
-        # to `doctor` in an environment that has nothing wrong with it.
-        rule="a wiring that belongs to this root is not also machine-wide",
-        old='        "machine_wide": [pair for pair in wired if pair not in scoped],',
-        new='        "machine_wide": list(wired),',
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="no root means no settings to search, rather than a crash",
-        old=(
-            "    wired, problems = wirings(settings_files(root, user_settings)) "
-            "if root else ([], [])"
-        ),
-        new="    wired, problems = wirings(settings_files(root, user_settings))",
-        caught_by="test_legacy.py",
-    ),
-]
-
-REGISTRY = [
-    Mutation(
-        module="registry",
-        rule="liveness is checked rather than assumed",
-        old="        os.kill(int(pid), 0)",
-        new="        int(pid)",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a pid that arrives as a string is coerced, not read as dead",
-        old="        os.kill(int(pid), 0)",
-        new="        os.kill(pid, 0)",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="something that is not a pid at all is not alive, and not an exception either",
-        old="    except (OSError, TypeError, ValueError):",
-        new="    except OSError:",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a pid that cannot be signalled reads as dead, not as alive",
-        old="    except (OSError, TypeError, ValueError):\n        return False",
-        new="    except (OSError, TypeError, ValueError):\n        return True",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a pid that can be signalled reads as alive",
-        old="    return True",
-        new="    return False",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # The only argument this module takes that is not a pid, and the first thing done to it is
-        # `.is_dir()`. Every caller inside the plugin passes a Path, so the coercion is for the ones
-        # outside it, which is exactly the set no existing check stood in for.
-        rule="a directory given as a string is still a directory",
-        old="    sessions_dir = pathlib.Path(sessions_dir)",
-        new="    sessions_dir = sessions_dir",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a file that will not parse is skipped, not raised",
-        old="        except (OSError, ValueError):\n            continue",
-        new="        except OSError:\n            continue",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="one bad file costs one row, not the rest of the directory",
-        old="        except (OSError, ValueError):\n            continue",
-        new="        except (OSError, ValueError):\n            break",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a row has to be an object, because a list has no .get",
-        old='        if not isinstance(row, dict) or not row.get("sessionId"):',
-        new='        if not row.get("sessionId"):',
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a row with no session id is not a session",
-        old='        if not isinstance(row, dict) or not row.get("sessionId"):',
-        new="        if not isinstance(row, dict):",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a dead session's row is left out by default",
-        old='        if live_only and not alive(row.get("pid")):',
-        new="        if live_only and False:",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="and included when the caller says liveness is not the question",
-        old='        if live_only and not alive(row.get("pid")):',
-        new='        if not alive(row.get("pid")):',
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # The module's own docstring calls this out, and nothing asserted it. A recycled pid is the
-        # whole reason: the stem was written by whatever process held that number at the time.
-        rule="the pid is read from inside the file, not from its name",
-        old='        if live_only and not alive(row.get("pid")):',
-        new="        if live_only and not alive(path.stem):",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="rows come back sorted, because presence is rendered straight from them",
-        old='    return sorted(rows, key=lambda r: str(r.get("name") or r.get("sessionId")))',
-        new="    return rows",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a row with no name sorts by its id, not by the string None",
-        old='    return sorted(rows, key=lambda r: str(r.get("name") or r.get("sessionId")))',
-        new='    return sorted(rows, key=lambda r: str(r.get("name")))',
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # A SessionEnd hook is the caller that needs this: by the time it runs, the session it is
-        # naming may already be gone, and filtering on liveness would lose exactly that row.
-        rule="a session that has just died still resolves by id",
-        old="    for row in entries(sessions_dir, live_only=False):",
-        new="    for row in entries(sessions_dir):",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="an id matches exactly, not as a prefix",
-        old='        if row.get("sessionId") == session_id:',
-        new='        if str(row.get("sessionId")).startswith(session_id):',
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="the row returned is the one whose id matched",
-        old='        if row.get("sessionId") == session_id:',
-        new='        if row.get("sessionId") != session_id:',
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="the walk is bounded, so a cycle cannot hang a command",
-        old="    for _ in range(limit):",
-        new="    for _ in range(limit + 1):",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="pid 1 is where the walk stops, not another step",
-        old="        if current <= 1:",
-        new="        if current < 1:",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # Nearest first is not cosmetic: `own_entry` takes the first match, so the order of this
-        # list is what decides which session a nested command belongs to.
-        rule="the chain runs nearest first",
-        old="        chain.append(current)",
-        new="        chain.insert(0, current)",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a ps that is not there ends the walk rather than raising",
-        old="        except (OSError, subprocess.SubprocessError):",
-        new="        except subprocess.SubprocessError:",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a ps that hangs past the timeout ends the walk too",
-        old="        except (OSError, subprocess.SubprocessError):",
-        new="        except OSError:",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="ps output is stripped, or every parent reads as unusable",
-        old="        parent = out.stdout.strip()",
-        new="        parent = out.stdout",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="output that is not a number ends the walk instead of being parsed",
-        old="        if not parent.isdigit():\n            break",
-        new="        if not parent.isdigit():\n            pass",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="a row whose pid is not a number is skipped, not parsed anyway",
-        old='        if str(r.get("pid", "")).isdigit()',
-        new="        if True",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # The case every command run through a tool call is in: several processes below the session,
-        # so its own pid is in no registry file and only an ancestor's is.
-        rule="the process tree is walked, not just this process",
-        old="    for pid in _parents(os.getpid()):",
-        new="    for pid in [os.getpid()]:",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        rule="the nearest matching session wins, not the outermost",
-        old="    for pid in _parents(os.getpid()):",
-        new="    for pid in reversed(_parents(os.getpid())):",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # The defect shape worth naming: not "no session", which every command handles, but
-        # "somebody else's session", which they all act on.
-        rule="no match is no session, rather than whichever row was first",
-        old="            return rows[pid]\n    return None",
-        new="            return rows[pid]\n    return next(iter(rows.values()), None)",
-        caught_by="test_registry.py",
-    ),
-    # The three a review of this table found, each a line no mutation here offered and no check
-    # read, all three verified green before the checks went in. Two of them are rules
-    # `test_registry.py` already asserts correctly one function over, which is the shape worth
-    # naming: a file can carry a rule and drop it a few lines later, and a table written from the
-    # same reading drops it twice.
-    Mutation(
-        module="registry",
-        # The seam that made the `except` assertable did not make the timeout assertable, because a
-        # stand-in that raises unconditionally reaches the same arm whether the call is bounded or
-        # not. A hung `ps` is the failure the bound exists for and it hangs a session start.
-        rule="the ps call is bounded, not merely guarded",
-        old="                timeout=5,\n",
-        new="",
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # Asserted for `alive` one function up and silently dropped here, where it decides whether a
-        # command can learn its own session id at all. Every fixture in the file wrote an int, so an
-        # int-keyed dict and a raw-keyed one agreed on all of them.
-        rule="a pid that arrives as a string keys the same row as an int",
-        old='        int(r["pid"]): r',
-        new='        r["pid"]: r',
-        caught_by="test_registry.py",
-    ),
-    Mutation(
-        module="registry",
-        # Written up as unfalsifiable on the grounds that the answer is None either way. True of the
-        # answer, false of the behaviour: what it skips is a directory read, which is observable.
-        rule="an empty id is answered without reading the directory",
-        old="    if not session_id:\n        return None",
-        new="    if False:\n        return None",
-        caught_by="test_registry.py",
-    ),
-]
-
-# The first module that writes state a *different* session reads. A claim is written and read by
-# one session, so a wrong claim misinforms nobody but its author. A handoff is addressed to
-# whoever works in a scope next, which may be a session that does not exist yet. That is why there
-# is a table here rather than an entry in `DECLINED` next to `cli`: the argument there is that a
-# wrong answer lands in front of the person who typed the command, and here it does not. Nobody is
-# watching when a handoff is dropped, because the sender saw it posted and the recipient never had
-# it to miss.
-#
-# Two rules carry the module and most of the table is about them: posting never overwrites, and
-# `status` is derived from `history` in one write rather than maintained beside it. The second is
-# this repo's recurring defect in a new shape, two inputs that agree cannot say which one was
-# read, so the mutations that matter most are the ones that make the two halves agree by
-# construction.
-HANDOFFS = [
-    Mutation(
-        module="handoffs",
-        rule="the timestamp's separators are stripped, because the id is also the filename",
-        old='    stamp = (at or store.now()).replace("-", "").replace(":", "")',
-        new="    stamp = at or store.now()",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="the id is built from the posting time, so a lexical sort is a chronological one",
-        old='    stamp = (at or store.now()).replace("-", "").replace(":", "")',
-        new='    stamp = store.now().replace("-", "").replace(":", "")',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Without it, two handoffs posted in the same second collide as a matter of course, and then
-        # the only safe behaviour is to retry - which turns a real duplicate into a second row
-        # nobody compares. The suffix is what makes a collision a bug rather than contention.
-        rule="the random suffix is really there, and long enough to be one",
-        old="SUFFIX_BYTES = 3",
-        new="SUFFIX_BYTES = 0",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="a scope and a session at once is neither",
-        old="    if repo and session_id:",
-        new="    if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="repeated paths are deduplicated",
-        old='            scope["paths"] = list(dict.fromkeys(paths))',
-        new='            scope["paths"] = list(paths)',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # `dict.fromkeys` rather than `set`, and the order is the reason: the paths are rendered
-        # back to a human in the order they were typed.
-        rule="and the order they were given in survives the deduplication",
-        old='            scope["paths"] = list(dict.fromkeys(paths))',
-        new='            scope["paths"] = sorted(set(paths))',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The schema's `oneOf` catches an empty `to` on the way to disk, with "does not match any of
-        # the allowed forms", which is true and says nothing about which flag was forgotten.
-        rule="--path without --repo names the missing flag rather than the failing form",
-        old='        return None, "--path narrows a repo scope, so it needs --repo as well"',
-        new='        return {"paths": list(paths)}, None',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The mutation is the bug that was there. `to_scope` returned on `session_id` before
-        # the paths-without-repo refusal below it, so `--session` with `--path` posted, exited
-        # 0, and left the narrowing out of the record. Nothing in the table covered the
-        # combination, so the sweep was green on it - which is why this is a table entry and
-        # not only a check.
-        rule="--path with --session is refused rather than silently dropped",
-        old="""        if paths:
-            return None, "--path narrows a repo scope, so it cannot go with --session"
-        return {"session_id": session_id}, None""",
-        new='        return {"session_id": session_id}, None',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="no addressing at all is a refusal, not an empty scope",
-        old='    return None, "say who it is for: --repo (optionally with --path) or --session"',
-        new="    return {}, None",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="a body of nothing but whitespace says nothing",
-        old='    if not (body or "").strip():',
-        new='    if not (body or ""):',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The filename rule runs before the write, the schema runs during it. Both refuse this id,
-        # so only the message says which one ran, and only one of them leaves the directory alone.
-        rule="an id that cannot be a filename is caught here, not by the validator",
-        old="    handoff_id = handoff_id or new_id(at)\n    if store.safe_id(handoff_id) is None:",
-        new="    handoff_id = handoff_id or new_id(at)\n    if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The headline rule. An id collision means two handoffs, and keeping one of them is
-        # invisible at both ends: no later command's output looks wrong. The mutation is the version
-        # that was here until #44: a writer that replaces, guarded by an `exists()` check above it.
-        rule="posting never overwrites an id that is already on disk",
-        old="    problem = store.create_json(path(root, handoff_id), record, SCHEMA)",
-        new="    problem = store.write_json(path(root, handoff_id), record, SCHEMA)",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="one clock reading is used for both the id and the recorded time",
-        old="    at = at or store.now()",
-        new="    at = store.now()",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="the sender's cwd is recorded, which is all there is when the registry has no row",
-        old='        "from": {"cwd": str(cwd)},',
-        new='        "from": {"cwd": str(root)},',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="the session id and the display name are not each other",
-        old='        record["from"]["session_id"] = session_id',
-        new='        record["from"]["name"] = session_id',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The regression guard for the bug this whole shape was rewritten around. The first version
-        # of #44 sorted these by filename, the filename began with the timestamp, and `store.now()`
-        # records seconds - so accepting and closing inside one second left the order to the random
-        # suffix. The name is legibility now; `after` is the ordering.
-        rule="moves are ordered by the position their writer recorded, never by their filename",
-        old='    return sorted(entries, key=lambda entry: entry["after"]), faults',
-        new="    return entries, faults",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # A move file carries no id on purpose - a second copy of it could disagree with the first -
-        # and its name is a position, so `0001-a3f2.json could not be read` on its own names nothing
-        # anyone can act on, and two handoffs with one bad move each produce two identical lines.
-        rule="a problem with a move names the handoff the move belongs to",
-        old='    faults = [f"{handoff_id}: {problem}" for problem in problems]',
-        new="    faults = list(problems)",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="a status that is not one of the three is refused before anything is read",
-        old="    if status not in STATUSES:",
-        new="    if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="an id with no record on disk is named as missing",
-        old="    if record is None:",
-        new="    if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # One rule per entry, because the first version of this covered both halves of the guard
-        # with a single `if False:` - and patching out only the unreadable half left the whole
-        # suite green, because nothing in the repo wrote a malformed move file at all. An entry
-        # that passes on the strength of the half that is covered is the thing this table exists
-        # to prevent.
-        rule="a move computed from a move that could not be read is refused",
-        old="    if problems or not _settled(seen):",
-        new="    if not _settled(seen):",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # A contested last position has no latest entry, so `current` is one of two answers and
-        # moving on from the wrong one is how a closed handoff comes back open.
-        rule="a move computed from a contested last position is refused",
-        old="    if problems or not _settled(seen):",
-        new="    if problems:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The other side of it. A disagreement at an earlier position is reported but must not
-        # block: a later uncontested move settles what the status is now, and refusing anyway
-        # would strand the handoff for good over a race already superseded, with no verb to
-        # unstrand it.
-        rule="only the last position being contested blocks a move, not any position",
-        old='    last = entries[-1]["after"]\n    return len({entry["status"]',
-        new='    last = entries[0]["after"]\n    return len({entry["status"]',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # `post` writes no moves, so a handoff that has never been touched has an empty directory
-        # and has to be movable. Refusing there would make every first accept fail.
-        rule="a handoff with no moves yet is settled, so it can be moved",
-        old="    if not entries:\n        return True",
-        new="    if not entries:\n        return False",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Not a no-op worth absorbing: either the caller is reading a stale render or two sessions
-        # are answering the same thing, and a second identical entry would hide both.
-        rule="a move to the status it already has is refused",
-        old="    if current == status:",
-        new="    if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="the move records the status moved to, not the one left behind",
-        old='    entry = {"at": at or store.now(), "status": status, "after": after}',
-        new='    entry = {"at": at or store.now(), "status": current, "after": after}',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Pinned to zero, every move claims to have been made against a fresh handoff, so the second
-        # one reads as concurrent with the first and an ordinary sequence reports as contested.
-        rule="a move records the position it was made at, so the next one sorts after it",
-        old='    after = (1 + max(entry["after"] for entry in seen)) if seen else 0',
-        new="    after = 0",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The mutation is what was here first, and the bug is subtle: the count equals the
-        # position only while every position holds one move, and the case where it does not is
-        # exactly a concurrent pair. Two writers acting on the same status then file at different
-        # positions, so the tie the whole layout exists to surface is never detected.
-        rule="the position is one past the highest one read, not the number of moves read",
-        old='    after = (1 + max(entry["after"] for entry in seen)) if seen else 0',
-        new="    after = len(seen)",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # What makes two concurrent writers at one position two files rather than one refusing. The
-        # `SUFFIX_BYTES` entry above covers `new_id`, and the id test catches it first, so this half
-        # was going unexercised.
-        rule="a move's filename carries a random suffix, so two at one position do not collide",
-        old='    name = f"{after:04d}-{secrets.token_hex(SUFFIX_BYTES)}.json"',
-        new='    name = f"{after:04d}.json"',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="who made the move is kept, which is most of what the moves are for",
-        old='        entry["by"] = by',
-        new='        entry["note"] = by',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Two kinds of fault reach a reader through here and each gets its own entry, because one
-        # `if False:` over both would pass on the strength of whichever half happened to be covered.
-        rule="a move that could not be read is reported to whoever asked for the status",
-        old="    return status, problems + faults",
-        new="    return status, faults",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="and so is a position whose moves disagree",
-        old="    return status, problems + faults",
-        new="    return status, problems",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # `post` writes no move, so an empty directory means "never changed since it was posted".
-        # Without the guard the next line indexes an empty list, which is the same defect arriving
-        # as a traceback.
-        rule="no moves at all is open",
-        old="    if not entries:\n        return OPEN, []",
-        new="    if False:\n        return OPEN, []",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="the current status is the last move, not the first",
-        old='    return entries[-1]["status"], _contested(handoff_id, entries)',
-        new='    return entries[0]["status"], _contested(handoff_id, entries)',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Dropping the row would hide a handoff, which is worse than showing one whose state is in
-        # question. A caller rendering a list has to be able to show the row *and* the fault.
-        rule="the status is still returned alongside the problem",
-        old='    return entries[-1]["status"], _contested(handoff_id, entries)',
-        new="    return None, _contested(handoff_id, entries)",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Without grouping by position every ordinary sequence is a disagreement: accepted then
-        # closed are two different statuses, and they were made one after the other.
-        rule="only moves at the same position are concurrent",
-        old='        first = first_at.setdefault(entry["after"], entry["status"])',
-        new='        first = first_at.setdefault(0, entry["status"])',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Every position, not only the newest. The first version compared each move against the last
-        # move's position, so a disagreement was reported until one further move landed on top of it
-        # and then vanished entirely - two sessions had moved one handoff two ways and the store had
-        # nothing left to say about it.
-        rule="a disagreement at any position is reported, not only one at the newest",
-        old="    for entry in entries:\n        first = first_at.setdefault",
-        new="    for entry in entries[-1:]:\n        first = first_at.setdefault",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Two concurrent *identical* moves are both true and the handoff is in that state either
-        # way. Without the comparison the first move at every position disagrees with itself.
-        rule="two moves at one position that agree are not a disagreement",
-        old='        if first != entry["status"]:',
-        new="        if True:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="two moves at one position that disagree are reported",
-        old='        if first != entry["status"]:',
-        new="        if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # The id inside the file is what finds the moves, so it has to be the name the file came out
-        # of. The mutation this replaces stat-ed `<id>.json` instead, which passes whenever *some*
-        # file of that name exists: swapping two records' ids had each row render the other's status
-        # and report nothing, and copying one file gave two rows under one id.
-        rule="the id in a handoff file has to name the file it was read from",
-        old='        if record["id"] != file.stem:',
-        new="        if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # A moves directory outlives its record if anyone removes `<id>.json`, and nothing iterates
-        # directories, so it is invisible until an id lands on it again. Posting into it hands a
-        # brand-new handoff the old one's status: posted, exit 0, and it reads as closed.
-        rule="posting never inherits moves already recorded under the id",
-        old="    if store.transitions_dir(root, handoff_id).exists():",
-        new="    if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="load_all reports what the moves said rather than only the parse failures",
-        old="        problems += faults",
-        new="        pass",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="and keeps the record it is complaining about",
-        old="    return pairs, problems",
-        new="    return [], problems",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="a narrowed scope is described with the paths that narrow it",
-        old="    return f\"{to['repo']}: {', '.join(paths)}\" if paths else to[\"repo\"]",
-        new='    return to["repo"]',
-        caught_by="test_handoffs.py",
-    ),
-]
-
-TABLES = {
-    "claims": CLAIMS,
-    "exchange_root": EXCHANGE_ROOT,
-    "handoffs": HANDOFFS,
-    "hook": HOOK,
-    "hookio": HOOKIO,
-    "legacy": LEGACY,
-    "registry": REGISTRY,
-    "store": STORE,
-    "validate": VALIDATE,
+# `tables/<module>.py` is deliberately not in here, and that is the whole of #36. The tables used to
+# live in this file, so the set below matched nearly every PR in the repo - the rule here is that a
+# fix adds a mutation, and a mutation was an edit to `mutate.py`. The narrowing applied only to a PR
+# that changed behaviour and asserted nothing new about it, which is the PR this repo tries not to
+# produce. Split per module, a new mutation is a diff in one path that names its own module.
+INSTRUMENT = {
+    "plugin/tests/run.py",
+    "plugin/tests/mutate.py",
+    "plugin/tests/tables/__init__.py",
+    "plugin/tests/tables/shape.py",
 }
 
-# Modules with no table yet, listed rather than merely absent so that the debt is a thing you have
-# to look at and a new module cannot join it by accident. `test_mutations.py` asserts these two sets
-# plus the keys of TABLES are exactly what is in `plugin/lib`, so adding a module without deciding
-# which of the three it belongs in fails the build. Tracked as issue #8.
+# Test files that hold rules up across the whole of `plugin/lib` while being no mutation's
+# `caught_by`, so the `caught_by` map cannot reach them. That is #27, and `test_cli.py` is the only
+# instance: the sweep prints it alongside the named file for several `registry` and `legacy`
+# mutations, because driving a command end to end exercises most of the lib whatever the command is.
 #
-# Empty as of the table below, which closes #8: eight of the eleven modules have a table now, and
-# the other three are in `DECLINED` with a reason rather than here. It stays as an empty set rather
-# than being deleted, because it is where the next module lands: a new file in `plugin/lib` fails
-# the accounting in `test_mutations.py` until someone puts its name in one of the three - a table,
-# this, or `DECLINED` - and that forced decision is the whole mechanism. The checks that read this
-# are given fixtures rather than real members, so they can still fail with nothing in here.
-NOT_YET = set()
+# Left as a note rather than fixed for as long as the fix cost a full sweep on a common PR, which is
+# most of the repo's history. #36 is what changes the arithmetic: with the tables split out, the
+# full sweep is rare, so paying it for a change to the one file that could weaken any table is
+# cheap. The alternative was recording per module which files the sweep saw objecting, and that is a
+# second copy of what the sweep already prints, kept by hand, rotting the way the `old` strings rot.
+BROAD = {"plugin/tests/test_cli.py"}
 
-# Not "not yet". Decided against, with the reason next to the name, because a debt list that
-# silently contains permanent entries stops being a debt list. These three are 1087 lines, about
-# half of `plugin/lib`, and every one of their failure modes is a wrong answer on a command a human
-# typed, which is the cheapest possible feedback loop; the sweep's cost, by contrast, is linear in
-# table size and paid on every push. Reversing one of these is an edit to this dict, which is the
-# point of writing the reason down rather than the decision.
+# Test files a sweep structurally cannot measure, as against merely does not. `prepare` deletes
+# `test_mutations.py` from every mutated copy - it asserts that a table matches its module, and a
+# mutation is exactly an edit that stops one matching, so it would fail by construction on every
+# entry - which means no mutation can ever name it in `caught_by`.
 #
-# `ledger` and `reconcile` were swept in /tmp and passed; that is not why they are here, and it is
-# not credited as cover either, because a sweep nobody can re-run is a claim rather than a check.
-DECLINED = {
-    "cli": "argument parsing and output formatting, wrong in front of the person who typed it",
-    "ledger": "append and read back, and a bad row is visible in the next command's output",
-    "reconcile": "reports staleness to a reader who can see the sessions it is describing",
-}
-
-# The union is what the accounting in `test_mutations.py` and the `--since` notes below read, so the
-# split above costs those callers nothing.
-UNSWEPT = NOT_YET | set(DECLINED)
-
-
-# The two files that decide what a sweep measures rather than being measured by it: `run.py` is what
-# "the suite" means, and this file holds every table. A change to either makes the last sweep's
-# verdicts stale for every module, so `--since` stops narrowing and reswept the lot. `test_*.py` is
-# deliberately not in here - those map through `caught_by` instead, which is narrower and exact.
-INSTRUMENT = {"plugin/tests/run.py", "plugin/tests/mutate.py"}
+# Its own set because the `caught_by` branch would otherwise print "named by no mutation, so no
+# table maps this change" about it, which is true and useless: it reads as a table nobody has got
+# round to, and the only thing anyone could do about it is the one thing the harness forbids. It
+# still prints alongside "every table is reswept" on a harness PR, which the pair the `continue`
+# above the loop removes was not: "reswept" and "no table maps this" contradict each other, while
+# "reswept" and "this one path cannot be swept by anything" are both true and neither is the other's
+# answer. The line stays because it is the only thing that explains a path selecting no module.
+#
+# The set is also what `prepare` deletes and what `test_mutations.py` holds `caught_by` against. A
+# mutation naming a file in here would pass every check about the table - the file exists - and then
+# be scored a permanent survivor, because the copy the suite runs in does not have the file that was
+# supposed to object. Which is a red sweep on a rule that is asserted, the opposite defect to the
+# one the sweep is for, and the check for it was missing until review asked what enforced this.
+UNSWEEPABLE = {"plugin/tests/test_mutations.py"}
 
 
 def targets(paths):
@@ -1815,21 +160,30 @@ def targets(paths):
     in a way nothing notices, since its failure is a sweep that runs, passes, and measured the
     wrong thing.
 
-    Three ways a path reaches a module:
+    Four ways a path reaches a module:
 
     - `plugin/lib/<name>.py` is the module itself, the obvious half.
+    - `plugin/tests/tables/<name>.py` is that module's table. The path is the mapping, which is why
+      the tables are one file each rather than one file with nine lists in it: a pure function given
+      a path can say which table a diff touched only if the path says so.
     - a test file maps through `caught_by`, because what the sweep asserts is that *the suite*
       objects, and a check deleted from that file is precisely how a mutation stops being caught. A
       sweep narrowed to changed lib modules alone would miss the whole of that, which is the failure
       this repo would have shipped: the file that weakens the gate is not the file the gate is
       about.
-    - `run.py` or this file is the instrument, so every table.
+    - `INSTRUMENT` or `BROAD` is every table, for the two different reasons recorded on each.
 
     A note rather than a refusal for a changed module with no table. Failing would gate `cli`,
     `ledger` and `reconcile` behind writing tables for them, and a gate that blocks ordinary work
     gets bypassed, which is worse than the hole it was closing. The note says the change went
     unswept, and the weekly full sweep does not cover it either: `UNSWEPT` means unswept
     everywhere.
+
+    The notes are printed on a wide run too, rather than returned only when the narrowing applies.
+    They used to be skipped: `INSTRUMENT` returned early, so a PR that touched the harness and also
+    changed `cli` swept everything and never said `cli` went unswept. Nothing was wrong with the
+    module list, which is what a check on that path would have compared, and the line a reader
+    needed was the one that went missing.
 
     A changed test file that no `caught_by` names gets a note for the same reason, which it did not
     for the first three tables (#24). Both halves were defensible alone - a file the tables do not
@@ -1838,40 +192,80 @@ def targets(paths):
     239 lines of checks. True, and not what a reader takes from it. `test_handlers.py` is the
     permanent case: the handlers are shell, which is outside anything this file can patch.
 
-    The note says "no table maps this change" rather than "nothing measures it", because those are
-    not the same and `test_cli.py` is the difference. It is a real catcher - the sweep prints it
-    alongside the named file for several `registry` and `legacy` mutations - while being no
-    mutation's `caught_by`, since that field records the file that has to object rather than every
-    file that does. So a change to it narrows to nothing and is honestly described as unmapped, not
-    as unmeasured. Tracked as #27.
+    The note for a test file says "no table maps this change" rather than "nothing measures it",
+    because those are not the same: a file can catch mutations without being any mutation's
+    `caught_by`, that field recording the one file that has to object rather than every file that
+    does. `test_handlers.py` is the honest instance, the handlers being shell, and `test_cli.py` was
+    the dishonest one until `BROAD`.
+
+    `UNSWEEPABLE` gets its own wording for the third case, a file the sweep deletes from every copy
+    it makes. "No table maps this change" is true of it and reads as a table nobody has written yet,
+    when the harness forbids the only thing that would fix it. It also paired with "every table is
+    reswept" on every harness PR, which is the contradiction the `continue` above is for.
     """
-    if INSTRUMENT & set(paths):
-        return sorted(TABLES), ["the sweep's own instrument changed, so every table is reswept"]
+    paths = set(paths)
+    # Wide for two different reasons, and both are said out loud rather than collapsed into one
+    # line. "The instrument changed" and "a file that catches across every module changed" lead to
+    # the same module list and to different follow-up actions, and the log is where it gets read.
+    wide = []
+    if INSTRUMENT & paths:
+        wide.append("the sweep's own instrument changed, so every table is reswept")
+    if BROAD & paths:
+        named = ", ".join(sorted(path.rpartition("/")[2] for path in BROAD & paths))
+        wide.append(
+            f"{named} catches mutations across every module, so every table is reswept (#27)"
+        )
+
     by_test = {}
     for name, table in TABLES.items():
         for mutation in table:
             by_test.setdefault(mutation.caught_by, set()).add(name)
     modules = set()
     notes = []
-    for path in sorted(set(paths)):
+    for path in sorted(paths):
+        # Handled above, and skipped here so the loop does not also report them as unmapped. Both
+        # would otherwise fall through to the test-file branch, where no mutation names them: a
+        # harness change would print "every table is reswept" and "mutate.py is named by no
+        # mutation", which contradict each other and are both true.
+        if path in INSTRUMENT or path in BROAD:
+            continue
         parts = pathlib.PurePosixPath(path).parts
-        if len(parts) != 3 or parts[0] != "plugin" or not path.endswith(".py"):
+        if parts[0] != "plugin" or not path.endswith(".py"):
             continue
         name = pathlib.PurePosixPath(path).stem
-        if parts[1] == "lib":
+        if len(parts) == 4 and parts[1:3] == ("tests", "tables"):
+            # A table for a module the accounting knows. A file here that is not one is dead code -
+            # nothing imports it, so no sweep reads it - and it gets a note rather than being
+            # ignored, because a mutation written into a file nothing assembles is a rule somebody
+            # believes is asserted.
+            if name in TABLES:
+                modules.add(name)
+            else:
+                notes.append(f"{path} is no module's table, so nothing assembles or sweeps it")
+        elif len(parts) != 3:
+            continue
+        elif parts[1] == "lib":
             if name in TABLES:
                 modules.add(name)
             elif name in DECLINED:
                 notes.append(f"{name} changed and is deliberately not swept: {DECLINED[name]}")
             elif name in NOT_YET:
                 notes.append(
-                    f"{name} changed and has no table yet, so this change goes unswept (#8)"
+                    f"{name} changed and has no table yet, so this change goes unswept (#55)"
                 )
         elif parts[1] == "tests":
             named = by_test.get(parts[2], set())
             modules |= named
-            if not named:
+            if named:
+                continue
+            if path in UNSWEEPABLE:
+                notes.append(
+                    f"{parts[2]} is deleted from every mutated copy, so no mutation can name it"
+                )
+            else:
                 notes.append(f"{parts[2]} is named by no mutation, so no table maps this change")
+    if wide:
+        return sorted(TABLES), wide + notes
     return sorted(modules), notes
 
 
@@ -1957,7 +351,13 @@ def prepare(scratch, mutation=None, mutated=None):
     # mutation did, which made the survivor branch unreachable for exactly the mutations the sweep
     # runs and left `caught_by` doing that job by accident. Removed for the sweep only; the baseline
     # run keeps it, which is where it is meaningful.
-    (scratch / "plugin" / "tests" / "test_mutations.py").unlink()
+    #
+    # Read off `UNSWEEPABLE` rather than naming the path again. The set and this line are one fact,
+    # and written twice they drift in both directions: a second entry in the set and `targets` says
+    # a file is deleted from every copy while the copy still has it, a deletion here and the note is
+    # wrong the other way round.
+    for path in sorted(UNSWEEPABLE):
+        (scratch / path).unlink()
 
 
 def run_suite(mutation=None):
@@ -2026,6 +426,67 @@ def catchers(out):
     return [name.strip() for name in failed.group(1).split(",")]
 
 
+def sections(out):
+    """Runner output split by the `=== <file>` headers `run.py` prints, as `{file: text}`.
+
+    So that "the named file objected" can be told from "the named file failed a check", which are
+    not the same thing and scored the same until #42. `run.py` reports any non-zero child in its
+    `FAILED:` line, and a test file that dies on a traceback exits non-zero, so the summary line the
+    scoring reads cannot distinguish a rule that was asserted and failed from a file that stopped
+    part way through and asserted nothing after that point.
+
+    The one file whose own output contains `=== ` lines is `test_mutations.py`, whose synthetic
+    runner fixtures print them, and `prepare` removes that file from every mutated copy - which is
+    the only place this is read. Recorded rather than guarded against: a guard for it would be
+    unreachable, and this file deletes those, but the coupling is worth knowing if that ever
+    changes.
+
+    `setdefault` on both branches, which is redundant on the second and deliberate. Written as a
+    plain `found[current].append(line)`, dropping the `current is not None` guard raises KeyError,
+    and a raise is the one report this repo will not take: it kills the check that exists to catch
+    the defect and every check after it, which is #42 one level up. Written this way the same edit
+    returns a `None` bucket holding the preamble, which is a wrong answer, and a wrong answer is
+    what a check can object to.
+
+    Which makes it the one line here no check can turn red on its own, and that is the trade rather
+    than an oversight: reverting it changes nothing for any input, and it changes what a *different*
+    deletion does. It costs something too. With a plain append, dropping the header branch's
+    `setdefault` raised KeyError on the first body line of the first file, so every caller noticed;
+    now it only changes the announced-and-silent case, and the whole of that rests on one check. A
+    check going red beats a traceback at an arbitrary caller, which is this file's own subject, so
+    both breaks landing on checks is the shape to want - but only while both checks exist."""
+    found, current = {}, None
+    for line in out.splitlines():
+        header = re.match(r"^=== (\S+)$", line)
+        if header:
+            current = header.group(1)
+            found.setdefault(current, [])
+        elif current is not None:
+            found.setdefault(current, []).append(line)
+    return {name: "\n".join(body) for name, body in found.items()}
+
+
+# `FAIL` followed by whitespace, which is the shape every check helper in this repo prints and is
+# deliberately not `FAILED:`, the runner's own summary line. That line lands inside the last file's
+# section, so matching it would report whichever file the glob happened to sort last as having
+# failed a check, which is two inputs that agree in the one place that is asking which was read.
+CHECK_FAILED = re.compile(r"^\s*FAIL\s")
+
+
+def failed_a_check(out, name):
+    """Whether the named file printed a failing check, rather than only exiting non-zero.
+
+    Catches "died with no failing check at all", which is narrower than "died". A file that fails
+    one check and then raises on the next line satisfies this and is scored an ordinary catch, so
+    the rules it asserts after the crash point are still credited - the #41 shape, one check in.
+    Telling that apart needs the count of checks the file was expected to print, and nothing has it:
+    the runner prints per-file `ok`/`FAIL` lines but no total, and a mutated module legitimately
+    changes how many checks run. The subset this does catch is the one that credited a whole file's
+    worth of rules to a traceback; the rest is #57.
+    """
+    return any(CHECK_FAILED.match(line) for line in sections(out).get(name, "").splitlines())
+
+
 def last_line(out):
     """The last line of runner output, for the cases where no test file was named.
 
@@ -2077,9 +538,26 @@ def verdict(returncode, out, mutation):
 
 
 def sweep_one(mutation):
-    """Returns `(ok, detail)`. `ok` is False when the suite did not object."""
+    """Returns `(ok, detail, crashed)`. `ok` is False when the suite did not object.
+
+    `crashed` is a caught mutation whose named file exited non-zero without a single check failing,
+    which means it died part way through - and everything it would have asserted after that point
+    went unasserted, for this mutation and for every other one that trips the same crash. It is not
+    a survivor: a module mutated into raising is a legitimate way to be caught, and the sweep says
+    so rather than failing. It is also not the same signal as a catch, which is #42. Found by
+    breaking the overwrite refusal in #41 by hand, where a check asserted a substring against a
+    value that is `None` exactly when the rule it covers is broken: the file died at check 14 of 34,
+    the remaining twenty never ran, and the sweep reported full coverage of the table throughout.
+
+    Computed here rather than inside `verdict` because it needs the output and the mutation
+    together, and `verdict` is fed synthetic output by the cheap gate on the strength of being
+    exactly the scoring and nothing else. `run_suite` is the seam this side is asserted through.
+    """
     returncode, out = run_suite(mutation)
-    return verdict(returncode, out, mutation)
+    ok, detail = verdict(returncode, out, mutation)
+    if ok and not failed_a_check(out, mutation.caught_by):
+        return True, f"{detail}, but no check in it failed, so it died rather than objecting", True
+    return ok, detail, False
 
 
 def main(argv):
@@ -2147,6 +625,7 @@ def main(argv):
     print("  ok    the unmutated copy passes, so a failure below is the mutation's")
 
     survivors = []
+    crashes = []
     # Counted as the loop goes, not from `sum(len(TABLES[name]) for name in wanted)`, which is what
     # this did and which is a claim about the table rather than about work done. Both directions
     # were probed and both green: slicing the inner loop to `TABLES[name][:1]` ran 3 of 16 and still
@@ -2154,20 +633,43 @@ def main(argv):
     # loop swept all 16 for `mutate.py hookio` and reported 8. Same reasoning as the `if not scored`
     # refusal below, one step out: a number nobody produced does not count either.
     scored = 0
+    started = time.monotonic()
     for name in wanted:
         print(f"=== {name}.py")
         for mutation in TABLES[name]:
-            ok, detail = sweep_one(mutation)
+            ok, detail, crashed = sweep_one(mutation)
             scored += 1
-            print(f"  {'ok   ' if ok else 'ALIVE'} {mutation.rule}")
+            print(f"  {'crash' if crashed else 'ok   ' if ok else 'ALIVE'} {mutation.rule}")
             # On a pass as well as on a survivor. `verdict` returns the files that objected and
             # nothing read the value, so it could have returned "" with the suite green - and it is
             # worth reading: a mutation caught by three files is a coupling nobody chose.
             print(f"        {detail}")
             if not ok:
                 survivors.append((mutation, detail))
+            elif crashed:
+                crashes.append((mutation, detail))
 
     print()
+    # The unit cost, which is the figure the job's timeout is actually sized against and which two
+    # files had wrong (#43). The sweep's price was described as linear in the size of the tables; it
+    # is mutations times suite length, so a slow check added to a shared test file multiplies by the
+    # whole mutation count and makes every older table's mutations slower too. Printed rather than
+    # recomputed by hand from a comment, because the estimate is what broke a merge: #41 was
+    # canceled at 15m15s against a 15-minute limit with a passing sweep.
+    elapsed = time.monotonic() - started
+    if scored:
+        print(f"  cost  {scored} mutation(s) in {elapsed:.0f}s, {elapsed / scored:.1f}s each")
+    # Ahead of the survivors, because a crash is a reason to distrust every verdict printed above it
+    # and not just its own. A file that dies part way through asserts nothing after that point, for
+    # this mutation and for every other one that trips the same crash, and the sweep reports the
+    # rest of the table as covered throughout. Not an exit code: a module mutated into raising is a
+    # legitimate way to be caught, and a gate that fails on a legitimate catch gets bypassed.
+    if crashes:
+        print(f"{len(crashes)} mutation(s) were caught by a file dying rather than by a check:")
+        for mutation, detail in crashes:
+            print(f"  {mutation.module}: {mutation.rule}")
+            print(f"    {detail}")
+        print()
     if survivors:
         print(f"{len(survivors)} mutation(s) survived:")
         # The detail, not just the rule. `ALIVE` covers four different outcomes - nothing asserts

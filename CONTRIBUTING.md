@@ -47,7 +47,10 @@ the modules that got swept are thorough. Point it at the ones that did not.
 
 The sweep itself now lives in `plugin/tests/mutate.py` rather than being rewritten in `/tmp` each
 time, which it was, four times, losing its tables and its own bug fixes with every session. The
-tables are the durable part; the runner is incidental:
+tables are the durable part; the runner is incidental, and the tables are one file per module under
+`plugin/tests/tables/` for a reason worth reading in that package's docstring: the path is what tells
+the narrowing which module a new mutation belongs to, so adding one costs a single module's sweep
+instead of all nine.
 
 ```sh
 python3 plugin/tests/mutate.py                      # every module with a table
@@ -61,13 +64,16 @@ every mutation still matches the source it claims to patch, and that `TABLES` an
 account for every module in `plugin/lib`. Both failures are otherwise silent. A mutation whose text
 has drifted tests nothing while still reporting a catch, and none of the eleven modules had a table in
 the repo at all before this, which is the same "thorough where it was pointed" problem one level up.
-Eight have one now, and `NOT_YET` is empty. The three that do not are all in `DECLINED`, with the
-reason recorded next to each: `cli`, `ledger` and `reconcile` are 1087 lines, about half of
-`plugin/lib`, and every failure mode they have is a wrong answer on a command a human just typed,
-which is a cheaper feedback loop than a sweep whose cost is linear in the size of the tables. The split
-exists because a debt list that quietly contains permanent entries stops being read as a debt list.
-Reversing one of those decisions is an edit to a dict, which is the point of writing the reason down.
-`NOT_YET` stays as an empty set rather than being deleted, because a new module in `plugin/lib` fails
+Nine have one now. `ledger` and `reconcile` are in `NOT_YET`, tables owed, and `cli` is the single
+entry in `DECLINED`: 400-odd lines of argument parsing and output formatting, every path of it reached
+by somebody who typed the command and is reading the answer, with `test_cli.py` driving all of it end
+to end. That is the trade the sweep loses on, and it is a claim about `cli` rather than a general
+argument - it was briefly recycled for the other two, and once written out honestly it did not apply
+to them, because neither has a caller at all so there is no person and no answer to misread (#40).
+
+The split exists because a debt list that quietly contains permanent entries stops being read as a
+debt list. Reversing either decision is an edit to a dict, which is the point of writing the reason
+down rather than the decision. Both stay even when empty, because a new module in `plugin/lib` fails
 the accounting until it gets one of the three - a table, a place in `NOT_YET`, or a recorded reason in
 `DECLINED` - and that forced choice is the mechanism.
 
@@ -209,34 +215,77 @@ buys is the round trip, a format failure found in under a second rather than two
 log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: six tables was just over four minutes locally,
-eight was 144 mutations and eight and a half, and nine is 191 mutations, 14m51s of it measured at 177.
-All measured, and the last one is why the figures are worth keeping: scaling the 144 would have
-predicted ten and a half.
+taste. A sweep is one full suite run per mutation, and every figure here is labelled with the count it
+was taken at, because a number that quietly re-labels itself as the tables grow is the whole problem:
+six tables was 87 mutations and just over four minutes locally, eight was 144 and eight and a half, and
+the ninth table was measured at 14m51s while it stood at 177 mutations. It is 191 now and sixteen and a
+half. The ninth is why the figures are worth keeping: scaling the 144 at its own 3.5s per mutation
+would have predicted ten and a half at 177, and it took fifteen.
+
+Every figure in that paragraph is a laptop, and the runner is a different measurement rather than the
+same one scaled. Three full resweeps of the same 191 over three consecutive commits came in at 20m44s,
+17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. A spread
+of nearly half, which swallows every local figure at this count, so the observed band is the whole of
+4.5 to 6.5 seconds and a tighter reading of it is not supported. Naming one is the older mistake here:
+the comment in `ci.yml` carried "between four and a half and four and three quarters" for the
+87-mutation set with no samples recorded beside it, so where that quarter-minute came from is not
+answerable now, and four later resweeps put the runner spread at three to five minutes. The first
+reading of the 191 figures repeated it a different way, off the runner's 6.5s against a 6.0s laptop
+figure: half a second was called the machine and the rest the added checks, which is one sample per
+cause and cannot separate them. The second runner resweep at 5.4s is what killed it. `timeout-minutes`
+on the `ci` sweep is `sweep.yml`'s number by parity rather than anything derived from these, and what
+they are for is the floor it has to clear: the slowest full resweep in the logs, never the latest one
+and never a laptop. 15 minutes was chosen off a laptop, and the sweep it was sized for ran to 15m15s
+and was canceled.
+
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
-from 3.5s to 5.0s when the ninth table landed. That is already well past what a push should carry to
+from 3.5s at 144 to 5.0s at 177, and is 5.2s at 191. That is already well past what a push should carry to
 re-answer a question the last push answered about code it did not touch, and each table added makes it
 worse than the one before. So `ci` sweeps only the modules the change could have affected, and the full
-sweep runs weekly where the length of it does not matter.
+sweep runs weekly where the length of it does not matter. The run prints its own per-mutation figure
+at the end now, so the next revision of this paragraph comes off a log line rather than off dividing a
+job total by a count.
 
-The narrowing is not a ceiling, though, and the workflow has to be written for that: a change to
-`run.py` or `mutate.py` widens `--since` to every table, so `ci`'s sweep job carries the same
-`timeout-minutes` as the weekly one rather than a tighter number sized for the usual case.
+The narrowing spent its first months narrowing nothing, which is worth knowing before trusting it. The
+tables lived in `mutate.py`, a change to `mutate.py` resweeps everything because it decides what every
+verdict means, and the rule in this repo is that a fix adds a mutation - so nearly every push paid the
+full sweep, and the narrow path applied only to a change that asserted nothing new about itself. Split
+per module (#36), a new mutation is a diff in one path that names its own module.
+
+It is still not a ceiling, and the workflow has to be written for that: a change to `run.py`, to
+`mutate.py`, to `tables/shape.py` or `tables/__init__.py`, or to `test_cli.py` widens `--since` to
+every table, so `ci`'s sweep job carries the same `timeout-minutes` as the weekly one rather than a
+tighter number sized for the usual case.
 
 That narrowing is in `mutate.py --since`, not in the workflow, so the command CI runs is the command
 you run. It is wider than "the lib modules that changed", and the extra width is the part that
 matters: a test file maps to the modules its checks catch, because a check deleted from a test file is
 exactly how a mutation stops being caught and that diff touches nothing under `plugin/lib` at all. A
-change to `run.py` or `mutate.py` itself reswept everything, since those two decide what the sweep
-measures. A change that no sweep can measure - a doc, a workflow, a handler - exits 0 saying so, which
-is deliberately not the same output as the refusal for a sweep that ran and proved nothing.
+change to the harness itself resweeps everything, since it decides what the sweep measures, and so does
+a change to `test_cli.py`, which is no mutation's `caught_by` and still catches mutations in most of
+the lib because driving a command end to end goes through most of it (#27). A change that no sweep can
+measure - a doc, a workflow, a handler - exits 0 saying so, which is deliberately not the same output
+as the refusal for a sweep that ran and proved nothing.
 
 Two things the narrowing gives up, both real. A rule can stop being asserted for a reason no diff
 points at: a check that covered a second module by accident, an interpreter change under the suite,
 two changes that are each fine and together are not. And a module in `UNSWEPT` is swept by nothing at
 all, weekly included, which is why a change to one of those prints a line saying the change went
-unswept rather than passing quietly. The weekly run is the net under the first; issue #8 is the second.
+unswept rather than passing quietly. The weekly run is the net under the first; issue #55 is the second.
+
+A third thing the scoring gives up, part of which is now reported. A mutation counts as caught when
+the file named in its `caught_by` fails, and a file that dies on a traceback fails too - so a module
+mutated into raising early scored as caught for every rule that file asserts, including all the ones
+after the point where it stopped running. The sweep now checks that the named file printed a failing
+check rather than only exiting non-zero, and tallies the ones that did not at the end (#42). Not an
+exit code: being mutated into raising is a legitimate way to be caught, and a gate that fails on a
+legitimate catch gets bypassed.
+
+That catches "died having asserted nothing" and not "died". A file that fails one check and then
+raises on the next line still reads as an ordinary catch, and the rules after the crash point are
+still credited. Telling that apart needs the number of checks the file owed, and nothing has it, which
+is #57.
 
 Nothing else is tiered. The test matrix is four fixed legs that do not grow, and a PR gate weaker than
 the gate on `main` is the failure mode this repo is about, so it stays as it is.
