@@ -232,11 +232,11 @@ the comment in `ci.yml` carried "between four and a half and four and three quar
 answerable now, and four later resweeps put the runner spread at three to five minutes. The first
 reading of the 191 figures repeated it a different way, off the runner's 6.5s against a 6.0s laptop
 figure: half a second was called the machine and the rest the added checks, which is one sample per
-cause and cannot separate them. The second runner resweep at 5.4s is what killed
-it. `timeout-minutes` on the `ci` sweep is `sweep.yml`'s number by parity
-rather than anything derived from these, and what they are for is the floor it has to clear: the
-slowest full resweep in the logs, never the latest one and never a laptop. 15 minutes was chosen off a
-laptop, and the sweep it was sized for ran to 15m15s and was canceled.
+cause and cannot separate them. The second runner resweep at 5.4s is what killed it. `timeout-minutes`
+on the `ci` sweep is `sweep.yml`'s number by parity rather than anything derived from these, and what
+they are for is the floor it has to clear: the slowest full resweep in the logs, never the latest one
+and never a laptop. 15 minutes was chosen off a laptop, and the sweep it was sized for ran to 15m15s
+and was canceled.
 
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went

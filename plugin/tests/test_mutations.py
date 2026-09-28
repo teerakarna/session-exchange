@@ -172,18 +172,24 @@ check(
 #
 # From `__file__` rather than typed out, so this is one fact and not a copy of one. `relpath` rather
 # than `relative_to`, which raises rather than reports when the resolved file is not under `REPO`.
-# One arrangement reaches this line that way, probed rather than reasoned about: this file run from
-# outside the tree with `mutate` found on `PYTHONPATH`, so `REPO` is the real repo and the file is
-# not in it. `relpath` gives a `../..` path, which is not in the set, so the check goes red naming
-# it. `relative_to` gives a `ValueError` and takes the ~750 checks after this one with it. That
-# arrangement is broken either way - it dies later reading `run.py` from `HERE` - so what this buys
-# is a red line rather than a traceback, which is #42's rule, not a way to run the suite.
-#
-# Third wording of this comment, because the first two named arrangements that cannot happen: a
+# The condition for that is one thing - the resolved `mutate.py` and the resolved `__file__` sitting
+# in different trees - and stating the condition is the point here, because three wordings of this
+# comment enumerated arrangements instead and all three were wrong. Two arrangements do reach this
+# line: `mutate` found on `PYTHONPATH` with this file run from outside the tree, and a symlinked
+# `mutate.py` with `tables` beside it. Both probed, both red naming a `../..` path. With
+# `relative_to` the same line raises `ValueError` and nothing after it in this file prints - a sixth
+# of the file's checks today, and no figure here because a count that re-labels itself as checks are
+# added is the mistake `ci.yml` spends a paragraph on. The wording before this one said "~750", the
+# count before this line rather than after it. Two others cannot reach it, for one reason: a
 # symlinked entry point resolves the import root along with the file, and a copied tests tree brings
-# its own `mutate.py`, so `REPO` moves in both and the paths agree. Probing settled it and guessing
-# produced both. Same reason this is a list rather than `in`: `got False, want True` does not say
-# which path went missing after a rename.
+# its own `mutate.py`, so `REPO` moves either way and the paths agree.
+#
+# Neither of the two that reach it is a supported way to run the suite - both die further down
+# reading `run.py` from `HERE` - so what this buys is #42's rule, a red line rather than a
+# traceback, and not a working run. In the two that cannot reach it this check passes: a symlinked
+# entry point runs green end to end, and a copied `plugin/` tree fails one unrelated check because
+# the suite reads above `plugin/`. Same reason this is a list rather than `in`: `got False, want
+# True` does not say which path went missing after a rename.
 SELF = os.path.relpath(pathlib.Path(__file__).resolve(), mutate.REPO)
 check(
     "and the set names this file, which is the reason it exists",

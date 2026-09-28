@@ -268,11 +268,11 @@ jobs:
   # reading was the 6.5s against a 6.0s laptop figure, and it called half a second the machine and the
   # rest the added checks - one sample per cause, which cannot separate them, and the 5.4s resweep
   # killed it. The same mistake the "four and a half to four and three quarters" paragraph above
-  # records, made against that paragraph. Nothing here supports
-  # attributing a per-mutation figure to anything. The limit below is `sweep.yml`'s number rather than
-  # anything derived from these, and what they are for is the floor it has to clear: the slowest full
-  # resweep observed, never a laptop figure. 15 minutes came from one of those, against a sweep that
-  # then ran to 15m15s and was canceled.
+  # records, made against that paragraph. Nothing here supports attributing a per-mutation figure to
+  # anything. The limit below is `sweep.yml`'s number rather than anything derived from these, and what
+  # they are for is the floor it has to clear: the slowest full resweep observed, never a laptop
+  # figure. 15 minutes came from one of those, against a sweep that then ran to 15m15s and was
+  # canceled.
   #
   # And the narrowing did not narrow anything until #36, which is the change worth knowing about here
   # rather than any of the figures. The tables lived in `mutate.py`, `mutate.py` is instrument, and the
