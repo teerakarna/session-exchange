@@ -34,14 +34,19 @@ HANDOFF = {
     "from": {"cwd": "/tmp/x"},
     "to": {"repo": "dotfiles"},
     "created": "2026-09-25T01:02:03Z",
-    "status": "open",
     "body": "please look at the thing",
 }
+TRANSITION = {"at": "2026-09-25T01:02:04Z", "status": "accepted", "after": 0}
 MARKER = {"name": "personal"}
 
 print("the shipped schemas accept what the plugin writes")
 
-for label, instance in (("exchange", MARKER), ("claim", CLAIM), ("handoff", HANDOFF)):
+for label, instance in (
+    ("exchange", MARKER),
+    ("claim", CLAIM),
+    ("handoff", HANDOFF),
+    ("transition", TRANSITION),
+):
     check(f"a minimal valid {label}", validate.validate(instance, validate.load(label)), [])
 
 check(
@@ -76,8 +81,24 @@ check(
 )
 check(
     "an unknown status is refused",
-    len(validate.validate(dict(HANDOFF, status="done"), handoff_schema)),
+    len(validate.validate(dict(TRANSITION, status="done"), validate.load("transition"))),
     1,
+)
+# A handoff written before #44 carried `status` and `history` in the record. `additionalProperties`
+# being false is what turns that into a named refusal rather than a half-read row, and this is the
+# check that says so out loud: the old shape must not validate, or a record whose status nothing
+# reads any more would list as open forever.
+check(
+    "a handoff from before status moved out of the record is refused by name",
+    validate.validate(dict(HANDOFF, status="open"), handoff_schema),
+    ["value: unexpected key 'status'"],
+)
+# Ordering is read from `after`, so a move without one has no position, and a reader that fell back
+# to the clock is exactly the version that read a closed handoff back as accepted.
+check(
+    "a move with no position is refused",
+    validate.validate({"at": TRANSITION["at"], "status": "closed"}, validate.load("transition")),
+    ["value: missing required key 'after'"],
 )
 check(
     "a session id that could climb out of its directory is refused",
@@ -195,7 +216,7 @@ def keywords(schema, seen):
 
 
 used = set()
-for name in ("exchange", "claim", "handoff"):
+for name in ("exchange", "claim", "handoff", "transition"):
     keywords(validate.load(name), used)
 check("every keyword the schemas use is implemented", sorted(used - validate.IMPLEMENTED), [])
 

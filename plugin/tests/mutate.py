@@ -288,8 +288,18 @@ STORE = [
     Mutation(
         module="store",
         rule="an invalid object never reaches disk",
-        old='            return f"refusing to write {path}: " + "; ".join(problems)',
+        old='            return None, f"refusing to write {path}: " + "; ".join(problems)',
         new="            pass",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        # The mutation is a writer that replaces, which is what `post` used to call under an
+        # `exists()` check. `os.link` is one syscall that either creates the name or fails, so there
+        # is no window between the check and the write for a second writer to fit into.
+        rule="create_json creates or fails, and never replaces",
+        old="        os.link(tmp, path)",
+        new="        os.replace(tmp, path)",
         caught_by="test_store_claims.py",
     ),
     Mutation(
@@ -1453,10 +1463,11 @@ HANDOFFS = [
     Mutation(
         module="handoffs",
         # The headline rule. An id collision means two handoffs, and keeping one of them is
-        # invisible at both ends: no later command's output looks wrong.
+        # invisible at both ends: no later command's output looks wrong. The mutation is the version
+        # that was here until #44: a writer that replaces, guarded by an `exists()` check above it.
         rule="posting never overwrites an id that is already on disk",
-        old="    if target.exists():",
-        new="    if False:",
+        old="    problem = store.create_json(path(root, handoff_id), record, SCHEMA)",
+        new="    problem = store.write_json(path(root, handoff_id), record, SCHEMA)",
         caught_by="test_handoffs.py",
     ),
     Mutation(
@@ -1482,9 +1493,13 @@ HANDOFFS = [
     ),
     Mutation(
         module="handoffs",
-        rule="a posted handoff is open",
-        old='        "status": OPEN,',
-        new='        "status": CLOSED,',
+        # The regression guard for the bug this whole shape was rewritten around. The first version
+        # of #44 sorted these by filename, the filename began with the timestamp, and `store.now()`
+        # records seconds - so accepting and closing inside one second left the order to the random
+        # suffix. The name is legibility now; `after` is the ordering.
+        rule="moves are ordered by the position their writer recorded, never by their filename",
+        old='    return sorted(entries, key=lambda entry: entry["after"]), problems',
+        new="    return entries, problems",
         caught_by="test_handoffs.py",
     ),
     Mutation(
@@ -1503,18 +1518,12 @@ HANDOFFS = [
     ),
     Mutation(
         module="handoffs",
-        # Refusing rather than repairing. Appending to a record whose halves disagree would make
-        # this module the author of a history it cannot vouch for.
-        rule="a record whose status contradicts its history is not moved",
-        old="    if disagreement:",
+        # Refusing rather than guessing. An unreadable move could be the latest one and a contested
+        # position has no latest one, so moving on from what `_status_of` returned would be moving
+        # on from a status that may not be the current one.
+        rule="a move computed from unreadable or contested moves is refused",
+        old="    if problems or tie:",
         new="    if False:",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="the current status comes from the history, not from the stated field alone",
-        old="    current, disagreement = state_of(record)",
-        new='    current, disagreement = record.get("status"), None',
         caught_by="test_handoffs.py",
     ),
     Mutation(
@@ -1528,53 +1537,67 @@ HANDOFFS = [
     ),
     Mutation(
         module="handoffs",
-        rule="the history entry records the status moved to, not the one left behind",
-        old='    entry = {"at": at or store.now(), "status": status}',
-        new='    entry = {"at": at or store.now(), "status": current}',
+        rule="the move records the status moved to, not the one left behind",
+        old='    entry = {"at": at or store.now(), "status": status, "after": len(seen)}',
+        new='    entry = {"at": at or store.now(), "status": current, "after": len(seen)}',
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        rule="a move appends to the history rather than replacing it",
-        old='    record["history"] = [*record.get("history", []), entry]',
-        new='    record["history"] = [entry]',
+        # `len(seen)` is the causal position: how many moves this writer had read. Pinned to zero,
+        # every move claims to have been made against a fresh handoff, so the second one reads as
+        # concurrent with the first and the pair reports as contested rather than ordered.
+        rule="a move records how many moves its writer had read, so the next one sorts after it",
+        old='    entry = {"at": at or store.now(), "status": status, "after": len(seen)}',
+        new='    entry = {"at": at or store.now(), "status": status, "after": 0}',
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        # The whole reason there is one write rather than two: `status` is taken from the entry just
-        # appended, so the two halves cannot be left disagreeing by a failure in between.
-        rule="the stated status is taken from the entry that was just appended",
-        old='    record["status"] = entry["status"]',
-        new='    record["status"] = record["status"]',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="who made the move is kept, which is most of what a history is for",
+        rule="who made the move is kept, which is most of what the moves are for",
         old='        entry["by"] = by',
         new='        entry["note"] = by',
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        rule="an empty history is not a disagreement",
-        old="    if not history:",
-        new="    if history:",
+        # `post` writes no move, so an empty directory means "never changed since it was posted".
+        # Without the guard the next line indexes an empty list, which is the same defect arriving
+        # as a traceback.
+        rule="no moves at all is open",
+        old="    if not entries:",
+        new="    if False:",
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        # A record with one entry cannot tell these apart, which is why the clean fixture has two.
-        rule="the status is compared against the last history entry, not the first",
-        old='    last = history[-1].get("status")',
-        new='    last = history[0].get("status")',
+        rule="the current status is the last move, not the first",
+        old="    last = entries[-1]",
+        new="    last = entries[0]",
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        rule="a status contradicting the history is reported",
-        old="    if last != stated:",
+        # Without the position comparison every ordinary sequence is a tie: accepted then closed are
+        # two different statuses, and they were made one after the other.
+        rule="only moves at the same position are concurrent",
+        old='if e["after"] == last["after"] and e["status"]',
+        new='if e["status"]',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # And without the status comparison, `last` matches itself and every handoff that has moved
+        # at all reports as contested. Two concurrent *identical* closes are both true.
+        rule="two moves at one position that agree are not a disagreement",
+        old=' and e["status"] != last["status"]]',
+        new="]",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="two moves at one position that disagree are reported",
+        old="    if tied:",
         new="    if False:",
         caught_by="test_handoffs.py",
     ),
@@ -1583,21 +1606,31 @@ HANDOFFS = [
         # Dropping the row would hide a handoff, which is worse than showing one whose state is in
         # question. A caller rendering a list has to be able to show the row *and* the fault.
         rule="the status is still returned alongside the problem",
-        old="        return stated, (",
+        old='        return last["status"], (',
         new="        return None, (",
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        rule="load_all reports the disagreement rather than only the parse failures",
-        old="        if problem:\n            problems.append(problem)",
-        new="        if problem:\n            pass",
+        # `read_all` hands back contents without filenames, so the id inside the file is what finds
+        # the moves. A hand-edited id looks under a directory that does not exist, which reads as
+        # `open` - a closed handoff quietly coming back.
+        rule="the id in a handoff file has to name the file it was read from",
+        old='        if not path(root, record["id"]).is_file():',
+        new="        if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="load_all reports what the moves said rather than only the parse failures",
+        old="        problems += faults",
+        new="        pass",
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
         rule="and keeps the record it is complaining about",
-        old="    return records, problems",
+        old="    return pairs, problems",
         new="    return [], problems",
         caught_by="test_handoffs.py",
     ),

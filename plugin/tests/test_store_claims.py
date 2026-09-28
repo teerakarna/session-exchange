@@ -74,6 +74,30 @@ with tempfile.TemporaryDirectory() as tmp:
         [],
     )
 
+print("creating a file, as distinct from writing one")
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    path = claims.path(root, "s1")
+    first = {"session_id": "s1", "cwd": str(root), "updated_at": store.now()}
+
+    check("a name nothing holds is created", store.create_json(path, first, CLAIM_SCHEMA), None)
+    second = dict(first, cwd=str(root / "elsewhere"))
+    check(
+        "the same name again is refused rather than replaced",
+        store.create_json(path, second, CLAIM_SCHEMA),
+        f"{path.name} already exists; refusing to overwrite it",
+    )
+    # The refusal is the filesystem's, so what matters is that the first writer's bytes are still
+    # there - not that a guard ran. `os.link` cannot half-succeed, which is the whole reason it is
+    # used here rather than `exists()` and then a write.
+    check("and the first contents are still there", store.read_json(path)[0], first)
+    check(
+        "with no temp file left beside it",
+        sorted(p.name for p in path.parent.glob(".tmp-*")),
+        [],
+    )
+
 print("an identifier that is also a filename")
 
 check("a plain id passes", store.safe_id("abc-123.def"), "abc-123.def")

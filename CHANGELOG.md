@@ -18,10 +18,18 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 - `exchange handoff post | accept | close | list`, the first thing here that writes state a
   *different* session reads. Two rules carry it. Posting never overwrites: an id already on disk is a
   refusal, because a dropped handoff is invisible at both ends - the sender saw it posted and the
-  recipient never had it to miss. And `status` is derived from `history` in one write rather than
-  maintained beside it, so a record whose two halves disagree is reported and left alone rather than
-  repaired: nothing here wrote it, and guessing which half is stale is how a closed handoff comes
-  back open. `accept` and `close` are separate verbs rather than a `--status` flag, so taking
+  recipient never had it to miss - and the refusal is `os.link` rather than a check followed by a
+  write, since a check and a write have a window between them that two senders can both fit through.
+  And status is not a field at all: the record is written once and never touched again, while each
+  move is its own file under `handoffs/<id>/`. Two sessions moving one handoff at the same moment
+  therefore both get their move recorded rather than one of them losing it, and the pair is reported
+  as concurrent and left alone rather than resolved, because guessing which came first is how a
+  closed handoff comes back open. Ordering is the number of moves a writer had read, never the clock:
+  timestamps here are seconds, and accepting then closing inside one second is ordinary. The first
+  shape of this kept `status` beside a `history` array inside the record and had the second writer
+  append to it - which drops a concurrent move and, because the file left behind is internally
+  consistent, reports nothing (#44). A record written in that shape is now refused by name rather
+  than half-read. `accept` and `close` are separate verbs rather than a `--status` flag, so taking
   something on cannot be typed as finishing it, and `handoff` has no default verb at all, so a typo
   cannot post or list by accident. `--body -` reads stdin, because a body with backticks in it does
   not survive being a shell argument. Addressing refuses every combination it cannot honour rather
@@ -37,7 +45,7 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   gitleaks, a gate asserting the runtime imports nothing but the standard library, and dependabot.
 - A mutation sweep as a CI gate. `plugin/tests/mutate.py` breaks one rule at a time and requires the
   suite to notice; `test_mutations.py` is the cheap half that keeps the tables from drifting away
-  from the source they claim to patch. A hundred and seventy-eight mutations across `claims`,
+  from the source they claim to patch. A hundred and eighty mutations across `claims`,
   `exchange_root`, `handoffs`, `hook`, `hookio`, `legacy`, `registry`, `store` and `validate`; the
   three modules with no table are all in `DECLINED`, with the reason recorded next to each. Every
   table has found live rules on its first run: two guards in `hookio.payload` wide enough to let a

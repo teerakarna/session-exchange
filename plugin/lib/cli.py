@@ -172,11 +172,11 @@ def cmd_show(args):
     for problem in problems:
         print(f"problem   {problem}")
 
-    # `handoffs.load_all` rather than `store.read_all`, so the status/history disagreement is
+    # `handoffs.load_all` rather than `store.read_all`, so an unreadable or contested status move is
     # reported here too. `show` is the command people actually run, and a check that only one reader
     # performs is a check most readers do not get.
     stored, handoff_problems = handoffs.load_all(root)
-    open_count = sum(1 for h in stored if h.get("status") != handoffs.CLOSED)
+    open_count = sum(1 for _, status in stored if status != handoffs.CLOSED)
     print(f"handoffs  {len(stored)} stored, {open_count} not closed")
     for problem in handoff_problems:
         print(f"problem   {problem}")
@@ -263,7 +263,7 @@ def _steps(root):
         (
             4,
             "open handoffs imported out of the markdown ledger",
-            any("imported" in h for h in stored) if stored else False,
+            any("imported" in record for record, _ in stored) if stored else False,
             None,
         ),
         (5, "this root marked", (pathlib.Path(root) / ".claude" / "exchange.json").is_file(), None),
@@ -415,13 +415,13 @@ def _transition(args, status):
     if resolution is None:
         return 1
     own = registry.own_entry() or {}
-    record, problem = handoffs.set_status(
+    move, problem = handoffs.set_status(
         resolution.root, args.id, status, by=own.get("name"), note=args.note
     )
     if problem:
         print(f"problem: {problem}")
         return 1
-    print(f"{record['id']} is now {record['status']}")
+    print(f"{args.id} is now {move['status']}")
     return 0
 
 
@@ -439,12 +439,12 @@ def cmd_handoff_list(args):
     resolution = _resolved(args)
     if resolution is None:
         return 1
-    records, problems = handoffs.load_all(resolution.root)
-    shown = [h for h in records if args.all or h.get("status") != handoffs.CLOSED]
-    print(f"handoffs  {len(records)} stored, {len(shown)} shown")
-    for record in shown:
+    stored, problems = handoffs.load_all(resolution.root)
+    shown = [pair for pair in stored if args.all or pair[1] != handoffs.CLOSED]
+    print(f"handoffs  {len(stored)} stored, {len(shown)} shown")
+    for record, status in shown:
         sender = record["from"].get("name") or record["from"]["cwd"]
-        print(f"  {record['id']}  {record['status']}")
+        print(f"  {record['id']}  {status}")
         print(f"    to {handoffs.describe(record['to'])}, from {sender}, {record['created']}")
         print(f"    {record['body'].splitlines()[0]}")
     for problem in problems:

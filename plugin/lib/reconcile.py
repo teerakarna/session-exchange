@@ -234,17 +234,25 @@ def body_of(entry: ledger.Entry) -> str:
     return entry.block.strip()
 
 
-def changes(entry: ledger.Entry, record: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
+def changes(entry: ledger.Entry, record: dict[str, Any], status: str) -> dict[str, tuple[Any, Any]]:
     """Which of the importer's own fields the stored row disagrees with, as `(stored, ledger)`.
 
-    Only the fields an import writes. A row edited in the store - a status set through the normal
-    path, history appended - is not in disagreement about anything an import owns, except status,
-    which the ledger is the source of truth for as long as the ledger is still being written to.
+    Only the fields an import writes. A row moved in the store through the normal path is not in
+    disagreement about anything an import owns, except status, which the ledger is the source of
+    truth for as long as the ledger is still being written to.
+
+    `status` is passed in rather than read off the record, because since #44 it is not on the
+    record: it is derived from the moves in `handoffs/<id>/`, and `handoffs.load_all` is what
+    pairs the two. Taking it as an argument keeps this module pure - no clock, no filesystem -
+    which is what makes it testable without a store at all.
     """
     out = {}
+    # A dict rather than two `record.get` calls, because `status` no longer comes from the record
+    # and a reader should not have to remember which of the two fields does.
+    held = {"status": status, "body": record.get("body")}
     for field, value in (("status", status_of(entry)), ("body", body_of(entry))):
-        if record.get(field) != value:
-            out[field] = (record.get(field), value)
+        if held[field] != value:
+            out[field] = (held[field], value)
     stored = record.get("imported")
     fresh = imported_of(entry)
     if stored != fresh:
@@ -271,8 +279,12 @@ def _by_key(items: list[Any], keyer: Any, what: str) -> tuple[dict[Key, Any], li
     return index, problems, unkeyed
 
 
-def reconcile(entries: list[ledger.Entry], records: list[dict[str, Any]]) -> Plan:
-    """What importing `entries` over `records` would do.
+def reconcile(entries: list[ledger.Entry], held: list[tuple[dict[str, Any], str]]) -> Plan:
+    """What importing `entries` over `held` would do.
+
+    `held` is what `handoffs.load_all` returns: each stored row paired with the status derived from
+    its moves. A pair rather than a record, because since #44 a record has no status in it, and this
+    module compares status.
 
     Pure: no clock, no filesystem, no ordering assumption. The source is not in date order and never
     was, so nothing here may infer position from a date or the reverse.
@@ -280,23 +292,24 @@ def reconcile(entries: list[ledger.Entry], records: list[dict[str, Any]]) -> Pla
     source, problems, unkeyed = _by_key(entries, key_of, "ledger entries")
     for entry in unkeyed:
         problems.append(f"no route to key on: {entry.headline[:60]!r}")
-    stored, stored_problems, _ = _by_key(records, key_of_record, "stored rows")
+    stored, stored_problems, _ = _by_key(held, lambda pair: key_of_record(pair[0]), "stored rows")
     problems.extend(stored_problems)
 
     create, update, unchanged, skipped = [], [], [], []
     for key, entry in source.items():
-        record = stored.get(key)
-        if record is None:
+        pair = stored.get(key)
+        if pair is None:
             # Closed and never imported: nothing to surface, but counted rather than dropped.
             if entry.closed:
                 skipped.append(entry)
             else:
                 create.append(entry)
             continue
-        fields = changes(entry, record)
+        record, status = pair
+        fields = changes(entry, record, status)
         if fields:
             update.append(Change(entry, record, fields))
         else:
             unchanged.append(entry)
-    orphan = [record for key, record in stored.items() if key not in source]
+    orphan = [record for key, (record, _) in stored.items() if key not in source]
     return Plan(create, update, unchanged, skipped, orphan, problems)

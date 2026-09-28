@@ -4,12 +4,21 @@ Layout, under a root that `exchange_root` resolved and this module never guesses
 
     <root>/.claude/exchange.json                       the marker, which is also the config
     <root>/.claude/exchange/sessions/<session_id>.json one claim per session
-    <root>/.claude/exchange/handoffs/<id>.json         one file per handoff
+    <root>/.claude/exchange/handoffs/<id>.json         one file per handoff, written once
+    <root>/.claude/exchange/handoffs/<id>/<after>-<n>.json  one file per status change
     <root>/.claude/exchange/EXCHANGE.md                narrative, for humans and sessions
 
 One file per writer, never a shared append target. Six concurrent sessions on one file is the
-contention this layout exists to avoid, and it is also why no write here needs a lock: the only
-writer of a session's claim is that session.
+contention this layout exists to avoid, and it is also why no write here needs a lock.
+
+A claim has one writer by nature - the session it describes - so that much was free. A handoff does
+not: the sender writes the record and some other session moves it on, which is two writers, and for
+a while the second one appended to an array inside the first one's file with no lock around the
+read-modify-write. Two concurrent moves both read the same history and the later write dropped the
+earlier entry, and because the surviving file was internally consistent nothing downstream had
+anything to report. The fix was not a lock, it was to stop violating the rule at the top of this
+docstring: a status change is now its own file under `<id>/`, so the only writer of any file here is
+still the one that created it. See #44.
 """
 
 from __future__ import annotations
@@ -47,6 +56,16 @@ def handoffs_dir(root):
     return store_dir(root) / "handoffs"
 
 
+def transitions_dir(root, handoff_id):
+    """Where one handoff's status changes live, one file per change.
+
+    A directory beside `<id>.json` rather than an array inside it. `read_all` globs `*.json`, so
+    this directory is not itself mistaken for a record, and the handoff file stays what `post`
+    wrote.
+    """
+    return handoffs_dir(root) / handoff_id
+
+
 def markdown(root):
     return store_dir(root) / "EXCHANGE.md"
 
@@ -63,30 +82,73 @@ def safe_id(value):
     return value if isinstance(value, str) and SAFE_ID.fullmatch(value) else None
 
 
-def write_json(path, obj, schema=None):
-    """Validate, then write atomically. Returns a problem string, or None on success.
+def _staged(path, obj, schema):
+    """Validate, then write a temp file beside the target. Returns `(tmp, problem)`.
 
-    Validating before writing rather than after means an invalid file never reaches disk, so a
-    reader never has to distinguish "corrupt" from "written by a newer version".
+    Both writers share this rather than each carrying a copy. "An invalid object never reaches disk"
+    is then one rule in one place, which is also one entry in the mutation table: two copies of a
+    refusal are two things that can drift, and only one of them would be the one under test.
 
-    The write is a temp file in the same directory plus `os.replace`, which is atomic on the same
-    filesystem. A reader mid-write therefore sees the old file or the new one, never a half of
-    either.
+    Validating before writing rather than after means a reader never has to distinguish "corrupt"
+    from "written by a newer version".
     """
-    path = pathlib.Path(path)
     if schema is not None:
         problems = validate.validate(obj, schema, path.name)
         if problems:
-            return f"refusing to write {path}: " + "; ".join(problems)
+            return None, f"refusing to write {path}: " + "; ".join(problems)
 
     tmp = path.with_name(f".tmp-{os.getpid()}-{path.name}")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        return None, f"could not write {path}: {exc}"
+    return tmp, None
+
+
+def write_json(path, obj, schema=None):
+    """Validate, then write atomically, replacing whatever was there. Returns a problem or None.
+
+    A temp file in the same directory plus `os.replace`, which is atomic on the same filesystem. A
+    reader mid-write therefore sees the old file or the new one, never a half of either.
+    """
+    path = pathlib.Path(path)
+    tmp, problem = _staged(path, obj, schema)
+    if problem:
+        return problem
+    try:
         os.replace(tmp, path)
     except OSError as exc:
         tmp.unlink(missing_ok=True)
         return f"could not write {path}: {exc}"
+    return None
+
+
+def create_json(path, obj, schema=None):
+    """Like `write_json`, but refuses a path that already exists. Returns a problem, or None.
+
+    `os.link` rather than `path.exists()` and then a write. The check-then-write version has a
+    window between the two in which another process can create the file, and both writers then
+    think they created it - which is the shape of every bug in this repo's list. `link` is one
+    syscall that either creates the name or fails with `EEXIST`, so "first writer wins" is the
+    filesystem's answer rather than a guard's, and there is no window to lose.
+
+    The temp file is hardlinked into place and then unlinked, so a reader that globs the directory
+    mid-write sees the target or nothing, and never the `.tmp-` name under a name it would read.
+    """
+    path = pathlib.Path(path)
+    tmp, problem = _staged(path, obj, schema)
+    if problem:
+        return problem
+    try:
+        os.link(tmp, path)
+    except FileExistsError:
+        return f"{path.name} already exists; refusing to overwrite it"
+    except OSError as exc:
+        return f"could not write {path}: {exc}"
+    finally:
+        tmp.unlink(missing_ok=True)
     return None
 
 

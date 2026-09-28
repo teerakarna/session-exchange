@@ -98,7 +98,7 @@ print("the schemas the code loads are all present")
 sys.path.insert(0, str(PLUGIN / "lib"))
 import validate  # noqa: E402
 
-for name in ("exchange", "claim", "handoff"):
+for name in ("exchange", "claim", "handoff", "transition"):
     schema, problem = load(validate.SCHEMA_DIR / f"{name}.schema.json")
     check(f"{name}.schema.json parses", problem, None)
     check(f"{name}.schema.json declares its own id", "$id" in schema, True)

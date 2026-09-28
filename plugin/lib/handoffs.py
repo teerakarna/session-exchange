@@ -1,28 +1,34 @@
-"""Writing handoffs, and reading them back with the one disagreement that cannot be tolerated.
+"""Writing handoffs, and reading their status back out of the moves that produced it.
 
 The first thing in this plugin that writes state a *different* session will read, and also the first
 thing a different session will write. A claim is written and read by one session, so a wrong claim
 misinforms nobody but its author; a handoff is addressed to whoever works in a scope next, which may
 be a session that does not exist yet, and is then transitioned by that other session rather than by
-its author. The second half is why the store's "no write needs a lock" argument does not reach this
-module, which is #44 and is not yet resolved. Two rules follow from the first half and everything
-else here is detail.
+its author. Two writers, not one, and everything below follows from that.
 
 **Posting never overwrites.** `post` refuses an id that is already on disk rather than replacing it.
 An id collision means two handoffs, and silently keeping one is the failure mode this project is
 about - the loss is invisible to both the sender and the recipient, and there is no later command
 whose output looks wrong. Ids carry a random suffix precisely so a collision is a bug rather than
-ordinary contention, which is why it is safe to treat one as a refusal instead of retrying.
+ordinary contention, which is why it is safe to treat one as a refusal instead of retrying. The
+refusal is `os.link` rather than a check followed by a write: see `store.create_json`.
 
-**`status` is derived from `history`, not maintained beside it.** Two fields that can disagree
-cannot say which one was read, and that is the defect class this repo keeps finding in new shapes.
-So `set_status` appends to `history` and takes `status` from what it appended, in one write. Reading
-enforces the same thing from the other side: a record whose `status` contradicts the last history
-entry is reported as a problem rather than resolved in favour of either, because nothing here wrote
-it and guessing which half is stale is how a closed handoff comes back open.
+**Status is not a field.** It is derived from the transitions in `handoffs/<id>/`, one file per
+move, and the handoff file itself is written once by the sender and never touched again. Two things
+follow. There is no `status` that can contradict the history, because there is no second copy to
+contradict; and there is no read-modify-write, because a move creates a new name rather than
+rewriting an existing one, so two sessions moving the same handoff at the same moment both get their
+move recorded.
 
-`post` writes no history at all. A single entry restating `created` and `open` is not a record of
-anything, and an empty history is unambiguous: never changed since it was posted.
+That is #44, and it is worth saying what the version before it did, because the bug was not where
+it looks. `status` and a `history` array lived in the handoff file, `set_status` read them,
+appended and wrote back, and a check on the way out reported a record whose two halves disagreed.
+Two concurrent moves both read the same history and the later write dropped the earlier entry -
+and the file left behind was internally consistent, so the check reported nothing. The invariant
+being policed was precisely the one a lost update preserves.
+
+`post` writes no transitions at all. A first entry restating `created` and `open` is not a record of
+anything, and an empty directory is unambiguous: never changed since it was posted.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ import store
 import validate
 
 SCHEMA = validate.load("handoff")
+TRANSITION = validate.load("transition")
 
 OPEN = "open"
 ACCEPTED = "accepted"
@@ -110,17 +117,11 @@ def post(root, to, body, cwd, session_id=None, name=None, handoff_id=None, at=No
     if store.safe_id(handoff_id) is None:
         return None, f"{handoff_id!r} cannot be a filename, so it cannot be a handoff id"
 
-    target = path(root, handoff_id)
-    if target.exists():
-        # Never a replace. See the module docstring: the loss would be invisible to both ends.
-        return None, f"a handoff with id {handoff_id} already exists; refusing to overwrite it"
-
     record = {
         "id": handoff_id,
         "from": {"cwd": str(cwd)},
         "to": to,
         "created": at,
-        "status": OPEN,
         "body": body.strip(),
     }
     if session_id:
@@ -128,28 +129,61 @@ def post(root, to, body, cwd, session_id=None, name=None, handoff_id=None, at=No
     if name:
         record["from"]["name"] = name
 
-    problem = store.write_json(target, record, SCHEMA)
+    # `create_json`, so "never a replace" is the filesystem refusing a name that exists rather
+    # than this function checking first and writing second. The check-then-write version was here,
+    # and its window between the two was small enough to be invisible and real enough to lose a
+    # handoff - the loss being invisible to both ends is the whole reason this rule exists.
+    problem = store.create_json(path(root, handoff_id), record, SCHEMA)
     return (None, problem) if problem else (record, None)
 
 
+def transition_path(root, handoff_id, after):
+    """Where one move goes: its causal position, then a random suffix.
+
+    The position leads so that a directory listing reads in order for a human. It is not what the
+    reader orders by - `transitions` sorts on the field, so the padding here is cosmetic and cannot
+    be the wrong width. The suffix is what makes two concurrent writers at the same position two
+    files rather than one, and `create_json` turns the remaining one-in-sixteen-million case into a
+    refusal rather than a silent overwrite.
+    """
+    name = f"{after:04d}-{secrets.token_hex(SUFFIX_BYTES)}.json"
+    return store.transitions_dir(root, handoff_id) / name
+
+
+def transitions(root, handoff_id):
+    """Every recorded move on one handoff, oldest first, plus problems.
+
+    Ordered by `after` rather than by the clock. `at` is seconds, and accepting then closing
+    inside one second gives two moves the same timestamp with no way to tell them apart - the
+    first version of this sorted by filename, and a handoff read back as accepted after it had
+    been closed. Sorting on the field the writer computed from what it read puts the serialised
+    case in the right order and leaves only the genuinely concurrent one tied, which is what
+    `state_of` reports.
+    """
+    entries, problems = store.read_all(store.transitions_dir(root, handoff_id), TRANSITION)
+    return sorted(entries, key=lambda entry: entry["after"]), problems
+
+
 def set_status(root, handoff_id, status, by=None, note=None, at=None):
-    """Move a handoff to `status`, recording the move. Returns `(record, problem)`.
+    """Move a handoff to `status` by writing the move. Returns `(transition, problem)`.
+
+    One new file, created rather than replaced, so nothing is read and written back and nothing
+    another session wrote in between can be dropped.
 
     Refuses a move to the status it already has. "Close a closed handoff" is not a no-op worth
     absorbing: either the caller is looking at a stale render, or two sessions are answering the
-    same thing, and both are worth one line of output rather than a second identical history entry.
-
-    That catches the second session only when the two runs are serialised. There is no lock around
-    the read, the append and the write, so two genuinely concurrent moves both pass the guard and
-    the later write drops the earlier entry. Worse, the surviving file is internally consistent, so
-    `state_of` reports nothing: the invariant this module polices is the one a lost update happens
-    to preserve. See #44.
+    same thing, and both are worth a line of output. The guard is still best-effort - two moves
+    that genuinely race both read the same state and both pass it. What changed is the outcome.
+    Before, one of the two entries was gone and nothing said so; now there are two truthful
+    records of two sessions closing the same handoff, which is what happened.
     """
     if status not in STATUSES:
         return None, f"{status!r} is not a handoff status; one of {', '.join(STATUSES)}"
 
     if store.safe_id(handoff_id) is None:
         return None, f"{handoff_id!r} cannot be a filename, so it cannot be a handoff id"
+    # Read to confirm the handoff exists and validates, never to modify it. A transition filed under
+    # an id nothing posted is a status for a handoff no reader will ever go looking for.
     record, problem = store.read_json(path(root, handoff_id), SCHEMA)
     if record is None:
         return None, problem or f"no handoff with id {handoff_id} under this root"
@@ -158,59 +192,91 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     # used to be here was unfalsifiable: mutating it to `if False:` left the suite green, which this
     # repo treats as a defect rather than as coverage.
 
-    current, disagreement = state_of(record)
-    if disagreement:
-        # Refusing rather than repairing. A record whose two halves disagree was not written here,
-        # and appending to it would make this module the author of a history it cannot vouch for.
-        return None, disagreement
+    seen, problems = transitions(root, handoff_id)
+    current, tie = _status_of(handoff_id, seen)
+    if problems or tie:
+        # Refusing rather than guessing. An unreadable move could be the latest one and a contested
+        # position has no latest one, so `current` may not be current, and moving from a status that
+        # is not the real one is how a closed handoff comes back open.
+        return None, "; ".join([*problems, *([tie] if tie else [])])
     if current == status:
         return None, f"{handoff_id} is already {status}"
 
-    entry = {"at": at or store.now(), "status": status}
+    # `len(seen)`, so the move records what its writer had read. Two sessions acting on the same
+    # state land on the same number and both files are written; nothing is lost, and the tie is what
+    # `state_of` reports rather than something it resolves.
+    entry = {"at": at or store.now(), "status": status, "after": len(seen)}
     if by:
         entry["by"] = by
     if note:
         entry["note"] = note
-    record["history"] = [*record.get("history", []), entry]
-    record["status"] = entry["status"]
 
-    problem = store.write_json(path(root, handoff_id), record, SCHEMA)
-    return (None, problem) if problem else (record, None)
+    problem = store.create_json(transition_path(root, handoff_id, len(seen)), entry, TRANSITION)
+    return (None, problem) if problem else (entry, None)
 
 
-def state_of(record):
-    """The current status, and a problem if the record's two halves disagree.
+def state_of(root, handoff_id):
+    """The current status of one handoff, and anything wrong with how it got there.
 
-    Returns `(status, problem)`. The status is still returned alongside a problem, because a caller
-    rendering a list must be able to show the row *and* the fault: dropping the row would hide a
-    handoff, which is worse than showing one whose state is in question.
+    Returns `(status, problems)`. No moves at all means `open`: `post` writes none, so an empty
+    directory says "never changed since it was posted" and nothing else.
+
+    A problem never suppresses the status. A caller rendering a list must be able to show the row
+    *and* the fault, because dropping the row would hide a handoff, which is worse than showing one
+    whose state is in question.
     """
-    history = record.get("history") or []
-    stated = record.get("status")
-    if not history:
-        return stated, None
-    last = history[-1].get("status")
-    if last != stated:
-        return stated, (
-            f"{record.get('id')} says it is {stated!r} while its last history entry says "
-            f"{last!r}; something other than `exchange` wrote it and which half is stale "
-            "cannot be worked out from here"
+    entries, problems = transitions(root, handoff_id)
+    status, tie = _status_of(handoff_id, entries)
+    return status, problems + ([tie] if tie else [])
+
+
+def _status_of(handoff_id, entries):
+    """The last status in an ordered list of moves, and a problem if the last position is contested.
+
+    Split out because `set_status` needs this without re-reading the directory it has just read, and
+    the two must not be able to disagree about what the current status is.
+
+    Two moves sharing an `after` were written against the same state, so they are concurrent and
+    nothing here can say which came first. Two concurrent *identical* closes are not a problem -
+    both are true, and the handoff is closed either way. Two that disagree are reported and not
+    resolved, for the same reason the old status-against-history disagreement was.
+    """
+    if not entries:
+        return OPEN, None
+    last = entries[-1]
+    tied = [e for e in entries if e["after"] == last["after"] and e["status"] != last["status"]]
+    if tied:
+        return last["status"], (
+            f"{handoff_id} has two moves at position {last['after']} that disagree "
+            f"({tied[0]['status']!r} and {last['status']!r}); they were made against the same "
+            "state, so which came first cannot be worked out from here"
         )
-    return stated, None
+    return last["status"], None
 
 
 def load_all(root):
-    """Every handoff under this root, plus problems. Never one without the other.
+    """Every handoff under this root as `(record, status)`, plus problems.
 
-    The disagreement check runs here and not in `store.read_all`, because it is a rule about what a
-    handoff means rather than about whether a file parses. A record that fails it is still returned.
+    A pair rather than a `status` key added to the record on the way past. Nothing in memory then
+    looks like a field that is on disk, and a caller has to name which half it is reading - which is
+    the property this whole module is arranged around.
     """
     records, problems = store.read_all(store.handoffs_dir(root), SCHEMA)
+    pairs = []
     for record in records:
-        _, problem = state_of(record)
-        if problem:
-            problems.append(problem)
-    return records, problems
+        # `read_all` hands back contents without filenames, so the id inside the file is what finds
+        # the moves. A hand-edited id would point at a directory that does not exist, `state_of`
+        # would say `open`, and a closed handoff would quietly come back. One stat says otherwise:
+        # the id has to name the file it was read from.
+        if not path(root, record["id"]).is_file():
+            problems.append(
+                f"a handoff file holds the id {record['id']} but is not named after it; its "
+                "moves live under that id, so the status below it is not to be trusted"
+            )
+        status, faults = state_of(root, record["id"])
+        problems += faults
+        pairs.append((record, status))
+    return pairs, problems
 
 
 def describe(to):
