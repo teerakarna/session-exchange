@@ -215,13 +215,20 @@ buys is the round trip, a format failure found in under a second rather than two
 log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: six tables was just over four minutes locally,
-eight was 144 mutations and eight and a half, and nine is 191 mutations at sixteen and a half.
-All measured, and the ninth is why the figures are worth keeping: scaling the 144 would have
-predicted ten and a half.
+taste. A sweep is one full suite run per mutation, and every figure here is labelled with the count it
+was taken at, because a number that quietly re-labels itself as the tables grow is the whole problem:
+six tables was just over four minutes locally, eight was 144 mutations and eight and a half, and the
+ninth table was measured at 14m51s while it stood at 177 mutations. It is 191 now and sixteen and a
+half. The ninth is why the figures are worth keeping: scaling the 144 at its own 3.5s per mutation
+would have predicted ten and a half at 177, and it took fifteen.
+Every figure in that sentence is a laptop. A CI runner swept 191 in 20m44s, 6.5s each, and that is not
+the 5.2s measurement with a different machine in front of it: the branch it ran on had lengthened the
+suite too, which reads 6.0s locally. Half a second is the runner and the rest is the checks added. So a
+local timing scaled straight into a `timeout-minutes` runs short before any table is added. Size the job
+off a CI log line, and keep both the machine and the count attached to the number.
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
-from 3.5s to 5.0s when the ninth table landed. That is already well past what a push should carry to
+from 3.5s at 144 to 5.0s at 177, and is 5.2s at 191. That is already well past what a push should carry to
 re-answer a question the last push answered about code it did not touch, and each table added makes it
 worse than the one before. So `ci` sweeps only the modules the change could have affected, and the full
 sweep runs weekly where the length of it does not matter. The run prints its own per-mutation figure
@@ -255,13 +262,18 @@ two changes that are each fine and together are not. And a module in `UNSWEPT` i
 all, weekly included, which is why a change to one of those prints a line saying the change went
 unswept rather than passing quietly. The weekly run is the net under the first; issue #55 is the second.
 
-A third thing the scoring gives up, and this one is now reported rather than given up. A mutation
-counts as caught when the file named in its `caught_by` fails, and a file that dies on a traceback
-fails too - so a module mutated into raising early scored as caught for every rule that file asserts,
-including all the ones after the point where it stopped running. The sweep now checks that the named
-file printed a failing check rather than only exiting non-zero, and tallies the ones that did not at
-the end (#42). Not an exit code: being mutated into raising is a legitimate way to be caught, and a
-gate that fails on a legitimate catch gets bypassed.
+A third thing the scoring gives up, part of which is now reported. A mutation counts as caught when
+the file named in its `caught_by` fails, and a file that dies on a traceback fails too - so a module
+mutated into raising early scored as caught for every rule that file asserts, including all the ones
+after the point where it stopped running. The sweep now checks that the named file printed a failing
+check rather than only exiting non-zero, and tallies the ones that did not at the end (#42). Not an
+exit code: being mutated into raising is a legitimate way to be caught, and a gate that fails on a
+legitimate catch gets bypassed.
+
+That catches "died having asserted nothing" and not "died". A file that fails one check and then
+raises on the next line still reads as an ordinary catch, and the rules after the crash point are
+still credited. Telling that apart needs the number of checks the file owed, and nothing has it, which
+is #57.
 
 Nothing else is tiered. The test matrix is four fixed legs that do not grow, and a PR gate weaker than
 the gate on `main` is the failure mode this repo is about, so it stays as it is.

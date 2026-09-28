@@ -39,9 +39,13 @@ Line coverage measures execution. What matters here is whether a wrong answer ge
 The third form is what CI runs per push, and the cost is why: a sweep is one full suite run per
 mutation, so its price is the mutation count times the length of the suite, and both halves grow.
 Not linear in the size of the tables, which is what this said until #43 and what sized a job at
-15 minutes that took 16m30s: a slow check added to a shared test file multiplies by every mutation
-in every table, so a table written for one module makes the sweep of all the others dearer too. The
-run prints the per-mutation figure at the end, so the estimate is measured rather than remembered.
+15 minutes for a sweep that then ran 15m15s and was canceled: a slow check added to a shared test
+file multiplies by every mutation in every table, so a table written for one module makes the sweep
+of all the others dearer too. The run prints the per-mutation figure at the end, so the estimate is
+measured rather than remembered - on whichever machine ran it, and against whatever the suite was
+that day. Both move: 5.2s per mutation locally at 191, 6.0s locally once this file's own tables and
+checks grew, 6.5s for the same 191 on a CI runner. The limit in `ci.yml` is a CI number for that
+reason, and comparing a figure from one machine against one from the other says nothing.
 
 Narrowing it to the modules a change can actually have affected keeps the per-push cost flat, and
 the full sweep moves to a weekly schedule where the length of it does not matter. The narrowing only
@@ -125,6 +129,18 @@ INSTRUMENT = {
 # second copy of what the sweep already prints, kept by hand, rotting the way the `old` strings rot.
 BROAD = {"plugin/tests/test_cli.py"}
 
+# Test files a sweep structurally cannot measure, as against merely does not. `prepare` deletes
+# `test_mutations.py` from every mutated copy - it asserts that a table matches its module, and a
+# mutation is exactly an edit that stops one matching, so it would fail by construction on every
+# entry - which means no mutation can ever name it in `caught_by`.
+#
+# Its own set because the `caught_by` branch would otherwise print "named by no mutation, so no
+# table maps this change" about it, which is true and useless: it reads as a table nobody has got
+# round to, and the only thing anyone could do about it is the one thing the harness forbids. On a
+# harness PR that note also appeared next to "every table is reswept", and the `targets` docstring
+# says a contradictory pair like that is what the `continue` above the loop exists to stop.
+UNSWEEPABLE = {"plugin/tests/test_mutations.py"}
+
 
 def targets(paths):
     """Which modules a change to `paths` makes worth sweeping, and what was left out.
@@ -171,6 +187,11 @@ def targets(paths):
     `caught_by`, that field recording the one file that has to object rather than every file that
     does. `test_handlers.py` is the honest instance, the handlers being shell, and `test_cli.py` was
     the dishonest one until `BROAD`.
+
+    `UNSWEEPABLE` gets its own wording for the third case, a file the sweep deletes from every copy
+    it makes. "No table maps this change" is true of it and reads as a table nobody has written yet,
+    when the harness forbids the only thing that would fix it. It also paired with "every table is
+    reswept" on every harness PR, which is the contradiction the `continue` above is for.
     """
     paths = set(paths)
     # Wide for two different reasons, and both are said out loud rather than collapsed into one
@@ -225,7 +246,13 @@ def targets(paths):
         elif parts[1] == "tests":
             named = by_test.get(parts[2], set())
             modules |= named
-            if not named:
+            if named:
+                continue
+            if path in UNSWEEPABLE:
+                notes.append(
+                    f"{parts[2]} is deleted from every mutated copy, so no mutation can name it"
+                )
+            else:
                 notes.append(f"{parts[2]} is named by no mutation, so no table maps this change")
     if wide:
         return sorted(TABLES), wide + notes
@@ -396,7 +423,14 @@ def sections(out):
     runner fixtures print them, and `prepare` removes that file from every mutated copy - which is
     the only place this is read. Recorded rather than guarded against: a guard for it would be
     unreachable, and this file deletes those, but the coupling is worth knowing if that ever
-    changes."""
+    changes.
+
+    `setdefault` on both branches, which is redundant on the second and deliberate. Written as a
+    plain `found[current].append(line)`, dropping the `current is not None` guard raises KeyError,
+    and a raise is the one report this repo will not take: it kills the check that exists to catch
+    the defect and every check after it, which is #42 one level up. Written this way the same edit
+    returns a `None` bucket holding the preamble, which is a wrong answer, and a wrong answer is
+    what a check can object to."""
     found, current = {}, None
     for line in out.splitlines():
         header = re.match(r"^=== (\S+)$", line)
@@ -404,7 +438,7 @@ def sections(out):
             current = header.group(1)
             found.setdefault(current, [])
         elif current is not None:
-            found[current].append(line)
+            found.setdefault(current, []).append(line)
     return {name: "\n".join(body) for name, body in found.items()}
 
 
@@ -416,7 +450,16 @@ CHECK_FAILED = re.compile(r"^\s*FAIL\s")
 
 
 def failed_a_check(out, name):
-    """Whether the named file printed a failing check, rather than only exiting non-zero."""
+    """Whether the named file printed a failing check, rather than only exiting non-zero.
+
+    Catches "died with no failing check at all", which is narrower than "died". A file that fails
+    one check and then raises on the next line satisfies this and is scored an ordinary catch, so
+    the rules it asserts after the crash point are still credited - the #41 shape, one check in.
+    Telling that apart needs the count of checks the file was expected to print, and nothing has it:
+    the runner prints per-file `ok`/`FAIL` lines but no total, and a mutated module legitimately
+    changes how many checks run. The subset this does catch is the one that credited a whole file's
+    worth of rules to a traceback; the rest is #57.
+    """
     return any(CHECK_FAILED.match(line) for line in sections(out).get(name, "").splitlines())
 
 

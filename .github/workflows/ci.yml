@@ -256,12 +256,22 @@ jobs:
   # own per-mutation figure from #43 onwards, so the next correction to this paragraph comes off a log
   # line rather than off someone dividing a job total by a count read out of the summary.
   #
+  # That one is a laptop, and so is every figure above it except the runner paragraphs that say so.
+  # This job swept 191 in 1244s, 6.5s each, printed by the sweep itself on run 36395773935. Same count
+  # as the 5.2s figure and not the same measurement: the branch that produced it also lengthened the
+  # suite, which locally reads 6.0s per mutation. So the machine is worth about half a second and the
+  # added checks the rest, and a figure carried across either change is a guess. A local timing read
+  # straight into the limit below is short before a single mutation is added, which is close enough to
+  # look safe and is how 15 minutes got chosen for a sweep that ran 15m15s. Size it off this job.
+  #
   # And the narrowing did not narrow anything until #36, which is the change worth knowing about here
   # rather than any of the figures. The tables lived in `mutate.py`, `mutate.py` is instrument, and the
   # rule in this repo is that a fix adds a mutation, so nearly every push tripped the wide path and
   # paid the full sweep. The tables are `plugin/tests/tables/<module>.py` now, one file each so the
   # path says which module a new mutation belongs to, and the figures above are what a push pays only
-  # when the harness itself changes.
+  # when it changes something wide: the harness, what a table entry is, which tables exist, or
+  # `test_cli.py`. That is the same list the timeout paragraph below gives, and it is deliberately not
+  # "when the harness itself changes", which is what this said first and is narrower than the code.
   #
   # Read the step duration, not the first log line. The 138 run printed its `sweeping ...` line four
   # minutes in, which is stdout block-buffering flushing rather than the sweep starting late, and taking

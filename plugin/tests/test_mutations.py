@@ -276,23 +276,42 @@ print("and it can tell a file that objected from a file that died")
 # `sections` is why #42 is answerable at all: the runner's summary says which files failed and
 # nothing more, so deciding whether the named file objected means reading that file's own output and
 # nobody could, because the output was one string.
+#
+# Read with `sorted(..., key=repr)` and `.get`, neither of which is fussiness. The first version of
+# these three checks used plain `sorted` and a plain index, and both die on exactly the output a
+# broken `sections` produces: `sorted` on a dict holding a `None` key raises TypeError comparing it
+# with a string, and the index raises KeyError when the split collapses to one bucket. Either kills
+# this file at the check that was supposed to report the defect and takes the two hundred checks
+# after it with it, which is #42's failure mode inside the gate that exists to catch #42.
+TWO_FILES = CAUGHT + "=== test_store_claims.py\n  ok    fine\n"
 check(
     "output splits on the headers the runner prints",
-    sorted(mutate.sections(CAUGHT + "=== test_store_claims.py\n  ok    fine\n")),
+    sorted(mutate.sections(TWO_FILES), key=repr),
     ["test_hook.py", "test_store_claims.py"],
 )
 check(
     "and a section is the lines under its header, not the whole run",
-    "FAIL"
-    in mutate.sections(CAUGHT + "=== test_store_claims.py\n  ok    fine\n")["test_store_claims.py"],
+    "FAIL" in mutate.sections(TWO_FILES).get("test_store_claims.py", ""),
     False,
 )
 # Anything before the first header belongs to no file. It is the runner's own preamble, and
 # attaching it to the first file makes that file answer for text it did not print.
+#
+# Compared as a whole dict rather than by key, so both shapes of the defect land here: a `None`
+# bucket holding the preamble, and the preamble prepended to the first real file.
 check(
     "and a preamble before any header belongs to no file",
     mutate.sections("running 9 files\n" + CAUGHT),
     {"test_hook.py": "  FAIL  a rule nobody kept: got 1, want 2\nFAILED: test_hook.py"},
+)
+# A file announced and then silent is the shape a crash in the first check leaves behind, and it is
+# the one case where the header alone has to create the section. Without it the name is simply
+# absent, which `failed_a_check` reads as "printed nothing", so the answer comes out the same by
+# accident - and stops doing so the moment anything else asks what the sweep saw.
+check(
+    "a file announced and then silent is still a section of its own",
+    mutate.sections("=== test_hook.py\n"),
+    {"test_hook.py": ""},
 )
 # Deliberately not `FAILED:`, which is the obvious thing to look for and the wrong one: the runner
 # prints it after the last section's header, so it lands inside that file's section and every crash
@@ -605,6 +624,13 @@ check(
 
 check("and each catch says which file objected", "stubbed" in printed, True)
 check("and nothing on a clean run is marked alive", "ALIVE" in printed, False)
+# The third state of the marker column, which had no check while the other two did. `ALIVE` and
+# `crash` were asserted and `ok` was not, so rewriting the expression to mark a catch `crash` left
+# the suite green: every mutation printed `crash` above a summary reporting no crashes and saying
+# every one was caught. A run contradicting itself is what the column exists to prevent, and saying
+# so about two of three states is not saying it.
+check("and a catch is marked ok, which is the third state", "ok    stub" in printed, True)
+check("and not as a crash, on a run that had none", "crash" in printed, False)
 
 # The detail, in every one of these, not just the exit code. `mutate.py`'s own summary comment says
 # the detail is the load-bearing half, because `ALIVE` covers four different outcomes and only one
@@ -779,6 +805,28 @@ check(
     targets_with(["plugin/tests/run.py"])[0],
     ["hookio", "store"],
 )
+# The two entries #36 added, and the only reason splitting the tables out is safe. `shape.py`
+# decides what a table entry is and `__init__.py` decides which tables exist, so either can
+# invalidate every verdict at once. Neither had a check: deleting both lines from `INSTRUMENT` left
+# the whole suite green, and a change to `__init__.py` then selected no modules at all and printed
+# "is no module's table, so nothing assembles or sweeps it" about the file that assembles every
+# table. Narrowing to nothing, with a false note over it, in the two files the split's safety
+# argument rests on.
+check(
+    "a change to which tables exist resweeps all of them",
+    targets_with(["plugin/tests/tables/__init__.py"])[0],
+    ["hookio", "store"],
+)
+check(
+    "and says the instrument changed, not that the file is nobody's table",
+    targets_with(["plugin/tests/tables/__init__.py"])[1],
+    ["the sweep's own instrument changed, so every table is reswept"],
+)
+check(
+    "and so does a change to what a table entry is",
+    targets_with(["plugin/tests/tables/shape.py"]),
+    (["hookio", "store"], ["the sweep's own instrument changed, so every table is reswept"]),
+)
 
 # An unswept module has to leave a line behind. Silence here is a PR whose only changed module was
 # never swept by anything, reported as a clean sweep, which is this repo's whole subject.
@@ -840,6 +888,18 @@ modules, notes = targets_with(["plugin/tests/test_handlers.py"])
 check("a test file no mutation names selects nothing", modules, [])
 check("but says no table maps it", "named by no mutation" in " ".join(notes), True)
 check("and names the file, not just the fact", "test_handlers.py" in " ".join(notes), True)
+# The third wording, for the file the sweep deletes from every copy it makes. Without it this said
+# "named by no mutation, so no table maps this change" about `test_mutations.py`, which reads as a
+# table nobody has written when what it actually is is a file no mutation is allowed to name - and
+# on a harness PR it printed next to "every table is reswept", which is the contradictory pair the
+# `INSTRUMENT` skip exists to stop.
+modules, notes = targets_with(["plugin/tests/test_mutations.py"])
+check("the file the sweep deletes from every copy selects nothing", modules, [])
+check(
+    "and says that is why, rather than that a table is owed",
+    notes,
+    ["test_mutations.py is deleted from every mutated copy, so no mutation can name it"],
+)
 
 docs = (["README.md"], None)
 code, printed = run_main(["--since", "main"], tables=TWO, caught=True, changed=docs)
