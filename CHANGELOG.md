@@ -56,8 +56,12 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 - A mutation sweep as a CI gate. `plugin/tests/mutate.py` breaks one rule at a time and requires the
   suite to notice; `test_mutations.py` is the cheap half that keeps the tables from drifting away
   from the source they claim to patch. A hundred and ninety-one mutations across `claims`,
-  `exchange_root`, `handoffs`, `hook`, `hookio`, `legacy`, `registry`, `store` and `validate`; the
-  three modules with no table are all in `DECLINED`, with the reason recorded next to each. Every
+  `exchange_root`, `handoffs`, `hook`, `hookio`, `legacy`, `registry`, `store` and `validate`, one
+  file each under `plugin/tests/tables/` so that adding a mutation sweeps the module it names instead
+  of all nine. `cli` is the one module deliberately not swept, with the reason recorded next to it;
+  `ledger` and `reconcile` are owed tables. A catch is a failing check inside the file the mutation
+  names, not merely a non-zero exit, so a file that dies part way through is reported rather than
+  credited with every rule it asserts after that point. Every
   table has found live rules on its first run: two guards in `hookio.payload` wide enough to let a
   hook exit 1 with a traceback, ten unasserted rules in root resolution, every failure path of
   `seed`, `update` and `clear` in `claims`, and five rules in `legacy` that the end-to-end fixtures

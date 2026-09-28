@@ -11,12 +11,17 @@ untested while hiding a fake one. Asserted here rather than only inside the swee
 that moves a line turns the table red on the cheap job instead of on the slow one.
 
 **A module with no table at all.** None of the eleven had one in the repo before this file existed,
-and eight do now, which is exactly how the suite came to read as thorough: the modules that got
+and nine do now, which is exactly how the suite came to read as thorough: the modules that got
 swept are thorough. So `TABLES` and `UNSWEPT` together have to account for every module in
 `plugin/lib`, and a new module joins neither by accident.
 
 `UNSWEPT` is deliberately a list of names rather than a count or a flag. A count drifts without
 saying what changed, and a flag lets a module be quietly forgotten.
+
+**A table file nothing assembles**, which is new since the tables became one file per module (#36).
+The accounting above compares `plugin/lib` against `TABLES` and cannot see a file in `tables/` that
+`tables/__init__.py` never imports - swept by nothing, with the mutations in it read as protection.
+So that direction is checked too, both ways round.
 """
 
 import contextlib
@@ -97,6 +102,21 @@ check(
     [],
 )
 
+# The third direction, which only exists because the tables became files (#36). The two above
+# compare `plugin/lib` against `TABLES`; neither can see a file in `tables/` that `__init__.py`
+# forgot to import, and that file is swept by nothing and assembled by nothing while both checks
+# stay green. `targets` reports the same thing for a changed file, but only for a changed one: a
+# table added and never wired up is silent from the day after it lands.
+TABLE_FILES = {
+    path.stem for path in (HERE / "tables").glob("*.py") if path.stem not in {"__init__", "shape"}
+}
+check(
+    "every file in tables is a table some module's sweep reads",
+    sorted(TABLE_FILES - set(mutate.TABLES)),
+    [],
+)
+check("and every table in TABLES is a file", sorted(set(mutate.TABLES) - TABLE_FILES), [])
+
 print("every mutation still patches the source it claims to")
 
 for name, table in sorted(mutate.TABLES.items()):
@@ -149,7 +169,19 @@ print("and it scores a finished run the way it claims to")
 # because scoring had no seam. Fed synthetic runner output here, so deleting the `caught_by`
 # comparison or the baseline refusal is a red build on the cheap job rather than a silent loss on
 # the slow one.
-CAUGHT = "=== test_hook.py\nFAILED: test_hook.py\n"
+# A failing check inside the section, not just the runner's summary line. Those are two different
+# signals and the scoring told them apart only from #42 onwards: `run.py` reports any non-zero child
+# in `FAILED:`, and a file that dies on a traceback is non-zero, so a fixture with no `FAIL` line in
+# it is a file that crashed rather than one that objected. `CRASHED` is that case, kept beside this
+# one because the pair is the whole distinction.
+CAUGHT = "=== test_hook.py\n  FAIL  a rule nobody kept: got 1, want 2\nFAILED: test_hook.py\n"
+CRASHED = (
+    "=== test_hook.py\n"
+    "  ok    the checks before the crash\n"
+    "Traceback (most recent call last):\n"
+    "TypeError: argument of type 'NoneType' is not iterable\n"
+    "FAILED: test_hook.py\n"
+)
 
 check(
     "a suite that passed means the rule is unasserted",
@@ -239,6 +271,45 @@ check(
     True,
 )
 
+print("and it can tell a file that objected from a file that died")
+
+# `sections` is why #42 is answerable at all: the runner's summary says which files failed and
+# nothing more, so deciding whether the named file objected means reading that file's own output and
+# nobody could, because the output was one string.
+check(
+    "output splits on the headers the runner prints",
+    sorted(mutate.sections(CAUGHT + "=== test_store_claims.py\n  ok    fine\n")),
+    ["test_hook.py", "test_store_claims.py"],
+)
+check(
+    "and a section is the lines under its header, not the whole run",
+    "FAIL"
+    in mutate.sections(CAUGHT + "=== test_store_claims.py\n  ok    fine\n")["test_store_claims.py"],
+    False,
+)
+# Anything before the first header belongs to no file. It is the runner's own preamble, and
+# attaching it to the first file makes that file answer for text it did not print.
+check(
+    "and a preamble before any header belongs to no file",
+    mutate.sections("running 9 files\n" + CAUGHT),
+    {"test_hook.py": "  FAIL  a rule nobody kept: got 1, want 2\nFAILED: test_hook.py"},
+)
+# Deliberately not `FAILED:`, which is the obvious thing to look for and the wrong one: the runner
+# prints it after the last section's header, so it lands inside that file's section and every crash
+# in the last file swept would read as a check failing.
+check("a section with a failing check says so", mutate.failed_a_check(CAUGHT, "test_hook.py"), True)
+check("one that only died does not", mutate.failed_a_check(CRASHED, "test_hook.py"), False)
+check(
+    "and the summary line is not a failing check, whichever section it fell into",
+    mutate.failed_a_check("=== test_hook.py\nFAILED: test_hook.py\n", "test_hook.py"),
+    False,
+)
+check(
+    "a file that printed nothing at all did not fail a check",
+    mutate.failed_a_check(CAUGHT, "test_store_claims.py"),
+    False,
+)
+
 print("and each of those verdicts is what the sweep actually asks for")
 
 
@@ -284,9 +355,47 @@ check("having asked for no mutation, which is the whole point of it", through.ha
 check(
     "sweep_one asks verdict, and reports the mutation it was given",
     through((1, "FAILED: test_store_claims.py\n"), lambda: mutate.sweep_one(once)),
-    (False, "caught by test_store_claims.py rather than test_hook.py"),
+    (False, "caught by test_store_claims.py rather than test_hook.py", False),
 )
 check("and asked for that mutation rather than for a clean run", through.handed, once)
+# The third value, which is #42. Both of these are `verdict` saying caught, and the difference
+# between them is entirely inside the named file's own output: one printed a failing check and the
+# other printed a traceback. Scored the same until this branch existed, so a file that dies a third
+# of the way in stopped asserting everything after that point while the sweep reported it as the
+# catcher of every rule it names.
+check(
+    "a catch whose file printed a failing check is an ordinary catch",
+    through((1, CAUGHT), lambda: mutate.sweep_one(once)),
+    (True, "test_hook.py", False),
+)
+check(
+    "a catch whose file only died is flagged instead",
+    through((1, CRASHED), lambda: mutate.sweep_one(once))[2],
+    True,
+)
+check(
+    "and says so, since the mutation is not what is wrong",
+    "died rather than objecting" in through((1, CRASHED), lambda: mutate.sweep_one(once))[1],
+    True,
+)
+# The flag is about the file the mutation names, not about any file failing. A crash in `store`
+# while `hook` objects properly is `store`'s problem and says nothing about this rule, and the
+# cheapest way to get this wrong is to scan the whole output for `FAIL`.
+check(
+    "a check failing in some other file does not clear the flag",
+    through(
+        (1, CRASHED + "=== test_store_claims.py\n  FAIL  something else\n"),
+        lambda: mutate.sweep_one(once),
+    )[2],
+    True,
+)
+# A survivor is never flagged, because there is nothing to explain: the suite passed, so no file
+# failed at all and "it died rather than objecting" would be a wrong reason for a right verdict.
+check(
+    "and a rule nothing asserts is not a crash",
+    through((0, "everything passed\n"), lambda: mutate.sweep_one(once)),
+    (False, "the suite passed, so nothing asserts this rule", False),
+)
 
 print("and what run_suite hands it is what the scoring needs")
 
@@ -438,7 +547,7 @@ ONE = mutate.Mutation(
 )
 
 
-def run_main(argv, *, tables, caught, baseline_problem=None, changed=None):
+def run_main(argv, *, tables, caught, crashed=False, baseline_problem=None, changed=None):
     """`main`'s exit code and what it printed, with the two slow calls stubbed.
 
     `changed` stubs `changed_since` for the `--since` checks, as `(paths, problem)`. Stubbed rather
@@ -449,7 +558,7 @@ def run_main(argv, *, tables, caught, baseline_problem=None, changed=None):
     real = (mutate.TABLES, mutate.baseline, mutate.sweep_one, mutate.changed_since)
     mutate.TABLES = tables
     mutate.baseline = lambda: baseline_problem
-    mutate.sweep_one = lambda mutation: (caught, "stubbed")
+    mutate.sweep_one = lambda mutation: (caught, "stubbed", crashed)
     if changed is not None:
         mutate.changed_since = lambda base: changed
     # `main` reads the sweep marker from the real `os.environ`, and this calls it in-process rather
@@ -526,6 +635,47 @@ code, printed = run_main([], tables=TWO, caught=True, baseline_problem="the copy
 check("a baseline that cannot be trusted stops the run rather than passing it", code, 2)
 check("and says what was wrong with it", "the copy already fails" in printed, True)
 
+# The crash tally, #42's other half. A crash is still a catch, so the run passes: the mutation was
+# noticed, and what the flag says is that the file noticing it stopped early, so every rule it
+# asserts after that point went unchecked this time round. That is a thing to go and look at rather
+# than a reason to fail the build, and calling it a survivor would report a rule as unasserted when
+# the table entry is fine.
+code, printed = run_main([], tables=TWO, caught=True, crashed=True)
+check("a catch by crashing still passes, since the mutation was caught", code, 0)
+check(
+    "but the run says how many, rather than burying it in the per-line output",
+    "4 mutation(s) were caught by a file dying" in printed,
+    True,
+)
+check(
+    "and names them, since the file to go and look at is the finding",
+    "hookio: stub" in printed,
+    True,
+)
+# Same reason as the survivor marker above: a column that reads `ok` for all four outcomes is a run
+# that contradicts its own summary.
+check("and each one is marked crash rather than ok", "crash stub" in printed, True)
+check(
+    "a clean run reports no crashes at all",
+    "caught by a file dying" in run_main([], tables=TWO, caught=True)[1],
+    False,
+)
+
+# The cost line, which is the cheap half of #43: the sweep's own runtime, printed by the sweep,
+# because the number that decides whether the next table is affordable is seconds per mutation and
+# until this line the only place it existed was a human dividing a CI job's wall clock by a count in
+# the summary. Asserted for the shape rather than the value, since the value is a real clock.
+check(
+    "a run reports what it cost",
+    "4 mutation(s) in " in run_main([], tables=TWO, caught=True)[1],
+    True,
+)
+check(
+    "and the per-mutation figure, which is the one that scales",
+    "s each" in run_main([], tables=TWO, caught=True)[1],
+    True,
+)
+
 # Reachable without anyone meaning it: move the tables into `UNSWEPT` and the accounting above still
 # balances, so a sweep that swept nothing would report "every one of 0 mutation(s) was caught".
 code, printed = run_main([], tables={}, caught=True)
@@ -588,12 +738,21 @@ check(
     ),
     ([], []),
 )
-# This one used to assert `([], [])`, which was #24 written down as a rule: silence about a changed
-# test file nothing measures. It selects nothing, which was right, and said nothing, which was not.
+# `test_cli.py` was here twice over, first as `([], [])` - #24 written down as a rule, silence about
+# a changed test file nothing measures - then as a note saying no table maps it. Both described the
+# mechanism correctly and the file wrongly: it is no mutation's `caught_by`, but it drives every
+# command end to end, so it is one of the files most able to catch a mutation in any module, and a
+# change to it that stops catching something narrowed to nothing being swept. That is #27, and what
+# made it affordable to fix was #36 making the wide sweep rare rather than the default.
 check(
-    "and a test file that catches no mutation selects nothing, but is not silent about it",
-    targets_with(["plugin/tests/test_cli.py"]),
-    ([], ["test_cli.py is named by no mutation, so no table maps this change"]),
+    "a test file that catches across modules resweeps everything",
+    targets_with(["plugin/tests/test_cli.py"])[0],
+    ["hookio", "store"],
+)
+check(
+    "and says which file, and that catching broadly is the reason",
+    targets_with(["plugin/tests/test_cli.py"])[1],
+    ["test_cli.py catches mutations across every module, so every table is reswept (#27)"],
 )
 # The shape filter is three conditions and the probe found two of them deletable: with the `plugin`
 # test or the extension test gone, nothing in the suite objected. Both are the same failure, a path
@@ -632,6 +791,43 @@ check(
 modules, notes = targets_with(["plugin/lib/notyet.py"])
 check("a module still owed a table selects nothing", modules, [])
 check("and says the change went unswept", "goes unswept" in " ".join(notes), True)
+
+# The route that is the whole of #36. A table file names its module in its path, which is why the
+# tables are nine files rather than one: a single `tables.py` could only ever be swept wide, because
+# no path says which table inside a file changed, and the narrowing would have moved code without
+# narrowing anything. Adding a mutation is the commonest diff in this repo and it now costs one
+# module's sweep.
+check(
+    "a changed table sweeps the module it is the table for",
+    targets_with(["plugin/tests/tables/store.py"]),
+    (["store"], []),
+)
+check(
+    "and not the whole package, which is what putting them in one file would have cost",
+    targets_with(["plugin/tests/tables/store.py"])[0],
+    ["store"],
+)
+# A table file for nothing is a file nobody runs. `__init__.py` imports the nine by name, so a tenth
+# sitting beside them is assembled by nothing and swept by nothing, and the failure is silence. The
+# accounting at the top of this file covers the opposite direction, a module with no table.
+modules, notes = targets_with(["plugin/tests/tables/nosuch.py"])
+check("a table file no module claims selects nothing", modules, [])
+check(
+    "but says nothing assembles it, since a table nobody runs is the silent case",
+    "is no module's table" in " ".join(notes),
+    True,
+)
+# Both halves of a wide run's output. The notes are how an unswept or unmapped module gets reported,
+# and returning early on the wide path dropped them: the sweep would sweep everything, correctly,
+# and say nothing about the module in the same diff that no table covers.
+modules, notes = targets_with(["plugin/tests/mutate.py", "plugin/lib/notyet.py"])
+check("a wide sweep is still wide when something unswept changed too", modules, ["hookio", "store"])
+check(
+    "and reports the wide reason first, since it is why the run looks like that",
+    "instrument" in notes[0],
+    True,
+)
+check("and still says the unswept module went unswept", "goes unswept" in " ".join(notes), True)
 
 # The same hole one step over, and the one that shipped: a changed test file no `caught_by` names
 # mapped to nothing and said nothing, so a diff that added a whole test file printed "nothing that a

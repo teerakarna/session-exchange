@@ -218,12 +218,17 @@ jobs:
   # suite runs by four for no additional answer.
   #
   # Narrowed to what the change could have broken, rather than every table, and that is the one tier
-  # in this workflow. A sweep is one full suite run per mutation, so its cost is linear in the size of
-  # the tables: eight modules is 144 mutations and eight and a half minutes locally, where six was
-  # just over four. That is already past what a push should carry to re-answer a question the last push
-  # answered about code it did not touch, and every table added makes it worse. Nothing else here grows
-  # that way, which is why nothing else here is tiered - the matrix is four fixed legs, and making the
-  # PR gate weaker than the main gate is the failure mode this repo is about.
+  # in this workflow. A sweep is one full suite run per mutation, so its cost is the mutation count
+  # times the length of the suite: eight modules is 144 mutations and eight and a half minutes locally,
+  # where six was just over four, and nine is 191 and sixteen and a half. That is already past what a
+  # push should carry to re-answer a question the last push answered about code it did not touch, and
+  # every table added makes it worse. Nothing else here grows that way, which is why nothing else here
+  # is tiered - the matrix is four fixed legs, and making the PR gate weaker than the main gate is the
+  # failure mode this repo is about.
+  #
+  # This comment said "linear in the size of the tables" for four tables' worth of history, and the
+  # measurements below are what corrected it. Both halves of the product grow, because a table brings
+  # its own test file and every mutation already in the tables then runs those checks too.
   #
   # The runner figure this comment used to carry was "between four and a half and four and three
   # quarters", and the correction is about the range rather than the number. Four full resweeps of the
@@ -245,7 +250,18 @@ jobs:
   # suite length, not mutations. The ninth table added 32 mutations and also added a test file and
   # nineteen subprocess-spawning checks to the suite that all of them then run, so per-mutation cost
   # went from 3.5s to 5.0s and every existing table got slower. Each table added is therefore worse
-  # than linear, and the "linear in the size of the tables" line above is the optimistic reading.
+  # than linear.
+  #
+  # 16m30s at 191 mutations is the most recent full resweep, on the #50 branch. The sweep prints its
+  # own per-mutation figure from #43 onwards, so the next correction to this paragraph comes off a log
+  # line rather than off someone dividing a job total by a count read out of the summary.
+  #
+  # And the narrowing did not narrow anything until #36, which is the change worth knowing about here
+  # rather than any of the figures. The tables lived in `mutate.py`, `mutate.py` is instrument, and the
+  # rule in this repo is that a fix adds a mutation, so nearly every push tripped the wide path and
+  # paid the full sweep. The tables are `plugin/tests/tables/<module>.py` now, one file each so the
+  # path says which module a new mutation belongs to, and the figures above are what a push pays only
+  # when the harness itself changes.
   #
   # Read the step duration, not the first log line. The 138 run printed its `sweeping ...` line four
   # minutes in, which is stdout block-buffering flushing rather than the sweep starting late, and taking
@@ -255,7 +271,8 @@ jobs:
   # The narrowing is in `mutate.py --since`, not in this file, so the same command is the local one.
   # `targets` there derives the module list, and it is wider than "the lib files that changed": a test
   # file maps to the modules its checks catch, because a deleted check is how a mutation stops being
-  # caught, and a change to `run.py` or `mutate.py` reswept everything.
+  # caught, a change to the harness or to what a table is resweeps everything, and so does a change to
+  # `test_cli.py`, which catches across every module while being no mutation's `caught_by` (#27).
   #
   # Still unconditional, and it has to be: `ci` reads a `skipped` need as failure, so a job with an
   # `if:` on it would block `main` on every run where the condition was false. A change with nothing
@@ -264,8 +281,10 @@ jobs:
   # The full sweep lives in `sweep.yml`, weekly, where the length of it does not matter.
   #
   # Which is why the limit below is `sweep.yml`'s number and not a smaller one sized for the narrow
-  # case. The narrowing is not a bound: any change to `run.py` or `mutate.py` widens it to every
-  # table, so this job runs the weekly sweep several times a quarter and has to be able to finish it.
+  # case. The narrowing is not a bound: a change to the harness, to what a table is, or to
+  # `test_cli.py` widens it to every table, so this job runs the weekly sweep several times a quarter
+  # and has to be able to finish it. #36 made that rarer, not impossible, and a limit sized for the
+  # common case fails on exactly the PRs that most need the wide sweep to be believed.
   # Sizing it for the common case instead cost a day here. At 15 minutes against a 14m51s sweep, the
   # first PR to touch the harness after the ninth table was added got `The operation was canceled` at
   # 15m15s, which arrives as a red `mutate` and takes the `ci` aggregate with it - indistinguishable
