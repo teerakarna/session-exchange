@@ -10,10 +10,13 @@ registry Claude Code already maintains, and the only files it writes are its own
 deliberately.
 
 **Status: early, installable, not yet load-bearing.** Root resolution, both hooks, and
-`init | show | claim | doctor` work end to end. Handoff matching and the import out of the existing
-markdown ledger are not built, and `Stop` is deliberately unwired until they are. Seven migration
-steps, three done; `doctor` prints all seven derived from live state, and the design lives with
-the plan (see [Docs](#docs)).
+`init | show | claim | doctor | handoff` all work. Presence is delivered end to end; handoffs are
+not. Nothing matches a handoff to a recipient yet, so a posted one is only seen by somebody who
+thinks to run `exchange handoff list`, which is the failure this project replaces rather than a use
+of it. Handoff matching and the import out of the existing markdown ledger are both unbuilt, and
+`Stop` stays deliberately unwired until the matcher gives it something to read. Seven migration
+steps, three done; `doctor` prints all seven derived from live state, and the design lives with the
+plan (see [Docs](#docs)).
 
 ## Why
 
@@ -65,7 +68,10 @@ State under a root:
 | Humans and sessions | Markdown | `<root>/.claude/exchange/EXCHANGE.md` |
 
 One file per writer, never a shared append target: concurrent writers otherwise contend, and it is also
-why no write needs a lock, since the only writer of a session's claim is that session. No regex ever
+why a claim needs no lock, since the only writer of a session's claim is that session. That last part
+stops at claims. A handoff has two writers - the sender, and whichever session accepts or closes it -
+so the argument does not cover the handoff directory, and #44 is the open question of what it needs
+instead. No regex ever
 parses hand-typed structure again. The markdown keeps narrative, decisions and history, which is what a
 ledger is genuinely good at.
 
@@ -148,14 +154,30 @@ survives a version bump.
 
 ## Commands
 
-**Look** `show` `doctor`
-**Say** `claim`
+**Look** `show` `doctor` `handoff list`
+**Say** `claim` `handoff post` `handoff accept` `handoff close`
 **Set up** `init`
-**Not built yet** `handoff` `migrate`
+**Not built yet** `migrate`
 
-The two unbuilt commands exit 2 and name the migration step that delivers them. Exit 2 is not a
-failure: a command that does not exist yet must not report success, and must not look like a fault
-either.
+`migrate` exits 2 and names the migration step that delivers it. Exit 2 is not a failure: a command
+that does not exist yet must not report success, and must not look like a fault either.
+
+`handoff` has no default verb, so `exchange handoff` on its own is a usage error rather than a guess
+between posting and listing. `--body -` reads the body from stdin, which is what you want for
+anything with a backtick or a blank line in it:
+
+```sh
+exchange handoff post --repo dotfiles --path plugin/lib --body - <<'EOF'
+The hooks manifest is wired twice. `doctor` names both files.
+EOF
+```
+
+Posting never overwrites: an id already on disk is a refusal, because a silently dropped handoff is
+invisible at both ends. `accept` and `close` are separate verbs rather than a `--status` flag, so
+taking something on cannot be typed as finishing it, and each move is appended to the record's
+history with the status read back off the entry that was just written. A record whose `status`
+contradicts its own history is reported and left alone rather than repaired, because nothing here
+wrote it and guessing which half is stale is how a closed handoff comes back open.
 
 Writes stay at the terminal rather than behind a tool the model can call. Reads are pushed by hooks,
 because a read surface that has to be asked for would reintroduce the exact failure this replaces,
@@ -209,9 +231,11 @@ back in through the test suite.
 python3 plugin/tests/run.py
 ```
 
-156 checks, no install step. `test_handoff_parser.py` exercises the legacy hook still running on one
-machine and **skips** if it is absent, so the suite is green on a machine that never had it. It is here
-because the port has to keep it passing.
+555 checks, plus 841 more from the table accounting - about five per mutation, not one - and no
+install step.
+`test_handoff_parser.py` exercises the legacy hook still running on one machine and **skips** if it is
+absent, so the suite is green on a machine that never had it. It is here because the port has to keep
+it passing.
 
 State is validated against `plugin/schemas/` on the way to disk, by a validator that covers only the
 subset of JSON Schema those files use and **raises on any keyword it does not implement**. That is what

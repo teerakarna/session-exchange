@@ -209,11 +209,20 @@ buys is the round trip, a format failure found in under a second rather than two
 log. The sweep is in neither stage, for the arithmetic below.
 
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation: eight tables is 144 mutations and eight and a half
-minutes locally, measured, where six tables was just over four. That is already past what a push
-should carry to re-answer a question the last push answered about code it did not touch, and it grows
-with every table added. So `ci` sweeps only the modules the change could have affected, and the full
+taste. A sweep is one full suite run per mutation: six tables was just over four minutes locally,
+eight was 144 mutations and eight and a half, and nine is 178 mutations, 14m51s of it measured at 177.
+All measured, and the last one is why the figures are worth keeping: scaling the 144 would have
+predicted ten and a half.
+The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
+and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
+from 3.5s to 5.0s when the ninth table landed. That is already well past what a push should carry to
+re-answer a question the last push answered about code it did not touch, and each table added makes it
+worse than the one before. So `ci` sweeps only the modules the change could have affected, and the full
 sweep runs weekly where the length of it does not matter.
+
+The narrowing is not a ceiling, though, and the workflow has to be written for that: a change to
+`run.py` or `mutate.py` widens `--since` to every table, so `ci`'s sweep job carries the same
+`timeout-minutes` as the weekly one rather than a tighter number sized for the usual case.
 
 That narrowing is in `mutate.py --since`, not in the workflow, so the command CI runs is the command
 you run. It is wider than "the lib modules that changed", and the extra width is the part that
@@ -255,7 +264,10 @@ implement it and the meta-test will tell you when you have not.
   That split is the portability, and a hardcoded path anywhere in here is the bug class being removed.
 - **Roots never read each other**, in either direction. This is the test that must never regress.
 - **One file per writer**, never a shared append target. Concurrent sessions on one file contend, and
-  it is also why no write needs a lock: the only writer of a session's claim is that session.
+  it is also why a claim needs no lock: the only writer of a session's claim is that session. Read the
+  second half narrowly - it is an argument about claims, not a property of the store. A handoff has two
+  writers, the sender and whoever accepts or closes it, so `set_status` is a read-modify-write that two
+  sessions can interleave. See #44; do not cite this bullet as licence for a new unlocked writer.
 - **A hook must never fail a session start.** Everything is wrapped, exits 0, and reports the problem
   in the injected context instead. A bad root resolves to no root and says why.
 - **Silence is a real answer.** No root means no output and no files, ever. An empty section injected

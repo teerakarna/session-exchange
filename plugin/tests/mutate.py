@@ -1343,9 +1343,277 @@ REGISTRY = [
     ),
 ]
 
+# The first module that writes state a *different* session reads. A claim is written and read by
+# one session, so a wrong claim misinforms nobody but its author. A handoff is addressed to
+# whoever works in a scope next, which may be a session that does not exist yet. That is why there
+# is a table here rather than an entry in `DECLINED` next to `cli`: the argument there is that a
+# wrong answer lands in front of the person who typed the command, and here it does not. Nobody is
+# watching when a handoff is dropped, because the sender saw it posted and the recipient never had
+# it to miss.
+#
+# Two rules carry the module and most of the table is about them: posting never overwrites, and
+# `status` is derived from `history` in one write rather than maintained beside it. The second is
+# this repo's recurring defect in a new shape, two inputs that agree cannot say which one was
+# read, so the mutations that matter most are the ones that make the two halves agree by
+# construction.
+HANDOFFS = [
+    Mutation(
+        module="handoffs",
+        rule="the timestamp's separators are stripped, because the id is also the filename",
+        old='    stamp = (at or store.now()).replace("-", "").replace(":", "")',
+        new="    stamp = at or store.now()",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the id is built from the posting time, so a lexical sort is a chronological one",
+        old='    stamp = (at or store.now()).replace("-", "").replace(":", "")',
+        new='    stamp = store.now().replace("-", "").replace(":", "")',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # Without it, two handoffs posted in the same second collide as a matter of course, and then
+        # the only safe behaviour is to retry - which turns a real duplicate into a second row
+        # nobody compares. The suffix is what makes a collision a bug rather than contention.
+        rule="the random suffix is really there, and long enough to be one",
+        old="SUFFIX_BYTES = 3",
+        new="SUFFIX_BYTES = 0",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="a scope and a session at once is neither",
+        old="    if repo and session_id:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="repeated paths are deduplicated",
+        old='            scope["paths"] = list(dict.fromkeys(paths))',
+        new='            scope["paths"] = list(paths)',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # `dict.fromkeys` rather than `set`, and the order is the reason: the paths are rendered
+        # back to a human in the order they were typed.
+        rule="and the order they were given in survives the deduplication",
+        old='            scope["paths"] = list(dict.fromkeys(paths))',
+        new='            scope["paths"] = sorted(set(paths))',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The schema's `oneOf` catches an empty `to` on the way to disk, with "does not match any of
+        # the allowed forms", which is true and says nothing about which flag was forgotten.
+        rule="--path without --repo names the missing flag rather than the failing form",
+        old='        return None, "--path narrows a repo scope, so it needs --repo as well"',
+        new='        return {"paths": list(paths)}, None',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The mutation is the bug that was there. `to_scope` returned on `session_id` before
+        # the paths-without-repo refusal below it, so `--session` with `--path` posted, exited
+        # 0, and left the narrowing out of the record. Nothing in the table covered the
+        # combination, so the sweep was green on it - which is why this is a table entry and
+        # not only a check.
+        rule="--path with --session is refused rather than silently dropped",
+        old="""        if paths:
+            return None, "--path narrows a repo scope, so it cannot go with --session"
+        return {"session_id": session_id}, None""",
+        new='        return {"session_id": session_id}, None',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="no addressing at all is a refusal, not an empty scope",
+        old='    return None, "say who it is for: --repo (optionally with --path) or --session"',
+        new="    return {}, None",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="a body of nothing but whitespace says nothing",
+        old='    if not (body or "").strip():',
+        new='    if not (body or ""):',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The filename rule runs before the write, the schema runs during it. Both refuse this id,
+        # so only the message says which one ran, and only one of them leaves the directory alone.
+        rule="an id that cannot be a filename is caught here, not by the validator",
+        old="    handoff_id = handoff_id or new_id(at)\n    if store.safe_id(handoff_id) is None:",
+        new="    handoff_id = handoff_id or new_id(at)\n    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The headline rule. An id collision means two handoffs, and keeping one of them is
+        # invisible at both ends: no later command's output looks wrong.
+        rule="posting never overwrites an id that is already on disk",
+        old="    if target.exists():",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="one clock reading is used for both the id and the recorded time",
+        old="    at = at or store.now()",
+        new="    at = store.now()",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the sender's cwd is recorded, which is all there is when the registry has no row",
+        old='        "from": {"cwd": str(cwd)},',
+        new='        "from": {"cwd": str(root)},',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the session id and the display name are not each other",
+        old='        record["from"]["session_id"] = session_id',
+        new='        record["from"]["name"] = session_id',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="a posted handoff is open",
+        old='        "status": OPEN,',
+        new='        "status": CLOSED,',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="a status that is not one of the three is refused before anything is read",
+        old="    if status not in STATUSES:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="an id with no record on disk is named as missing",
+        old="    if record is None:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # Refusing rather than repairing. Appending to a record whose halves disagree would make
+        # this module the author of a history it cannot vouch for.
+        rule="a record whose status contradicts its history is not moved",
+        old="    if disagreement:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the current status comes from the history, not from the stated field alone",
+        old="    current, disagreement = state_of(record)",
+        new='    current, disagreement = record.get("status"), None',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # Not a no-op worth absorbing: either the caller is reading a stale render or two sessions
+        # are answering the same thing, and a second identical entry would hide both.
+        rule="a move to the status it already has is refused",
+        old="    if current == status:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the history entry records the status moved to, not the one left behind",
+        old='    entry = {"at": at or store.now(), "status": status}',
+        new='    entry = {"at": at or store.now(), "status": current}',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="a move appends to the history rather than replacing it",
+        old='    record["history"] = [*record.get("history", []), entry]',
+        new='    record["history"] = [entry]',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The whole reason there is one write rather than two: `status` is taken from the entry just
+        # appended, so the two halves cannot be left disagreeing by a failure in between.
+        rule="the stated status is taken from the entry that was just appended",
+        old='    record["status"] = entry["status"]',
+        new='    record["status"] = record["status"]',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="who made the move is kept, which is most of what a history is for",
+        old='        entry["by"] = by',
+        new='        entry["note"] = by',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="an empty history is not a disagreement",
+        old="    if not history:",
+        new="    if history:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # A record with one entry cannot tell these apart, which is why the clean fixture has two.
+        rule="the status is compared against the last history entry, not the first",
+        old='    last = history[-1].get("status")',
+        new='    last = history[0].get("status")',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="a status contradicting the history is reported",
+        old="    if last != stated:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # Dropping the row would hide a handoff, which is worse than showing one whose state is in
+        # question. A caller rendering a list has to be able to show the row *and* the fault.
+        rule="the status is still returned alongside the problem",
+        old="        return stated, (",
+        new="        return None, (",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="load_all reports the disagreement rather than only the parse failures",
+        old="        if problem:\n            problems.append(problem)",
+        new="        if problem:\n            pass",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and keeps the record it is complaining about",
+        old="    return records, problems",
+        new="    return [], problems",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="a narrowed scope is described with the paths that narrow it",
+        old="    return f\"{to['repo']}: {', '.join(paths)}\" if paths else to[\"repo\"]",
+        new='    return to["repo"]',
+        caught_by="test_handoffs.py",
+    ),
+]
+
 TABLES = {
     "claims": CLAIMS,
     "exchange_root": EXCHANGE_ROOT,
+    "handoffs": HANDOFFS,
     "hook": HOOK,
     "hookio": HOOKIO,
     "legacy": LEGACY,

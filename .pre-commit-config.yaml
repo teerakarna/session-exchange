@@ -20,9 +20,9 @@
 #   that interrupts a train of small commits gets uninstalled, and an uninstalled gate is weaker
 #   than a slower one.
 #
-# The mutation sweep is in neither. It is 45 mutations and just over two minutes today and grows with
-# every table added, so it belongs where nobody is waiting on it: narrowed to what changed in `ci`,
-# and in full weekly. `CONTRIBUTING.md` has the arithmetic.
+# The mutation sweep is in neither. It is minutes rather than seconds and grows with every table
+# added, so it belongs where nobody is waiting on it: narrowed to what changed in `ci`, and in full
+# weekly. `CONTRIBUTING.md` has the arithmetic and the only count worth keeping current.
 minimum_pre_commit_version: "4.0.0"
 
 # So that `pre-commit install` with no arguments wires both stages. Without it only `pre-commit` is
