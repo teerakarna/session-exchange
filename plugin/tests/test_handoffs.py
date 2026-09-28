@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Handoffs: the write path, and the one disagreement it refuses to resolve.
+"""Handoffs: the write path, and the one ambiguity it refuses to resolve.
 
-The first thing in this plugin that writes state a *different* session reads, so the two rules in
+The first thing in this plugin that writes state a *different* session reads, so the rules in
 `handoffs.py` are asserted here by breaking them rather than by describing them:
 
 - Posting never overwrites. An id already on disk is a refusal, because keeping one of two handoffs
   is invisible at both ends - the sender saw it posted, the recipient never had it to miss.
-- `status` is derived from `history` in one write, and a record where the two disagree is reported
-  rather than repaired. Guessing which half is stale is how a closed handoff comes back open.
+- A status move is its own file and the handoff record never changes, so two sessions moving one
+  handoff at the same moment both get their move recorded rather than one of them losing it.
+- Order comes from `after`, one past the highest position a writer read, and never from the clock.
+  The clock records seconds, and accepting then closing inside one second is ordinary.
+- Two moves at the same position that disagree are reported, not resolved, at whatever position they
+  sit and not only the newest. Guessing which came first is how a closed handoff comes back open.
 """
 
 import json
@@ -103,10 +107,19 @@ with tempfile.TemporaryDirectory() as tmp:
     sender = root / "repo" / "somewhere"
 
     record, problem = handoffs.post(root, to, "first", sender, handoff_id="fixed-id")
-    check("a handoff is written and handed back", (problem, record["status"]), (None, "open"))
-    # A single entry restating `created` and `open` is not a record of anything, and an absent
-    # history is unambiguous: never changed since it was posted.
-    check("with no history at all", "history" in record, False)
+    check(
+        "a handoff is written and handed back, and reads as open",
+        (problem, handoffs.state_of(root, "fixed-id")),
+        (None, ("open", [])),
+    )
+    # Not a field on the record, and not a first move restating `created` and `open` either. An
+    # empty transitions directory is unambiguous: never changed since it was posted.
+    check("with no status in it", "status" in record, False)
+    check(
+        "and no moves beside it either",
+        store.transitions_dir(root, "fixed-id").exists(),
+        False,
+    )
 
     second, problem = handoffs.post(root, to, "second", sender, handoff_id="fixed-id")
     # `problem or ""` rather than `problem`. When this rule is the one that broke, `problem` is
@@ -160,37 +173,61 @@ with tempfile.TemporaryDirectory() as tmp:
         ("2026-01-02T03:04:05Z", True),
     )
 
-print("status moves, in one write, with history as the record")
+print("a status move is its own file, and the record it moves is never touched")
 
 with tempfile.TemporaryDirectory() as tmp:
     root = rooted(tmp)
-    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    posted, _ = handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
 
-    record, problem = handoffs.set_status(root, "h1", handoffs.ACCEPTED, by="me", note="mine now")
-    check(
-        "accepting appends one entry and takes the status off it",
-        (problem, record["status"], [e["status"] for e in record["history"]]),
-        (None, "accepted", ["accepted"]),
+    # Both moves are given the same `at` explicitly. Two calls in a row share a second in practice
+    # almost always, which is not the same as always: a check that only sometimes exercises the case
+    # it is named after passes on the runs where it tested nothing.
+    same_second = "2026-01-02T03:04:05Z"
+    move, problem = handoffs.set_status(
+        root, "h1", handoffs.ACCEPTED, by="me", note="mine now", at=same_second
     )
     check(
-        "keeping who and why, which is the whole reason history exists",
-        (record["history"][-1]["by"], record["history"][-1]["note"]),
+        "accepting writes one move, at position zero, and hands it back",
+        (problem, move["status"], move["after"]),
+        (None, "accepted", 0),
+    )
+    check(
+        "keeping who and why, which is the whole reason the moves are kept at all",
+        (move["by"], move["note"]),
         ("me", "mine now"),
     )
-
-    record, problem = handoffs.set_status(root, "h1", handoffs.CLOSED)
+    check("and the handoff reads as accepted", handoffs.state_of(root, "h1"), ("accepted", []))
+    # The point of the whole shape. The sender wrote this file and nothing else ever writes it, so
+    # there is no second copy of the status to contradict the moves and no read-modify-write to lose
+    # a concurrent one.
     check(
-        "closing appends rather than rewriting",
-        [e["status"] for e in record["history"]],
+        "while the record on disk is byte-for-byte what post wrote",
+        json.loads(handoffs.path(root, "h1").read_text()),
+        posted,
+    )
+
+    move, problem = handoffs.set_status(root, "h1", handoffs.CLOSED, at=same_second)
+    check("closing adds a second move rather than replacing the first", move["after"], 1)
+    check(
+        "so both moves are on disk, in order",
+        [e["status"] for e in handoffs.transitions(root, "h1")[0]],
         ["accepted", "closed"],
+    )
+    # The bug that `after` exists for. `store.now()` records seconds, so accepting and then
+    # closing inside one second is ordinary, and the first version of this sorted the directory by
+    # a name built from that timestamp - which left the order to the random suffix and read a
+    # closed handoff back as accepted about half the time.
+    check(
+        "the clock does not decide the order, and here it cannot: both moves share a second",
+        (handoffs.state_of(root, "h1"), {e["at"] for e in handoffs.transitions(root, "h1")[0]}),
+        (("closed", []), {same_second}),
     )
 
     # Not absorbed as a no-op: either the caller is reading a stale render or two sessions are
-    # answering the same thing, and a second identical entry would hide both.
-    record, problem = handoffs.set_status(root, "h1", handoffs.CLOSED)
-    check("the status it already has is refused", (record, problem), (None, "h1 is already closed"))
-    on_disk = json.loads(handoffs.path(root, "h1").read_text())
-    check("and nothing was appended", len(on_disk["history"]), 2)
+    # answering the same thing, and a second identical move would hide both.
+    move, problem = handoffs.set_status(root, "h1", handoffs.CLOSED)
+    check("the status it already has is refused", (move, problem), (None, "h1 is already closed"))
+    check("and nothing was written", len(handoffs.transitions(root, "h1")[0]), 2)
 
     check(
         "a status that is not one of the three is refused before any read",
@@ -199,69 +236,284 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     # `or ""` for the same reason as the overwrite check above - and this one was missed when
     # that one was fixed. The rules that make this return a problem are the rules a mutation
-    # breaks, and a `TypeError` here would stop the file before the disagreement section runs.
+    # breaks, and a `TypeError` here would stop the file before the ambiguity section runs.
     check(
         "an id with no record is named",
         "no handoff with id h2" in (handoffs.set_status(root, "h2", handoffs.OPEN)[1] or ""),
         True,
     )
+    # A move filed under an id nothing posted is a status for a handoff no reader will go looking
+    # for. Asserted on the filesystem rather than on the message, because the refusal has to happen
+    # before the write, not instead of reporting it.
+    check(
+        "and nothing was written under it either",
+        store.transitions_dir(root, "h2").exists(),
+        False,
+    )
 
-print("a record whose two halves disagree is reported, never resolved")
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    # Two names that sort the wrong way round on purpose. The name is there for a human listing the
+    # directory; `after` is the ordering, and the two are only kept in step by this module writing
+    # both of them. A hand-edited name, or one left by the version that ordered by filename, must
+    # not be able to reorder the moves - which is the bug, exactly, restaged as a check.
+    moves = store.transitions_dir(root, "h1")
+    misnamed = (("0009-aaa", handoffs.ACCEPTED, 0), ("0001-bbb", handoffs.CLOSED, 1))
+    for name, status, after in misnamed:
+        store.create_json(
+            moves / f"{name}.json",
+            {"at": store.now(), "status": status, "after": after},
+            handoffs.TRANSITION,
+        )
+    check(
+        "the filename does not order the moves; the position their writer recorded does",
+        (handoffs.state_of(root, "h1"), [e["status"] for e in handoffs.transitions(root, "h1")[0]]),
+        (("closed", []), ["accepted", "closed"]),
+    )
+
+print("two moves made against the same state are reported, never resolved")
 
 with tempfile.TemporaryDirectory() as tmp:
     root = rooted(tmp)
     handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
     handoffs.set_status(root, "h1", handoffs.CLOSED)
 
-    path = handoffs.path(root, "h1")
-    tampered = json.loads(path.read_text())
-    tampered["status"] = handoffs.OPEN
-    path.write_text(json.dumps(tampered))
+    # What two genuinely concurrent sessions produce: both read zero moves, both write position
+    # zero, and neither write is lost because neither is a rewrite of the other's file. Forged
+    # here because a test cannot race two processes reliably, and the state on disk is the same
+    # either way.
+    forged = handoffs.transition_path(root, "h1", 0)
+    store.create_json(
+        forged, {"at": store.now(), "status": handoffs.ACCEPTED, "after": 0}, handoffs.TRANSITION
+    )
 
-    status, problem = handoffs.state_of(tampered)
+    status, problems = handoffs.state_of(root, "h1")
     check(
-        "state_of names both halves, so a reader knows which file to go and look at",
+        "state_of names the position and both statuses, so a reader knows what to go and look at",
         (
-            problem is not None,
-            *(s in (problem or "") for s in ("'open'", "'closed'", "h1")),
+            len(problems),
+            *(s in (problems[0] if problems else "") for s in ("position 0", "'accepted'", "h1")),
         ),
-        (True, True, True, True),
+        (1, True, True, True),
     )
     # Still returned alongside the problem. A caller rendering a list has to be able to show the row
     # *and* the fault: dropping it would hide a handoff, which is worse than showing a doubtful one.
-    check("while still returning the stated status", status, "open")
+    check("while still returning a status", status in handoffs.STATUSES, True)
 
-    records, problems = handoffs.load_all(root)
+    stored, problems = handoffs.load_all(root)
+    check("load_all reports it and keeps the row", (len(stored), len(problems)), (1, 1))
     check(
-        "load_all reports it and keeps the row",
-        (len(records), len(problems)),
-        (1, 1),
-    )
-    check(
-        "a move on it is refused rather than appending to a history it cannot vouch for",
-        handoffs.set_status(root, "h1", handoffs.ACCEPTED)[0],
+        "a move on it is refused rather than filed after a position that has no last entry",
+        handoffs.set_status(root, "h1", handoffs.OPEN)[0],
         None,
     )
-    on_disk = json.loads(path.read_text())
-    check("leaving the file exactly as it was found", on_disk, tampered)
+    check("leaving the two moves as they were found", len(handoffs.transitions(root, "h1")[0]), 2)
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    # Two closes at one position, not two different statuses. Both are true and the handoff is
+    # closed either way, so this is the one concurrent case with nothing to report - and it must not
+    # be reported, or every ordinary double-close would show a fault.
+    handoffs.set_status(root, "h1", handoffs.CLOSED)
+    duplicate = handoffs.transition_path(root, "h1", 0)
+    # The write is checked, and so is the count. Without both, this check passes with one move on
+    # disk, because one close also reads back as `("closed", [])` - it would be named after the
+    # concurrent case and never exercise it.
+    check(
+        "a second move at a position that already holds one is written, not refused",
+        store.create_json(
+            duplicate,
+            {"at": store.now(), "status": handoffs.CLOSED, "after": 0},
+            handoffs.TRANSITION,
+        ),
+        None,
+    )
+    check("so there are two of them", len(handoffs.transitions(root, "h1")[0]), 2)
+    check(
+        "two identical moves at one position agree, so nothing is wrong",
+        handoffs.state_of(root, "h1"),
+        ("closed", []),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    # A contested position with a later move sitting on top of it. The first version compared every
+    # move against the *last* move's position, so this disagreement was reported while it was the
+    # newest thing on disk and then vanished the moment anything landed after it: two sessions had
+    # moved one handoff two ways and `list` went back to showing a row with nothing beside it.
+    moves = store.transitions_dir(root, "h1")
+    buried = (
+        ("0000-aaa", handoffs.ACCEPTED, 0),
+        ("0000-bbb", handoffs.CLOSED, 0),
+        ("0001-ccc", handoffs.OPEN, 1),
+    )
+    for name, status, after in buried:
+        store.create_json(
+            moves / f"{name}.json",
+            {"at": store.now(), "status": status, "after": after},
+            handoffs.TRANSITION,
+        )
+    status, problems = handoffs.state_of(root, "h1")
+    check(
+        "a disagreement is still reported once a later move has settled the status",
+        (status, len(problems), "position 0" in (problems[0] if problems else "")),
+        ("open", 1, True),
+    )
+    # And it does not freeze the handoff. The last position holds one move, so the current status is
+    # knowable, and refusing to move on from it would strand the handoff for good over a race that
+    # has already been superseded - with no verb anywhere to unstrand it.
+    check(
+        "while a settled last position can still be moved on from",
+        handoffs.set_status(root, "h1", handoffs.CLOSED)[1],
+        None,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    # Two concurrent accepts at position 0 - the blessed case, both true, nothing to report. What
+    # is under test is the number the *next* writer picks. Counting the files read gives 2 here,
+    # while a session that had read only one of the two would give 1, so two writers acting on the
+    # same status would file at different positions and neither would ever be seen as concurrent.
+    # One past the highest position read gives both of them 1, which is what makes the tie
+    # detectable.
+    handoffs.set_status(root, "h1", handoffs.ACCEPTED)
+    store.create_json(
+        handoffs.transition_path(root, "h1", 0),
+        {"at": store.now(), "status": handoffs.ACCEPTED, "after": 0},
+        handoffs.TRANSITION,
+    )
+    move, _ = handoffs.set_status(root, "h1", handoffs.CLOSED)
+    check(
+        "a move files one past the highest position read, not the number of moves read",
+        (move["after"], len(handoffs.transitions(root, "h1")[0])),
+        (1, 3),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    handoffs.set_status(root, "h1", handoffs.ACCEPTED)
+    # A move that will not parse. It could be the latest one, so the status in hand may not be the
+    # current one, and a move computed from it could take a closed handoff back to open. Nothing in
+    # this module writes a file like this, which is why it has to be forged - and until it was, both
+    # the refusal and the reporting were unfalsifiable: a mutation dropping the unreadable half of
+    # the guard left the whole suite green.
+    (store.transitions_dir(root, "h1") / "0001-bad.json").write_text("{ truncated")
+    status, problems = handoffs.state_of(root, "h1")
+    check(
+        "an unreadable move is reported, and the status still comes back",
+        (status, len(problems)),
+        ("accepted", 1),
+    )
+    # Named for the handoff, not only for the file. A move file carries no id and its name is a
+    # position, so `0001-bad.json could not be read` points at nothing anyone can go and look at,
+    # and two handoffs with one bad move each would produce two identical lines.
+    check(
+        "and the problem names the handoff it belongs to",
+        problems[0].startswith("h1: 0001-bad.json") if problems else False,
+        True,
+    )
+    check(
+        "a further move is refused rather than computed from the moves that did read",
+        handoffs.set_status(root, "h1", handoffs.CLOSED),
+        (None, problems[0] if problems else ""),
+    )
+    check(
+        "leaving what was there alone",
+        len(list(store.transitions_dir(root, "h1").glob("*.json"))),
+        2,
+    )
+
+print("a moves directory is a name in its own right")
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    handoffs.set_status(root, "h1", handoffs.CLOSED)
+    # A moves directory outliving its record. `rm handoffs/<id>.json` does it, and nothing iterates
+    # directories, so what is left is invisible: `load_all` reads records and finds none.
+    handoffs.path(root, "h1").unlink()
+    check("an orphaned moves directory is read by nothing", handoffs.load_all(root), ([], []))
+    # Posting into it would hand a brand-new handoff the old one's status the moment it was
+    # written - posted, exit 0, and it reads as closed - so a taken moves directory is a refusal
+    # in the same way a taken record is.
+    fresh, problem = handoffs.post(root, {"repo": "repo"}, "fresh", root, handoff_id="h1")
+    check(
+        "and posting over one is refused rather than inheriting its status",
+        (fresh, "already has moves" in (problem or "")),
+        (None, True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    # An id with a dot in it, which `SAFE_ID` allows and `new_id` never produces - but
+    # `handoff_id` is an argument, and the ledger importer is its declared next caller. The moves
+    # directory was first named after the bare id, so this id put a directory called `note.json`
+    # exactly where a record of the id `note` goes: every read reported "Is a directory" for good,
+    # and posting `note` was refused for colliding with a name nobody had written. `.d` cannot be
+    # a record's name, so the two namespaces cannot overlap whatever the id is.
+    _, problem = handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="note.json")
+    handoffs.set_status(root, "note.json", handoffs.ACCEPTED)
+    check(
+        "an id ending in .json keeps its moves out of the records",
+        (problem, handoffs.load_all(root)[1], handoffs.state_of(root, "note.json")),
+        (None, [], ("accepted", [])),
+    )
+    check(
+        "and leaves the record of a plainer id free to be posted",
+        handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="note")[1],
+        None,
+    )
 
 with tempfile.TemporaryDirectory() as tmp:
     root = rooted(tmp)
     record, _ = handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
     check(
-        "no history and a stated status is not a disagreement",
-        handoffs.state_of(record),
-        ("open", None),
+        "no moves at all is open, with nothing to report",
+        handoffs.state_of(root, "h1"),
+        ("open", []),
     )
-    # Two entries, not one. With a single entry the first and the last are the same object, so a
-    # reader comparing `status` against the wrong end of the history agrees with itself.
     handoffs.set_status(root, "h1", handoffs.ACCEPTED)
     handoffs.set_status(root, "h1", handoffs.CLOSED)
-    records, problems = handoffs.load_all(root)
+    stored, problems = handoffs.load_all(root)
     check(
-        "and a record this module wrote reads back clean, however long its history",
-        (len(records), problems),
-        (1, []),
+        "and a handoff this module wrote reads back clean, however many times it moved",
+        (stored, problems),
+        ([(record, "closed")], []),
+    )
+
+    # The id inside the file is what finds the moves, so it has to be the name the file was read
+    # from. A hand-edited id looks under a directory that does not exist, `state_of` says open,
+    # and a closed handoff quietly comes back.
+    path = handoffs.path(root, "h1")
+    renamed = json.loads(path.read_text())
+    renamed["id"] = "h9"
+    path.write_text(json.dumps(renamed))
+    stored, problems = handoffs.load_all(root)
+    # `problems[0] if problems else ""` rather than `problems[0]`, for the same reason the `or ""`
+    # above exists: when this is the rule that broke there is no problem to index, and an IndexError
+    # reports one broken rule as a broken file.
+    check(
+        "an id that does not name its own file is reported, with the row still shown",
+        (len(stored), len(problems), "not named after" in (problems[0] if problems else "")),
+        (1, 1, True),
+    )
+
+    # The other half of the same rule, and the half a stat cannot see. Copying a record leaves two
+    # files whose ids are both real, so `<id>.json is a file` passes for both - and there is no way
+    # to tell which of the two the row on screen came out of. Two inputs that agree cannot say which
+    # one was read, which is this repo's recurring shape.
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), id="h1")))
+    (store.handoffs_dir(root) / "h1-copy.json").write_text(path.read_text())
+    stored, problems = handoffs.load_all(root)
+    check(
+        "and so is a second file holding an id that already names one",
+        (len(stored), len(problems), "h1-copy.json" in (problems[0] if problems else "")),
+        (2, 1, True),
     )
 
 print()

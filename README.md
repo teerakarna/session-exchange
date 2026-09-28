@@ -65,13 +65,14 @@ State under a root:
 |---|---|---|
 | Hooks and CLI | JSON, schema'd | `<root>/.claude/exchange/sessions/<session_id>.json` |
 | Hooks and CLI | JSON, schema'd | `<root>/.claude/exchange/handoffs/<id>.json` |
+| Hooks and CLI | JSON, schema'd | `<root>/.claude/exchange/handoffs/<id>.d/<after>-<suffix>.json` |
 | Humans and sessions | Markdown | `<root>/.claude/exchange/EXCHANGE.md` |
 
 One file per writer, never a shared append target: concurrent writers otherwise contend, and it is also
-why a claim needs no lock, since the only writer of a session's claim is that session. That last part
-stops at claims. A handoff has two writers - the sender, and whichever session accepts or closes it -
-so the argument does not cover the handoff directory, and #44 is the open question of what it needs
-instead. No regex ever
+why nothing here needs a lock. A claim has one writer by nature - the session it describes. A handoff
+has two, the sender and whichever session accepts or closes it, which is why a status change is a file
+of its own under `handoffs/<id>.d/` rather than a field the second writer edits into the first one's
+file. The record is written once and never again. No regex ever
 parses hand-typed structure again. The markdown keeps narrative, decisions and history, which is what a
 ledger is genuinely good at.
 
@@ -173,11 +174,19 @@ EOF
 ```
 
 Posting never overwrites: an id already on disk is a refusal, because a silently dropped handoff is
-invisible at both ends. `accept` and `close` are separate verbs rather than a `--status` flag, so
-taking something on cannot be typed as finishing it, and each move is appended to the record's
-history with the status read back off the entry that was just written. A record whose `status`
-contradicts its own history is reported and left alone rather than repaired, because nothing here
-wrote it and guessing which half is stale is how a closed handoff comes back open.
+invisible at both ends. The refusal is the filesystem's rather than a check the code runs first, since
+a check and then a write has a window in between that two senders can both fit through.
+
+`accept` and `close` are separate verbs rather than a `--status` flag, so taking something on cannot be
+typed as finishing it. Each move is a new file under `handoffs/<id>.d/`, and the status of a handoff
+is the last of them - nothing rewrites the record, so two sessions moving one handoff at the same
+moment both get their move recorded instead of one of them silently losing it. The ordering is one past
+the highest position the writer read, not the clock: timestamps here are seconds, and accepting then
+closing inside one second is ordinary. One past the highest, rather than a count of the moves read, so
+that two writers acting on the same state land on the same number - which is the only thing that makes
+a concurrent pair detectable, and a count stops matching the position as soon as one pair exists. Two
+moves made against the same state are reported and left alone rather than resolved, at whatever
+position they sit, because guessing which came first is how a closed handoff comes back open.
 
 Writes stay at the terminal rather than behind a tool the model can call. Reads are pushed by hooks,
 because a read surface that has to be asked for would reintroduce the exact failure this replaces,
@@ -231,7 +240,7 @@ back in through the test suite.
 python3 plugin/tests/run.py
 ```
 
-555 checks, plus 841 more from the table accounting - about five per mutation, not one - and no
+588 checks, plus 893 more from the table accounting - about five per mutation, not one - and no
 install step.
 `test_handoff_parser.py` exercises the legacy hook still running on one machine and **skips** if it is
 absent, so the suite is green on a machine that never had it. It is here because the port has to keep

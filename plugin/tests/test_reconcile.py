@@ -65,24 +65,31 @@ def record_of(entry, ident="h"):
     exist yet.
 
     Deliberately assembled here rather than in `reconcile`: this PR keys and dedupes, and a record
-    builder living in the library would be the write path arriving early and untested. The three
-    fields the dedupe actually reads - `status`, `body`, `imported` - come from the library, so the
+    builder living in the library would be the write path arriving early and untested. The two
+    fields the dedupe reads off the record - `body` and `imported` - come from the library, so the
     test cannot accidentally agree with itself about them.
+
+    No `status`: since #44 it is not a field, and the schema refuses one. It travels beside the
+    record instead, which is what `held_of` builds.
     """
     return {
         "id": ident,
         "from": {"cwd": "/tmp/somewhere"},
         "to": {"repo": "somewhere"},
         "created": "2026-01-01T00:00:00Z",
-        "status": reconcile.status_of(entry),
         "body": reconcile.body_of(entry),
         "imported": reconcile.imported_of(entry),
     }
 
 
+def held_of(entry, ident="h"):
+    """A stored row as `handoffs.load_all` hands it over: a record, and its moves' status."""
+    return record_of(entry, ident), reconcile.status_of(entry)
+
+
 def records_of(text):
     rows, _ = ledger.entries(text)
-    return [record_of(row, f"h{n}") for n, row in enumerate(rows) if not row.closed]
+    return [held_of(row, f"h{n}") for n, row in enumerate(rows) if not row.closed]
 
 
 print("a first import of the census fixture")
@@ -340,7 +347,7 @@ PAIR = "one handoff, written two ways round"
 FORWARD = SECTION + f"**[Lane E → Lane F]** 2026-02-04 — **{PAIR}.** **Status:** OPEN\n"
 BACKWARD = SECTION + f"**[Lane F ← Lane E]** 2026-02-04 — **{PAIR}.** **Status:** OPEN\n"
 both_ways = reconcile.reconcile(
-    ledger.entries(BACKWARD)[0], [record_of(ledger.entries(FORWARD)[0][0])]
+    ledger.entries(BACKWARD)[0], [held_of(ledger.entries(FORWARD)[0][0])]
 )
 check("so the same handoff written backwards is the same row", both_ways.create, [])
 check("and shows up as one update, not a second handoff", len(both_ways.update), 1)
@@ -420,7 +427,7 @@ check(
 check("and still keys", reconcile.key_of(undated) is None, False)
 check(
     "and reconciles against its own row without faulting",
-    len(reconcile.reconcile([undated], [record_of(undated)]).unchanged),
+    len(reconcile.reconcile([undated], [held_of(undated)]).unchanged),
     1,
 )
 
@@ -453,13 +460,13 @@ check(
 )
 check(
     "and the difference is reported, so the row gets rewritten into normal form",
-    sorted(reconcile.changes(dated, hand_edited)),
+    sorted(reconcile.changes(dated, hand_edited, reconcile.status_of(dated))),
     ["imported"],
 )
 
 # The state a hash-keyed importer leaves behind: the same handoff stored twice, the stale copy still
 # open. It cannot be repaired by a better key alone, so it has to be said out loud.
-doubled = reconcile.reconcile(census, [*stored, dict(record_of(dated), id="h-again")])
+doubled = reconcile.reconcile(census, [*stored, (dict(record_of(dated), id="h-again"), "open")])
 check(
     "two stored rows sharing a key are reported, not silently picked between",
     [p for p in doubled.problems if "stored rows" in p],
@@ -477,7 +484,7 @@ check("the padding landed in the block", padded[0].block.endswith("   "), True)
 check("but not in the body", reconcile.body_of(padded[0]), reconcile.body_of(plain[0]))
 check(
     "so a file touched only by a stray space at the end updates nothing",
-    reconcile.reconcile(padded, [record_of(plain[0])]).update,
+    reconcile.reconcile(padded, [held_of(plain[0])]).update,
     [],
 )
 
@@ -494,11 +501,10 @@ native = {
     "from": {"cwd": "/tmp/somewhere", "session_id": "abc-123"},
     "to": {"repo": "somewhere"},
     "created": "2026-03-05T00:00:00Z",
-    "status": "open",
     "body": "posted through the normal path, never imported from anything",
 }
 check("a natively posted row has no importer key", reconcile.key_of_record(native), None)
-native_plan = reconcile.reconcile(census, [*stored, native])
+native_plan = reconcile.reconcile(census, [*stored, (native, "open")])
 check("so the importer does not orphan it", native_plan.orphan, [])
 check("does not update it", len(native_plan.update), 0)
 check("and does not report it as a problem", native_plan.problems, [])
@@ -506,7 +512,7 @@ check("and does not report it as a problem", native_plan.problems, [])
 print()
 print("a row whose source is gone, and a date that appears later")
 
-gone = record_of(entry_with(SHAPES, "reversed arrow"), "from-another-file")
+gone = held_of(entry_with(SHAPES, "reversed arrow"), "from-another-file")
 orphaned = reconcile.reconcile(census, [*stored, gone])
 check("a stored row with no live entry is reported", len(orphaned.orphan), 1)
 check("named, so it can be looked at", orphaned.orphan[0]["id"], "from-another-file")
@@ -522,7 +528,7 @@ DATED = UNDATED.replace("Lane G]** —", "Lane G]** 2026-03-04 —")
 undated_rows, _ = ledger.entries(UNDATED)
 dated_rows, _ = ledger.entries(DATED)
 check("the edit added a date", (undated_rows[0].date, dated_rows[0].date), (None, "2026-03-04"))
-rekeyed = reconcile.reconcile(dated_rows, [record_of(undated_rows[0])])
+rekeyed = reconcile.reconcile(dated_rows, [held_of(undated_rows[0])])
 check("adding a date re-keys, so the row duplicates", len(rekeyed.create), 1)
 check(
     "and the old one is reported as orphaned rather than left unexplained", len(rekeyed.orphan), 1

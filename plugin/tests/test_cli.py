@@ -398,16 +398,20 @@ with tempfile.TemporaryDirectory() as tmp:
     first = posted_id(out)
     check("a body on stdin is posted", (code, (store_dir / f"{first}.json").is_file()), (0, True))
     written = json.loads((store_dir / f"{first}.json").read_text())
+    # `.d`, not the bare id: an id may contain a dot, and a directory named after the bare id would
+    # then sit exactly where another id's record goes.
+    moves = store_dir / f"{first}.d"
     check(
-        "recorded whole, as the caller, with no history yet",
+        "recorded whole, as the caller, with no state in the record and no moves beside it",
         (
-            written["status"],
             written["from"]["name"],
             written["to"],
+            "status" in written,
             "history" in written,
+            moves.exists(),
             written["body"].endswith("see `doctor`"),
         ),
-        ("open", "the-caller", {"repo": "repo", "paths": ["plugin/lib"]}, False, True),
+        ("the-caller", {"repo": "repo", "paths": ["plugin/lib"]}, False, False, False, True),
     )
 
     code, out = run(home, repo, "handoff", "list")
@@ -419,11 +423,20 @@ with tempfile.TemporaryDirectory() as tmp:
 
     code, out = run(home, repo, "handoff", "accept", first, "--note", "taking it")
     check("accept moves it without closing it", (code, "is now accepted" in out), (0, True))
-    written = json.loads((store_dir / f"{first}.json").read_text())
+    # Read off the filesystem rather than through `handoffs`, because the point is the layout: one
+    # new file under the id, and the record the sender wrote left exactly as it was.
+    recorded = [json.loads(p.read_text()) for p in sorted(moves.glob("*.json"))]
     check(
-        "and the move is recorded once, with status read off the entry",
-        (written["status"], [e["status"] for e in written["history"]], written["history"][0]["by"]),
-        ("accepted", ["accepted"], "the-caller"),
+        "by writing one move beside the record rather than into it",
+        (
+            [e["status"] for e in recorded],
+            # `.get` through an index that may not exist. When the rule under test is the one that
+            # broke there is no move to index, and an IndexError would report one broken rule as a
+            # broken test file and take the rest of this fixture down with it.
+            recorded[0].get("by") if recorded else None,
+            json.loads((store_dir / f"{first}.json").read_text()) == written,
+        ),
+        (["accepted"], "the-caller", True),
     )
 
     code, out = run(home, repo, "handoff", "close", first)
@@ -434,43 +447,63 @@ with tempfile.TemporaryDirectory() as tmp:
     check("--all brings it back", first in out, True)
 
     # Closing a closed handoff is not absorbed as a no-op: it means a stale render or two sessions
-    # answering the same thing, and a second identical history entry would hide both.
+    # answering the same thing, and a second identical move would hide both.
     code, out = run(home, repo, "handoff", "close", first)
     check("closing it again is refused", (code, "already closed" in out), (1, True))
-    written = json.loads((store_dir / f"{first}.json").read_text())
-    check("and no second entry was appended", len(written["history"]), 2)
+    check("and no third move was written", len(list(moves.glob("*.json"))), 2)
 
     code, out = run(home, repo, "handoff", "accept", "no-such-id")
     check("an unknown id is named, not swallowed", (code, "no handoff" in out), (1, True))
 
 with tempfile.TemporaryDirectory() as tmp:
-    # A record whose `status` and last history entry disagree was not written by this plugin. It is
-    # reported rather than resolved in favour of either half, and the row is still shown: dropping
-    # it would hide a handoff, which is worse than showing one whose state is in question.
+    # Two moves made against the same state - what two sessions closing one handoff at the same
+    # moment leave behind. Both are kept, because neither write is a rewrite of the other's file,
+    # and the contradiction is reported rather than resolved in favour of whichever sorted last.
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
     code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "first")
     handoff_id = posted_id(out)
     run(home, repo, "handoff", "close", handoff_id)
-    path = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json"
-    tampered = json.loads(path.read_text())
-    tampered["status"] = "open"
-    path.write_text(json.dumps(tampered))
+    moves = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.d"
+    forged = {"at": "2026-01-02T03:04:05Z", "status": "accepted", "after": 0}
+    (moves / "0000-forged.json").write_text(json.dumps(forged))
 
     code, out = run(home, repo, "handoff", "list")
     check(
-        "a status that contradicts its history is a fault, and the row is still shown",
-        (code, "something other than `exchange` wrote it" in out, handoff_id in out),
+        "two moves at one position are a fault, and the row is still shown",
+        (code, "position 0" in out, handoff_id in out),
         (1, True, True),
     )
     code, out = run(home, repo, "handoff", "accept", handoff_id)
     check(
-        "and a move is refused rather than appending to a history it cannot vouch for",
-        (code, "which half is stale" in out),
+        "and a move is refused rather than filed after a position with no last entry",
+        (code, "cannot be worked out" in out),
         (1, True),
     )
     code, out = run(home, repo, "show")
     check("show reports it too, rather than rendering a count over it", code, 1)
+
+with tempfile.TemporaryDirectory() as tmp:
+    # A record from before #44, with `status` and `history` in it. `additionalProperties` is false,
+    # so it is refused by name rather than half-read - the row leaves the list and a problem says
+    # which file and which key. The alternative was reading the record and ignoring the two
+    # fields, which would silently reopen every handoff that had been closed under the old shape.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "first")
+    handoff_id = posted_id(out)
+    path = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json"
+    legacy = json.loads(path.read_text())
+    legacy["status"] = "closed"
+    legacy["history"] = [{"at": legacy["created"], "status": "closed"}]
+    path.write_text(json.dumps(legacy))
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "a record carrying its own status is refused by name, not read around",
+        (code, "unexpected key 'status'" in out, "0 stored" in out),
+        (1, True, True),
+    )
 
 print("what is not built yet says so, and does not look like a failure")
 

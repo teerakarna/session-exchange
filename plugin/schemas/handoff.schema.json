@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/teerakarna/session-exchange/schemas/handoff.schema.json",
   "title": "Handoff",
-  "description": "`<root>/.claude/exchange/handoffs/<id>.json`. Addressed to a scope - a repo and optionally paths - or to one live session, never to a hand-typed lane name. That is the point: a lane vocabulary drifts, nothing says when it has, and the label in a script then has to agree with the label in a file nobody diffs. Two real handoffs were invisible for 9 and 3 days to exactly that. Scope addressing also works for a session that does not exist yet.",
+  "description": "`<root>/.claude/exchange/handoffs/<id>.json`. Addressed to a scope - a repo and optionally paths - or to one live session, never to a hand-typed lane name. That is the point: a lane vocabulary drifts, nothing says when it has, and the label in a script then has to agree with the label in a file nobody diffs. Two real handoffs were invisible for 9 and 3 days to exactly that. Scope addressing also works for a session that does not exist yet. Written once by the sender and never again: status lives in `handoffs/<id>/`, one file per change, per transition.schema.json. This file carried `status` and `history` until #44; because `additionalProperties` is false, a record written before that change is now refused by name rather than half-read, which is the intended direction for that breakage to travel.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "from", "to", "created", "status", "body"],
+  "required": ["id", "from", "to", "created", "body"],
   "properties": {
     "id": {
       "type": "string",
@@ -57,33 +57,10 @@
       "type": "string",
       "pattern": "^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
     },
-    "status": {
-      "type": "string",
-      "enum": ["open", "accepted", "closed"],
-      "description": "Accepting is explicitly not closing. A lane taking ownership is not the work being finished, and an accepted handoff with no later closure is exactly the state that should stay visible."
-    },
     "body": {
       "type": "string",
       "minLength": 1,
       "description": "Markdown. Never parsed for structure by anything."
-    },
-    "history": {
-      "type": "array",
-      "description": "Append-only by intent, and not yet by construction: see #44. Status changes in place - the ledger's own convention was acknowledge-in-place and it was the right one - so the previous state has to live somewhere or it is simply lost.",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["at", "status"],
-        "properties": {
-          "at": {
-            "type": "string",
-            "pattern": "^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
-          },
-          "status": { "type": "string", "enum": ["open", "accepted", "closed"] },
-          "by": { "type": "string" },
-          "note": { "type": "string" }
-        }
-      }
     },
     "imported": {
       "type": "object",
