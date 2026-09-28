@@ -39,13 +39,14 @@ Line coverage measures execution. What matters here is whether a wrong answer ge
 The third form is what CI runs per push, and the cost is why: a sweep is one full suite run per
 mutation, so its price is the mutation count times the length of the suite, and both halves grow.
 Not linear in the size of the tables, which is what this said until #43 and what sized a job at
-15 minutes for a sweep that then ran 15m15s and was canceled: a slow check added to a shared test
-file multiplies by every mutation in every table, so a table written for one module makes the sweep
-of all the others dearer too. The run prints the per-mutation figure at the end, so the estimate is
-measured rather than remembered - on whichever machine ran it, and against whatever the suite was
-that day. Both move: 5.2s per mutation locally at 191, 6.0s locally once this file's own tables and
-checks grew, 6.5s for the same 191 on a CI runner. The limit in `ci.yml` is a CI number for that
-reason, and comparing a figure from one machine against one from the other says nothing.
+15 minutes against a sweep measured at 14m51s, which then hit the limit and was canceled at 15m15s
+without finishing: a slow check added to a shared test file multiplies by every mutation in every
+table, so a table written for one module makes the sweep of all the others dearer too. The run
+prints the per-mutation figure at the end, so the estimate is measured rather than remembered - on
+whichever machine ran it, and that is as fine as the figure goes. Two CI resweeps of the same 191
+mutations, two commits apart, read 6.5s and 5.4s each, so the
+runner's own spread is wider than any difference worth attributing to a change in the suite. The
+limit in `ci.yml` is therefore sized off the slowest full resweep in the logs rather than the last.
 
 Narrowing it to the modules a change can actually have affected keeps the per-push cost flat, and
 the full sweep moves to a weekly schedule where the length of it does not matter. The narrowing only
@@ -136,9 +137,17 @@ BROAD = {"plugin/tests/test_cli.py"}
 #
 # Its own set because the `caught_by` branch would otherwise print "named by no mutation, so no
 # table maps this change" about it, which is true and useless: it reads as a table nobody has got
-# round to, and the only thing anyone could do about it is the one thing the harness forbids. On a
-# harness PR that note also appeared next to "every table is reswept", and the `targets` docstring
-# says a contradictory pair like that is what the `continue` above the loop exists to stop.
+# round to, and the only thing anyone could do about it is the one thing the harness forbids. It
+# still prints alongside "every table is reswept" on a harness PR, which the pair the `continue`
+# above the loop removes was not: "reswept" and "no table maps this" contradict each other, while
+# "reswept" and "this one path cannot be swept by anything" are both true and neither is the other's
+# answer. The line stays because it is the only thing that explains a path selecting no module.
+#
+# The set is also what `prepare` deletes and what `test_mutations.py` holds `caught_by` against. A
+# mutation naming a file in here would pass every check about the table - the file exists - and then
+# be scored a permanent survivor, because the copy the suite runs in does not have the file that was
+# supposed to object. Which is a red sweep on a rule that is asserted, the opposite defect to the
+# one the sweep is for, and the check for it was missing until review asked what enforced this.
 UNSWEEPABLE = {"plugin/tests/test_mutations.py"}
 
 
@@ -341,7 +350,13 @@ def prepare(scratch, mutation=None, mutated=None):
     # mutation did, which made the survivor branch unreachable for exactly the mutations the sweep
     # runs and left `caught_by` doing that job by accident. Removed for the sweep only; the baseline
     # run keeps it, which is where it is meaningful.
-    (scratch / "plugin" / "tests" / "test_mutations.py").unlink()
+    #
+    # Read off `UNSWEEPABLE` rather than naming the path again. The set and this line are one fact,
+    # and written twice they drift in both directions: a second entry in the set and `targets` says
+    # a file is deleted from every copy while the copy still has it, a deletion here and the note is
+    # wrong the other way round.
+    for path in sorted(UNSWEEPABLE):
+        (scratch / path).unlink()
 
 
 def run_suite(mutation=None):
@@ -430,7 +445,15 @@ def sections(out):
     and a raise is the one report this repo will not take: it kills the check that exists to catch
     the defect and every check after it, which is #42 one level up. Written this way the same edit
     returns a `None` bucket holding the preamble, which is a wrong answer, and a wrong answer is
-    what a check can object to."""
+    what a check can object to.
+
+    Which makes it the one line here no check can turn red on its own, and that is the trade rather
+    than an oversight: reverting it changes nothing for any input, and it changes what a *different*
+    deletion does. It costs something too. With a plain append, dropping the header branch's
+    `setdefault` raised KeyError on the first body line of the first file, so every caller noticed;
+    now it only changes the announced-and-silent case, and the whole of that rests on one check. A
+    check going red beats a traceback at an arbitrary caller, which is this file's own subject, so
+    both breaks landing on checks is the shape to want - but only while both checks exist."""
     found, current = {}, None
     for line in out.splitlines():
         header = re.match(r"^=== (\S+)$", line)

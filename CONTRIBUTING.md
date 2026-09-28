@@ -217,15 +217,20 @@ log. The sweep is in neither stage, for the arithmetic below.
 The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
 taste. A sweep is one full suite run per mutation, and every figure here is labelled with the count it
 was taken at, because a number that quietly re-labels itself as the tables grow is the whole problem:
-six tables was just over four minutes locally, eight was 144 mutations and eight and a half, and the
-ninth table was measured at 14m51s while it stood at 177 mutations. It is 191 now and sixteen and a
+six tables was 87 mutations and just over four minutes locally, eight was 144 and eight and a half, and
+the ninth table was measured at 14m51s while it stood at 177 mutations. It is 191 now and sixteen and a
 half. The ninth is why the figures are worth keeping: scaling the 144 at its own 3.5s per mutation
 would have predicted ten and a half at 177, and it took fifteen.
-Every figure in that sentence is a laptop. A CI runner swept 191 in 20m44s, 6.5s each, and that is not
-the 5.2s measurement with a different machine in front of it: the branch it ran on had lengthened the
-suite too, which reads 6.0s locally. Half a second is the runner and the rest is the checks added. So a
-local timing scaled straight into a `timeout-minutes` runs short before any table is added. Size the job
-off a CI log line, and keep both the machine and the count attached to the number.
+
+Every figure in that paragraph is a laptop, and the runner is a different measurement rather than the
+same one scaled. Two full resweeps of the same 191, two commits apart, came in at 20m44s and 17m08s -
+6.5s and 5.4s per mutation, the slower one on the shorter suite. A spread of a fifth that brackets every
+local figure at this count, so a per-mutation number here supports no attribution finer than "about six
+seconds on a runner", and the first reading of that pair claimed half a second of it was the machine and
+the rest the added checks. Size `timeout-minutes` off the slowest full resweep in the logs, not the
+latest one and not a laptop: 15 minutes was chosen off a laptop, and the sweep it was sized for ran to
+15m15s and was canceled.
+
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
 from 3.5s at 144 to 5.0s at 177, and is 5.2s at 191. That is already well past what a push should carry to

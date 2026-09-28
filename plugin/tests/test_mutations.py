@@ -138,6 +138,33 @@ for name, table in sorted(mutate.TABLES.items()):
             True,
         )
 
+# Existing is not enough, and this file is the counterexample. `prepare` deletes everything in
+# `UNSWEEPABLE` from the mutated copy, so a mutation naming one of those is caught by a file that is
+# not there: it passes the check above, survives every sweep, and gets reported as a rule nothing
+# asserts. A false survivor rather than a false catch, so it costs somebody an afternoon proving the
+# rule is fine rather than shipping a hole - but the whole value of the summary is that a line in it
+# means something, and the set claimed this in a comment with nothing holding it up.
+UNSWEEPABLE_NAMES = {path.rpartition("/")[2] for path in mutate.UNSWEEPABLE}
+# `prepare` unlinks each of these out of the copy, so a path that does not exist is a
+# FileNotFoundError out of every sweep rather than a verdict - the crash-instead-of-a-report shape
+# again, and out of the set rather than out of a module. Cheap gate first, so a wrong entry is one
+# red line here instead of a traceback 191 times on the slow job.
+check(
+    "every path the sweep deletes is a path that exists",
+    sorted(path for path in mutate.UNSWEEPABLE if not (mutate.REPO / path).is_file()),
+    [],
+)
+check(
+    "and not one the sweep deletes from the copy it runs in",
+    sorted(
+        f"{name}: {mutation.rule}"
+        for name, table in mutate.TABLES.items()
+        for mutation in table
+        if mutation.caught_by in UNSWEEPABLE_NAMES
+    ),
+    [],
+)
+
 print("and the harness refuses a mutation it cannot apply")
 
 # The defect the throwaway harness had, asserted directly. Scoring a non-matching mutation as "no

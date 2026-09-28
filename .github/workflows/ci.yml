@@ -257,12 +257,15 @@ jobs:
   # line rather than off someone dividing a job total by a count read out of the summary.
   #
   # That one is a laptop, and so is every figure above it except the runner paragraphs that say so.
-  # This job swept 191 in 1244s, 6.5s each, printed by the sweep itself on run 36395773935. Same count
-  # as the 5.2s figure and not the same measurement: the branch that produced it also lengthened the
-  # suite, which locally reads 6.0s per mutation. So the machine is worth about half a second and the
-  # added checks the rest, and a figure carried across either change is a guess. A local timing read
-  # straight into the limit below is short before a single mutation is added, which is close enough to
-  # look safe and is how 15 minutes got chosen for a sweep that ran 15m15s. Size it off this job.
+  # This job swept 191 in 1244s, 6.5s each, on run 36395773935, and then 191 in 1028s, 5.4s each, on
+  # 36399785524 - two commits apart, the second with the longer suite. Which is the whole lesson and
+  # not the two numbers: the runner's own spread is a fifth, it brackets every local figure taken at
+  # this count, and the first reading of this pair said the machine was worth half a second and the
+  # added checks the rest. That was a difference of two samples read as two causes, which is the same
+  # mistake the "four and a half to four and three quarters" paragraph above records. Nothing here
+  # supports attributing a per-mutation figure to anything, so the limit below is sized off the
+  # slowest full resweep observed rather than the latest, and a laptop figure is not a candidate at
+  # all: 15 minutes came from one, against a sweep that then ran to 15m15s and was canceled.
   #
   # And the narrowing did not narrow anything until #36, which is the change worth knowing about here
   # rather than any of the figures. The tables lived in `mutate.py`, `mutate.py` is instrument, and the
@@ -281,8 +284,9 @@ jobs:
   # The narrowing is in `mutate.py --since`, not in this file, so the same command is the local one.
   # `targets` there derives the module list, and it is wider than "the lib files that changed": a test
   # file maps to the modules its checks catch, because a deleted check is how a mutation stops being
-  # caught, a change to the harness or to what a table is resweeps everything, and so does a change to
-  # `test_cli.py`, which catches across every module while being no mutation's `caught_by` (#27).
+  # caught, a change to the harness, to what a table entry is or to which tables exist resweeps
+  # everything, and so does a change to `test_cli.py`, which catches across every module while being
+  # no mutation's `caught_by` (#27).
   #
   # Still unconditional, and it has to be: `ci` reads a `skipped` need as failure, so a job with an
   # `if:` on it would block `main` on every run where the condition was false. A change with nothing
@@ -291,8 +295,10 @@ jobs:
   # The full sweep lives in `sweep.yml`, weekly, where the length of it does not matter.
   #
   # Which is why the limit below is `sweep.yml`'s number and not a smaller one sized for the narrow
-  # case. The narrowing is not a bound: a change to the harness, to what a table is, or to
-  # `test_cli.py` widens it to every table, so this job runs the weekly sweep several times a quarter
+  # case. The narrowing is not a bound: a change to the harness, to what a table entry is, to which
+  # tables exist, or to `test_cli.py` widens it to every table - the same four the paragraph above
+  # gives, spelled out again because writing three of them here is what review caught - so this job
+  # runs the weekly sweep several times a quarter
   # and has to be able to finish it. #36 made that rarer, not impossible, and a limit sized for the
   # common case fails on exactly the PRs that most need the wide sweep to be believed.
   # Sizing it for the common case instead cost a day here. At 15 minutes against a 14m51s sweep, the
