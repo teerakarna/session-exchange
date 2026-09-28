@@ -233,8 +233,11 @@ jobs:
   # The runner figure this comment used to carry was "between four and a half and four and three
   # quarters", and the correction is about the range rather than the number. Four full resweeps of the
   # 87-mutation set came in at 3:02, 4:26, 4:40 and 4:57, so the spread is more like three to five
-  # minutes and a quarter-minute range was never supported by them - it was the tightest reading of
-  # three samples that happened to cluster.
+  # minutes and a quarter-minute range is not a reading of those four: only 4:40 falls inside it. This
+  # said the band was the tightest reading of three that clustered, which is a guess at how it came
+  # about dressed as the record. The band was here before any sample was written down beside it, and
+  # that is the whole of what is knowable - which is the argument for labelling a figure with the count
+  # and the machine at the time, rather than reconstructing it later.
   #
   # The figures for the eight tables are measurements rather than a range or a scaling. Two full
   # resweeps on the branch that filled them: 7m50s for 135 mutations, then 7m32s for all 138 (job
@@ -262,9 +265,10 @@ jobs:
   # 36395773935), 1028s (5.4s, 36399785524), 855s (4.5s, 36402302410). Which is the whole lesson and
   # not the numbers. The suite got longer across those three and the sweep got faster each time, so
   # the runner's own spread is nearly half and it swallows every local figure at this count. The first
-  # reading of the first two said the machine was worth half a second per mutation and the added
-  # checks the rest - two samples read as two causes, the same mistake the "four and a half to four
-  # and three quarters" paragraph above records, made against that paragraph. Nothing here supports
+  # reading was the 6.5s against a 6.0s laptop figure, and it called half a second the machine and the
+  # rest the added checks - one sample per cause, which cannot separate them, and the 5.4s resweep
+  # killed it. The same mistake the "four and a half to four and three quarters" paragraph above
+  # records, made against that paragraph. Nothing here supports
   # attributing a per-mutation figure to anything. The limit below is `sweep.yml`'s number rather than
   # anything derived from these, and what they are for is the floor it has to clear: the slowest full
   # resweep observed, never a laptop figure. 15 minutes came from one of those, against a sweep that

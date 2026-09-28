@@ -171,15 +171,19 @@ check(
 # file, which is the symptom three steps along, and this one says the set is empty.
 #
 # From `__file__` rather than typed out, so this is one fact and not a copy of one. `relpath` rather
-# than `relative_to`, and no scenario is being guarded here - two were claimed and both were wrong,
-# which is worth the lines it takes to say so. `REPO` comes from the resolved location of the
-# `mutate.py` this file imports off its own resolved parent, so the two paths are derived from one
-# place and move together: reaching this file through a symlink resolves the import root along with
-# it, and a copied tests tree brings its own `mutate.py`. Probed both. Splitting them needs a
-# symlinked `mutate.py`, which does not get as far as this check because `mutate` imports `tables`
-# off the entry point's path and fails first. So `relpath` costs nothing and cannot raise where
-# `relative_to` can, on a check whose job is to name a path. Same reason it is a list rather than
-# `in`: `got False, want True` does not say which path went missing after a rename.
+# than `relative_to`, which raises rather than reports when the resolved file is not under `REPO`.
+# One arrangement reaches this line that way, probed rather than reasoned about: this file run from
+# outside the tree with `mutate` found on `PYTHONPATH`, so `REPO` is the real repo and the file is
+# not in it. `relpath` gives a `../..` path, which is not in the set, so the check goes red naming
+# it. `relative_to` gives a `ValueError` and takes the ~750 checks after this one with it. That
+# arrangement is broken either way - it dies later reading `run.py` from `HERE` - so what this buys
+# is a red line rather than a traceback, which is #42's rule, not a way to run the suite.
+#
+# Third wording of this comment, because the first two named arrangements that cannot happen: a
+# symlinked entry point resolves the import root along with the file, and a copied tests tree brings
+# its own `mutate.py`, so `REPO` moves in both and the paths agree. Probing settled it and guessing
+# produced both. Same reason this is a list rather than `in`: `got False, want True` does not say
+# which path went missing after a rename.
 SELF = os.path.relpath(pathlib.Path(__file__).resolve(), mutate.REPO)
 check(
     "and the set names this file, which is the reason it exists",
