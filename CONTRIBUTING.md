@@ -225,10 +225,12 @@ would have predicted ten and a half at 177, and it took fifteen.
 Every figure in that paragraph is a laptop, and the runner is a different measurement rather than the
 same one scaled. Three full resweeps of the same 191 over three consecutive commits came in at 20m44s,
 17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. A spread
-of nearly half, which swallows every local figure at this count, so a per-mutation number here supports
-no attribution finer than "five or six seconds on a runner". The first reading of the first two claimed
-half a second of the difference was the machine and the rest the added checks. `timeout-minutes` on the `ci` sweep is `sweep.yml`'s number by
-parity rather than anything derived from these, and what they are for is the floor it has to clear: the
+of nearly half, which swallows every local figure at this count, so the observed band is the whole of
+4.5 to 6.5 seconds and a tighter reading of it is not supported - naming one is how the paragraph above
+came to say "four and a half to four and three quarters". The first reading of the first two resweeps
+claimed half a second of the difference was the machine and the rest the added checks.
+`timeout-minutes` on the `ci` sweep is `sweep.yml`'s number by parity rather than anything derived from
+these, and what they are for is the floor it has to clear: the
 slowest full resweep in the logs, never the latest one and never a laptop. 15 minutes was chosen off a
 laptop, and the sweep it was sized for ran to 15m15s and was canceled.
 

@@ -252,7 +252,8 @@ jobs:
   # went from 3.5s to 5.0s and every existing table got slower. Each table added is therefore worse
   # than linear.
   #
-  # 16m30s at 191 mutations is the most recent full resweep, on the #50 branch. The sweep prints its
+  # 16m30s at 191 mutations is the most recent local full resweep, on the #50 branch - the runner has
+  # swept that count three times since, in the paragraph below. The sweep prints its
   # own per-mutation figure from #43 onwards, so the next correction to this paragraph comes off a log
   # line rather than off someone dividing a job total by a count read out of the summary.
   #

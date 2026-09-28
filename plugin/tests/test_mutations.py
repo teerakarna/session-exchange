@@ -147,9 +147,9 @@ for name, table in sorted(mutate.TABLES.items()):
 # means something, and the set claimed this in a comment with nothing holding it up.
 #
 # Relative to `plugin/tests` rather than by basename, because `caught_by` is resolved against that
-# directory and the set holds repo-relative paths. The shape check below makes the two the same
-# thing for anything the set is allowed to hold, so this is not a fix for a live bug - it is the
-# form that does not depend on the check two lines down still being there.
+# directory and the set holds repo-relative paths. The shape check further down - every entry sits
+# directly in `plugin/tests` - makes the two the same thing for anything the set is allowed to hold,
+# so this is not a fix for a live bug. It is the form that does not lean on that check being there.
 UNSWEEPABLE_NAMES = {path.removeprefix("plugin/tests/") for path in mutate.UNSWEEPABLE}
 # `prepare` unlinks each of these out of the copy, so a path that does not exist is a
 # FileNotFoundError out of every sweep rather than a verdict - the crash-instead-of-a-report shape
@@ -170,15 +170,23 @@ check(
 # the only line between here and that outcome - but it goes red saying a mutated copy still has the
 # file, which is the symptom three steps along, and this one says the set is empty.
 #
-# From `__file__` rather than typed out, so this is one fact and not a copy of one.
-SELF = pathlib.Path(__file__).resolve().relative_to(mutate.REPO).as_posix()
+# From `__file__` rather than typed out, so this is one fact and not a copy of one. `relpath` rather
+# than `relative_to`, which raises when the path is not underneath: this file reached through a
+# symlink, or a tests tree copied somewhere `mutate.py` does not sit above, would be a traceback out
+# of the check written to avoid exactly that. `relpath` returns a `../..` path instead, which is not
+# in the set, so the check goes red naming it. Which is also why it is written as a list rather than
+# `in`: `got False, want True` does not say which path went missing after a rename.
+SELF = os.path.relpath(pathlib.Path(__file__).resolve(), mutate.REPO)
 check(
-    "and the set names this file, which is the reason it exists", SELF in mutate.UNSWEEPABLE, True
+    "and the set names this file, which is the reason it exists",
+    sorted(p for p in [pathlib.PurePath(SELF).as_posix()] if p not in mutate.UNSWEEPABLE),
+    [],
 )
-# Shape as well as content. `targets` only reaches the "deleted from every mutated copy" note in its
-# `plugin/tests/<file>.py` branch, so an entry one directory deeper gets deleted from every copy and
-# reported as a module to resweep, with no note saying it cannot be swept - the drift the comment on
-# the set says is closed, in the direction it does not cover.
+# Shape as well as content, and `targets` only has wording for one shape: `plugin/tests/<file>.py`.
+# An entry under `tables/` is deleted from every copy and comes back as a module to resweep, with no
+# note that it cannot be swept. Anywhere else nested it is deleted from every copy and produces no
+# module and no note at all, because the length test above the tests branch skips it - silent, which
+# is worse than the misreport. Either way it is the direction the comment on the set does not cover.
 check(
     "and every entry is a file directly in plugin/tests, which is the shape targets notes",
     sorted(p for p in mutate.UNSWEEPABLE if pathlib.PurePosixPath(p).parts[:-1] != TESTS_PARTS),
