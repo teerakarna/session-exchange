@@ -242,7 +242,7 @@ def changes(entry: ledger.Entry, record: dict[str, Any], status: str) -> dict[st
     truth for as long as the ledger is still being written to.
 
     `status` is passed in rather than read off the record, because since #44 it is not on the
-    record: it is derived from the moves in `handoffs/<id>/`, and `handoffs.load_all` is what
+    record: it is derived from the moves in `handoffs/<id>.d/`, and `handoffs.load_all` is what
     pairs the two. Taking it as an argument keeps this module pure - no clock, no filesystem -
     which is what makes it testable without a store at all.
     """

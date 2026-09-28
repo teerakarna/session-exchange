@@ -398,7 +398,9 @@ with tempfile.TemporaryDirectory() as tmp:
     first = posted_id(out)
     check("a body on stdin is posted", (code, (store_dir / f"{first}.json").is_file()), (0, True))
     written = json.loads((store_dir / f"{first}.json").read_text())
-    moves = store_dir / first
+    # `.d`, not the bare id: an id may contain a dot, and a directory named after the bare id would
+    # then sit exactly where another id's record goes.
+    moves = store_dir / f"{first}.d"
     check(
         "recorded whole, as the caller, with no state in the record and no moves beside it",
         (
@@ -428,7 +430,10 @@ with tempfile.TemporaryDirectory() as tmp:
         "by writing one move beside the record rather than into it",
         (
             [e["status"] for e in recorded],
-            recorded[0]["by"],
+            # `.get` through an index that may not exist. When the rule under test is the one that
+            # broke there is no move to index, and an IndexError would report one broken rule as a
+            # broken test file and take the rest of this fixture down with it.
+            recorded[0].get("by") if recorded else None,
             json.loads((store_dir / f"{first}.json").read_text()) == written,
         ),
         (["accepted"], "the-caller", True),
@@ -459,7 +464,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "first")
     handoff_id = posted_id(out)
     run(home, repo, "handoff", "close", handoff_id)
-    moves = area / ".claude" / "exchange" / "handoffs" / handoff_id
+    moves = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.d"
     forged = {"at": "2026-01-02T03:04:05Z", "status": "accepted", "after": 0}
     (moves / "0000-forged.json").write_text(json.dumps(forged))
 

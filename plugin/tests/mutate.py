@@ -304,6 +304,19 @@ STORE = [
     ),
     Mutation(
         module="store",
+        # The mutation is what this was first. An id may contain a dot, so an id of `note.json`
+        # put a moves directory at `handoffs/note.json` - exactly where a record of the id `note`
+        # goes - and `read_all`'s glob then tried to parse the directory as a record, for good.
+        # The suffix cannot be a record's name, so the two namespaces cannot overlap whatever the
+        # id is, which beats a rule that ids must not end in `.json` because nothing has to
+        # remember it.
+        rule="a handoff's moves live under a name no record could have",
+        old='    return handoffs_dir(root) / f"{handoff_id}.d"',
+        new="    return handoffs_dir(root) / handoff_id",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="store",
         rule="a file that exists and does not parse is never reported as absent",
         old=(
             "    except (OSError, ValueError) as exc:\n"
@@ -1498,8 +1511,18 @@ HANDOFFS = [
         # records seconds - so accepting and closing inside one second left the order to the random
         # suffix. The name is legibility now; `after` is the ordering.
         rule="moves are ordered by the position their writer recorded, never by their filename",
-        old='    return sorted(entries, key=lambda entry: entry["after"]), problems',
-        new="    return entries, problems",
+        old='    return sorted(entries, key=lambda entry: entry["after"]), faults',
+        new="    return entries, faults",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # A move file carries no id on purpose - a second copy of it could disagree with the first -
+        # and its name is a position, so `0001-a3f2.json could not be read` on its own names nothing
+        # anyone can act on, and two handoffs with one bad move each produce two identical lines.
+        rule="a problem with a move names the handoff the move belongs to",
+        old='    faults = [f"{handoff_id}: {problem}" for problem in problems]',
+        new="    faults = list(problems)",
         caught_by="test_handoffs.py",
     ),
     Mutation(
@@ -1518,12 +1541,43 @@ HANDOFFS = [
     ),
     Mutation(
         module="handoffs",
-        # Refusing rather than guessing. An unreadable move could be the latest one and a contested
-        # position has no latest one, so moving on from what `_status_of` returned would be moving
-        # on from a status that may not be the current one.
-        rule="a move computed from unreadable or contested moves is refused",
-        old="    if problems or tie:",
-        new="    if False:",
+        # One rule per entry, because the first version of this covered both halves of the guard
+        # with a single `if False:` - and patching out only the unreadable half left the whole
+        # suite green, because nothing in the repo wrote a malformed move file at all. An entry
+        # that passes on the strength of the half that is covered is the thing this table exists
+        # to prevent.
+        rule="a move computed from a move that could not be read is refused",
+        old="    if problems or not _settled(seen):",
+        new="    if not _settled(seen):",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # A contested last position has no latest entry, so `current` is one of two answers and
+        # moving on from the wrong one is how a closed handoff comes back open.
+        rule="a move computed from a contested last position is refused",
+        old="    if problems or not _settled(seen):",
+        new="    if problems:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The other side of it. A disagreement at an earlier position is reported but must not
+        # block: a later uncontested move settles what the status is now, and refusing anyway
+        # would strand the handoff for good over a race already superseded, with no verb to
+        # unstrand it.
+        rule="only the last position being contested blocks a move, not any position",
+        old='    last = entries[-1]["after"]\n    return len({entry["status"]',
+        new='    last = entries[0]["after"]\n    return len({entry["status"]',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # `post` writes no moves, so a handoff that has never been touched has an empty directory
+        # and has to be movable. Refusing there would make every first accept fail.
+        rule="a handoff with no moves yet is settled, so it can be moved",
+        old="    if not entries:\n        return True",
+        new="    if not entries:\n        return False",
         caught_by="test_handoffs.py",
     ),
     Mutation(
@@ -1538,18 +1592,38 @@ HANDOFFS = [
     Mutation(
         module="handoffs",
         rule="the move records the status moved to, not the one left behind",
-        old='    entry = {"at": at or store.now(), "status": status, "after": len(seen)}',
-        new='    entry = {"at": at or store.now(), "status": current, "after": len(seen)}',
+        old='    entry = {"at": at or store.now(), "status": status, "after": after}',
+        new='    entry = {"at": at or store.now(), "status": current, "after": after}',
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        # `len(seen)` is the causal position: how many moves this writer had read. Pinned to zero,
-        # every move claims to have been made against a fresh handoff, so the second one reads as
-        # concurrent with the first and the pair reports as contested rather than ordered.
-        rule="a move records how many moves its writer had read, so the next one sorts after it",
-        old='    entry = {"at": at or store.now(), "status": status, "after": len(seen)}',
-        new='    entry = {"at": at or store.now(), "status": status, "after": 0}',
+        # Pinned to zero, every move claims to have been made against a fresh handoff, so the second
+        # one reads as concurrent with the first and an ordinary sequence reports as contested.
+        rule="a move records the position it was made at, so the next one sorts after it",
+        old='    after = (1 + max(entry["after"] for entry in seen)) if seen else 0',
+        new="    after = 0",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The mutation is what was here first, and the bug is subtle: the count equals the
+        # position only while every position holds one move, and the case where it does not is
+        # exactly a concurrent pair. Two writers acting on the same status then file at different
+        # positions, so the tie the whole layout exists to surface is never detected.
+        rule="the position is one past the highest one read, not the number of moves read",
+        old='    after = (1 + max(entry["after"] for entry in seen)) if seen else 0',
+        new="    after = len(seen)",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # What makes two concurrent writers at one position two files rather than one refusing. The
+        # `SUFFIX_BYTES` entry above covers `new_id`, and the id test catches it first, so this half
+        # was going unexercised.
+        rule="a move's filename carries a random suffix, so two at one position do not collide",
+        old='    name = f"{after:04d}-{secrets.token_hex(SUFFIX_BYTES)}.json"',
+        new='    name = f"{after:04d}.json"',
         caught_by="test_handoffs.py",
     ),
     Mutation(
@@ -1561,44 +1635,35 @@ HANDOFFS = [
     ),
     Mutation(
         module="handoffs",
+        # Two kinds of fault reach a reader through here and each gets its own entry, because one
+        # `if False:` over both would pass on the strength of whichever half happened to be covered.
+        rule="a move that could not be read is reported to whoever asked for the status",
+        old="    return status, problems + faults",
+        new="    return status, faults",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and so is a position whose moves disagree",
+        old="    return status, problems + faults",
+        new="    return status, problems",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
         # `post` writes no move, so an empty directory means "never changed since it was posted".
         # Without the guard the next line indexes an empty list, which is the same defect arriving
         # as a traceback.
         rule="no moves at all is open",
-        old="    if not entries:",
-        new="    if False:",
+        old="    if not entries:\n        return OPEN, []",
+        new="    if False:\n        return OPEN, []",
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
         rule="the current status is the last move, not the first",
-        old="    last = entries[-1]",
-        new="    last = entries[0]",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # Without the position comparison every ordinary sequence is a tie: accepted then closed are
-        # two different statuses, and they were made one after the other.
-        rule="only moves at the same position are concurrent",
-        old='if e["after"] == last["after"] and e["status"]',
-        new='if e["status"]',
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        # And without the status comparison, `last` matches itself and every handoff that has moved
-        # at all reports as contested. Two concurrent *identical* closes are both true.
-        rule="two moves at one position that agree are not a disagreement",
-        old=' and e["status"] != last["status"]]',
-        new="]",
-        caught_by="test_handoffs.py",
-    ),
-    Mutation(
-        module="handoffs",
-        rule="two moves at one position that disagree are reported",
-        old="    if tied:",
-        new="    if False:",
+        old='    return entries[-1]["status"], _contested(handoff_id, entries)',
+        new='    return entries[0]["status"], _contested(handoff_id, entries)',
         caught_by="test_handoffs.py",
     ),
     Mutation(
@@ -1606,18 +1671,65 @@ HANDOFFS = [
         # Dropping the row would hide a handoff, which is worse than showing one whose state is in
         # question. A caller rendering a list has to be able to show the row *and* the fault.
         rule="the status is still returned alongside the problem",
-        old='        return last["status"], (',
-        new="        return None, (",
+        old='    return entries[-1]["status"], _contested(handoff_id, entries)',
+        new="    return None, _contested(handoff_id, entries)",
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        # `read_all` hands back contents without filenames, so the id inside the file is what finds
-        # the moves. A hand-edited id looks under a directory that does not exist, which reads as
-        # `open` - a closed handoff quietly coming back.
-        rule="the id in a handoff file has to name the file it was read from",
-        old='        if not path(root, record["id"]).is_file():',
+        # Without grouping by position every ordinary sequence is a disagreement: accepted then
+        # closed are two different statuses, and they were made one after the other.
+        rule="only moves at the same position are concurrent",
+        old='        first = first_at.setdefault(entry["after"], entry["status"])',
+        new='        first = first_at.setdefault(0, entry["status"])',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # Every position, not only the newest. The first version compared each move against the last
+        # move's position, so a disagreement was reported until one further move landed on top of it
+        # and then vanished entirely - two sessions had moved one handoff two ways and the store had
+        # nothing left to say about it.
+        rule="a disagreement at any position is reported, not only one at the newest",
+        old="    for entry in entries:\n        first = first_at.setdefault",
+        new="    for entry in entries[-1:]:\n        first = first_at.setdefault",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # Two concurrent *identical* moves are both true and the handoff is in that state either
+        # way. Without the comparison the first move at every position disagrees with itself.
+        rule="two moves at one position that agree are not a disagreement",
+        old='        if first != entry["status"]:',
+        new="        if True:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="two moves at one position that disagree are reported",
+        old='        if first != entry["status"]:',
         new="        if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # The id inside the file is what finds the moves, so it has to be the name the file came out
+        # of. The mutation this replaces stat-ed `<id>.json` instead, which passes whenever *some*
+        # file of that name exists: swapping two records' ids had each row render the other's status
+        # and report nothing, and copying one file gave two rows under one id.
+        rule="the id in a handoff file has to name the file it was read from",
+        old='        if record["id"] != file.stem:',
+        new="        if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        # A moves directory outlives its record if anyone removes `<id>.json`, and nothing iterates
+        # directories, so it is invisible until an id lands on it again. Posting into it hands a
+        # brand-new handoff the old one's status: posted, exit 0, and it reads as closed.
+        rule="posting never inherits moves already recorded under the id",
+        old="    if store.transitions_dir(root, handoff_id).exists():",
+        new="    if False:",
         caught_by="test_handoffs.py",
     ),
     Mutation(

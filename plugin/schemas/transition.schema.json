@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/teerakarna/session-exchange/schemas/transition.schema.json",
   "title": "Transition",
-  "description": "`<root>/.claude/exchange/handoffs/<id>/<after>-<suffix>.json`. One status change, in its own file, because the session that makes a change is not the session that posted the handoff and two writers sharing one file is how an entry gets lost. The handoff id is the directory name and is deliberately not repeated in here: a second copy of it could disagree with the first, and this repo keeps finding that exact shape.",
+  "description": "`<root>/.claude/exchange/handoffs/<id>.d/<after>-<suffix>.json`. One status change, in its own file, because the session that makes a change is not the session that posted the handoff and two writers sharing one file is how an entry gets lost. The handoff id is the directory name and is deliberately not repeated in here: a second copy of it could disagree with the first, and this repo keeps finding that exact shape.",
   "type": "object",
   "additionalProperties": false,
   "required": ["at", "status", "after"],
@@ -15,7 +15,7 @@
     "after": {
       "type": "integer",
       "minimum": 0,
-      "description": "How many moves this one was written after - the number its writer read before deciding. That makes it a causal position rather than a clock reading: moves made one after another strictly increase, and two writers that both acted on the same state both land on the same number, which is the honest answer because they were concurrent. The filename leads with it for legibility; the ordering is read from here, so there is no width at which padding stops sorting."
+      "description": "One past the highest position this move's writer read, so it is a causal position rather than a clock reading: moves made one after another strictly increase, and two writers that both acted on the same state both land on the same number, which is the honest answer because they were concurrent. One past the highest, not the count of files read - the count only equals the position while every position holds one move, and the case where it does not is precisely a concurrent pair, so counting stopped two writers on the same status from ever being detected as one. The filename leads with this for legibility; the ordering is read from here, so there is no width at which padding stops sorting."
     },
     "status": {
       "type": "string",

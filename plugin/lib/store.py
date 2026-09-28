@@ -5,7 +5,7 @@ Layout, under a root that `exchange_root` resolved and this module never guesses
     <root>/.claude/exchange.json                       the marker, which is also the config
     <root>/.claude/exchange/sessions/<session_id>.json one claim per session
     <root>/.claude/exchange/handoffs/<id>.json         one file per handoff, written once
-    <root>/.claude/exchange/handoffs/<id>/<after>-<n>.json  one file per status change
+    <root>/.claude/exchange/handoffs/<id>.d/<after>-<n>.json  one file per status change
     <root>/.claude/exchange/EXCHANGE.md                narrative, for humans and sessions
 
 One file per writer, never a shared append target. Six concurrent sessions on one file is the
@@ -59,11 +59,18 @@ def handoffs_dir(root):
 def transitions_dir(root, handoff_id):
     """Where one handoff's status changes live, one file per change.
 
-    A directory beside `<id>.json` rather than an array inside it. `read_all` globs `*.json`, so
-    this directory is not itself mistaken for a record, and the handoff file stays what `post`
-    wrote.
+    A directory beside `<id>.json` rather than an array inside it, so the handoff file stays what
+    `post` wrote.
+
+    `.d` rather than the bare id, which is what this was first: an id may contain a dot, so an id of
+    `note.json` gave a record at `handoffs/note.json.json` and a moves directory at
+    `handoffs/note.json`, which `read_all`'s `*.json` glob then tried to parse as a record. The
+    result was a permanent "Is a directory" problem on every read, plus a later `post` of the id
+    `note` refused for colliding with a name nobody had written. The suffix cannot be a record's
+    name, so the two namespaces cannot overlap whatever the id is - which is worth more than a rule
+    that ids must not end in `.json`, because nothing has to remember it.
     """
-    return handoffs_dir(root) / handoff_id
+    return handoffs_dir(root) / f"{handoff_id}.d"
 
 
 def markdown(root):
@@ -173,25 +180,39 @@ def read_json(path, schema=None):
     return obj, None
 
 
-def read_all(directory, schema=None):
-    """Every `*.json` in a directory, sorted. Returns `(objects, problems)`.
+def read_each(directory, schema=None):
+    """Every `*.json` in a directory as `(path, obj)`, sorted. Returns `(found, problems)`.
 
     Both halves are returned because one unreadable file must not hide the rest, and the rest
     passing must not hide the unreadable one.
+
+    The path comes back because for some callers the filename is part of what was read. `read_all`
+    is this with the paths dropped, and is what most callers want; a caller that has to check the
+    contents against the name they came out of cannot use it, because the name is exactly what it
+    discards. "The id in this file names this file" is unfalsifiable without this.
+
+    The `.tmp-` filter is not tidiness. A writer killed between `_staged` and the link leaves one
+    behind, and a reader that counted it would be counting a move that was never made.
     """
     directory = pathlib.Path(directory)
-    objects, problems = [], []
+    found, problems = [], []
     try:
         paths = sorted(p for p in directory.glob("*.json") if not p.name.startswith(".tmp-"))
     except OSError as exc:
-        return objects, [f"could not list {directory}: {exc}"]
+        return found, [f"could not list {directory}: {exc}"]
     for path in paths:
         obj, problem = read_json(path, schema)
         if problem:
             problems.append(problem)
         elif obj is not None:
-            objects.append(obj)
-    return objects, problems
+            found.append((path, obj))
+    return found, problems
+
+
+def read_all(directory, schema=None):
+    """Every `*.json` in a directory, sorted. Returns `(objects, problems)`."""
+    found, problems = read_each(directory, schema)
+    return [obj for _, obj in found], problems
 
 
 def config(root):
