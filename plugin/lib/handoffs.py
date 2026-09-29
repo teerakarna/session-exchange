@@ -187,6 +187,88 @@ def transitions(root, handoff_id):
     return sorted(entries, key=lambda entry: entry["after"]), faults
 
 
+def _moving(root, handoff_id, status):
+    """What both move verbs check before writing anything.
+
+    Returns `(seen, problems, refusal)`: the moves already recorded, whatever went wrong reading
+    them, and a refusal that stands whatever the caller was trying to do. Three values rather than
+    two because the two verbs part company on `problems` - `set_status` folds it in with the contest
+    report and `resolve` refuses on it alone - and a shared function that decided that would be
+    deciding the one thing they disagree about.
+
+    Shared so that "which ids and which statuses exist, and does the record read" is one answer.
+    `resolve` is a second writer of moves, and a second copy of those three refusals would be three
+    things that drift with only one of them the one under test.
+    """
+    if status not in STATUSES:
+        return None, [], f"{status!r} is not a handoff status; one of {', '.join(STATUSES)}"
+    if store.safe_id(handoff_id) is None:
+        return None, [], f"{handoff_id!r} cannot be a filename, so it cannot be a handoff id"
+    # Read to confirm the handoff exists and validates, never to modify it. A transition filed under
+    # an id nothing posted is a status for a handoff no reader will ever go looking for.
+    record, problem = store.read_json(path(root, handoff_id), SCHEMA)
+    if record is None:
+        return None, [], problem or f"no handoff with id {handoff_id} under this root"
+    # No second `if problem` after that. `read_json`'s contract is that every failure returns a
+    # `None` record, so a record in hand means there is no problem to check for, and the check that
+    # used to be here was unfalsifiable: mutating it to `if False:` left the suite green, which this
+    # repo treats as a defect rather than as coverage.
+    seen, problems = transitions(root, handoff_id)
+    return seen, problems, None
+
+
+def _move(root, handoff_id, status, after, by, note, at):
+    """Write one move at `after`. Returns `(transition, problem)`.
+
+    The only writer of a transition file, for both verbs. Which fields a move carries and how it
+    reaches disk is then one thing rather than two that agree today.
+    """
+    entry = {"at": at or store.now(), "status": status, "after": after}
+    if by:
+        entry["by"] = by
+    if note:
+        entry["note"] = note
+
+    problem = store.create_json(transition_path(root, handoff_id, after), entry, TRANSITION)
+    return (None, problem) if problem else (entry, None)
+
+
+def resolve(root, handoff_id, status, by=None, note=None, at=None):
+    """Declare the status of a handoff whose last position is tied. Returns `(transition, problem)`.
+
+    #52. Two disagreeing moves at the *last* position leave no current status to move on from, so
+    `set_status` refuses every further move and `list` and `show` exit 1 for good. Reporting the
+    disagreement rather than resolving it is right - guessing which of two concurrent moves came
+    first is how a closed handoff comes back open - but the state was then unrecoverable through the
+    tool, in a repo whose whole argument is that hand-editing the store is how things go wrong.
+
+    Nothing is erased and nothing is decided on anyone's behalf. The tie stays on disk, `_contested`
+    goes on reporting it for as long as the handoff exists, and this writes one more move at
+    `max + 1` with `by` and `note` recording who resolved it and why, which is what those two fields
+    are for. All that changes is that the handoff can move again.
+
+    Refused unless the last position really is tied. Without that check this is `set_status` with
+    the already-in-that-status guard taken out, reachable by typo, and the one verb here that
+    writes a status nothing derived would also be the easiest one to use by accident.
+    """
+    seen, problems, refusal = _moving(root, handoff_id, status)
+    if refusal:
+        return None, refusal
+    if problems:
+        # Still a refusal, and this is the case it would be tempting to wave through: an unreadable
+        # move could be one of the two at the last position, so which statuses are tied cannot be
+        # read, and resolving a tie that may not be the tie on disk is exactly the guess this verb
+        # exists to avoid making.
+        return None, "; ".join(problems)
+    if _settled(seen):
+        current, _ = _status_of(handoff_id, seen)
+        return None, (
+            f"{handoff_id} has one status at its last position ({current}), so there is nothing to "
+            "resolve; accept or close it"
+        )
+    return _move(root, handoff_id, status, 1 + max(e["after"] for e in seen), by, note, at)
+
+
 def set_status(root, handoff_id, status, by=None, note=None, at=None):
     """Move a handoff to `status` by writing the move. Returns `(transition, problem)`.
 
@@ -200,27 +282,16 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     Before, one of the two entries was gone and nothing said so; now there are two truthful
     records of two sessions closing the same handoff, which is what happened.
     """
-    if status not in STATUSES:
-        return None, f"{status!r} is not a handoff status; one of {', '.join(STATUSES)}"
-
-    if store.safe_id(handoff_id) is None:
-        return None, f"{handoff_id!r} cannot be a filename, so it cannot be a handoff id"
-    # Read to confirm the handoff exists and validates, never to modify it. A transition filed under
-    # an id nothing posted is a status for a handoff no reader will ever go looking for.
-    record, problem = store.read_json(path(root, handoff_id), SCHEMA)
-    if record is None:
-        return None, problem or f"no handoff with id {handoff_id} under this root"
-    # No second `if problem` after that. `read_json`'s contract is that every failure returns a
-    # `None` record, so a record in hand means there is no problem to check for, and the check that
-    # used to be here was unfalsifiable: mutating it to `if False:` left the suite green, which this
-    # repo treats as a defect rather than as coverage.
-
-    seen, problems = transitions(root, handoff_id)
+    seen, problems, refusal = _moving(root, handoff_id, status)
+    if refusal:
+        return None, refusal
     current, faults = _status_of(handoff_id, seen)
     if problems or not _settled(seen):
         # Refusing rather than guessing. An unreadable move could be the latest one, and a
         # contested last position has no latest one, so `current` may not be current - and moving
-        # from a status that is not the real one is how a closed handoff comes back open.
+        # from a status that is not the real one is how a closed handoff comes back open. `resolve`
+        # is the way out of the second of those, and it is a separate verb because it writes a
+        # status nothing derived.
         return None, "; ".join([*problems, *faults])
     if current == status:
         return None, f"{handoff_id} is already {status}"
@@ -231,14 +302,7 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     # any position holds two moves: the count stops equalling the position, so two sessions acting
     # on the same status file at different positions and neither one is reported.
     after = (1 + max(entry["after"] for entry in seen)) if seen else 0
-    entry = {"at": at or store.now(), "status": status, "after": after}
-    if by:
-        entry["by"] = by
-    if note:
-        entry["note"] = note
-
-    problem = store.create_json(transition_path(root, handoff_id, after), entry, TRANSITION)
-    return (None, problem) if problem else (entry, None)
+    return _move(root, handoff_id, status, after, by, note, at)
 
 
 def state_of(root, handoff_id):
@@ -369,6 +433,32 @@ def unconverted(root):
             "refused rather than read. To convert it: drop those keys from the record, then write "
             f"one file per old history entry into {moves}/, named 0000-<hex>.json upwards, each "
             '{"at": the entry\'s at, "status": its status, "after": its position counting from 0}.'
+        )
+    return problems
+
+
+def unresolved(root):
+    """Handoffs frozen by a tie at their last position, as problems naming the verb. See #52.
+
+    `_contested` already reports the disagreement itself, and this is a second line about the same
+    handoff on purpose: that one says what happened, and until `resolve` existed there was nothing
+    anywhere that said what to do about it. Only a tie at the *last* position, because that is the
+    only one that stops a handoff moving - an earlier one is reported forever and blocks nothing.
+    """
+    problems = []
+    found, _ = store.read_each(store.handoffs_dir(root), SCHEMA)
+    for _, record in found:
+        seen, faults = transitions(root, record["id"])
+        if faults or _settled(seen):
+            continue
+        last = seen[-1]["after"]
+        tied = sorted({entry["status"] for entry in seen if entry["after"] == last})
+        problems.append(
+            f"{record['id']} is frozen at position {last}: {' and '.join(tied)} were both moved "
+            "against the same state, so it has no current status and no further move is accepted. "
+            f"`exchange handoff resolve {record['id']} --status <{'|'.join(STATUSES)}> "
+            "--note <why>` writes one at the next position, recording who decided "
+            "rather than erasing the tie."
         )
     return problems
 

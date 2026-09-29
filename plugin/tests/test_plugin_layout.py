@@ -128,6 +128,24 @@ for name in subcommands:
     # A command the doc does not mention is a command nobody will run.
     check(f"the doc mentions {name}", f"`{name}" in command_doc, True)
 
+# And the same one level down, where the verbs actually are. `handoff` is the only command with its
+# own verbs, and the check above passes on the word `handoff` alone however many of them the doc
+# has quietly stopped listing - which is how `resolve` could ship documented nowhere but the
+# argument hint.
+handoff_verbs = sorted(
+    name
+    for action in parser._subparsers._group_actions
+    for verbs in action.choices["handoff"]._subparsers._group_actions
+    for name in verbs.choices
+)
+check(
+    "handoff offers the verbs it was designed with",
+    handoff_verbs,
+    ["accept", "close", "list", "post", "resolve"],
+)
+for name in handoff_verbs:
+    check(f"the doc mentions handoff {name}", f"`handoff {name}" in command_doc, True)
+
 print("and no file in the tree holds a character a reviewer cannot see")
 
 # Three commits on this branch shipped a literal invisible character into source: a ZWJ, a U+3000,

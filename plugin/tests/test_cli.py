@@ -590,6 +590,56 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "show")
     check("show reports it too, rather than rendering a count over it", code, 1)
 
+    # #52. Until `resolve` there was no verb that answered this and nothing in the docs that said
+    # what to do, in a repo whose whole argument is that hand-editing the store is how things go
+    # wrong.
+    code, out = run(home, repo, "doctor")
+    check(
+        "doctor calls it frozen and prints the verb that clears it",
+        (code, "is frozen at position 0" in out, f"handoff resolve {handoff_id}" in out),
+        (1, True, True),
+    )
+
+    code, out = run(home, repo, "handoff", "resolve", handoff_id, "--status", "closed")
+    check(
+        "resolving with no reason given is refused, a judgement being no use without one",
+        (code, "--note" in out, len(list(moves.glob("*.json")))),
+        (2, True, 2),
+    )
+    code, out = run(
+        home, repo, "handoff", "resolve", handoff_id, "--status", "closed", "--note", "mine stands"
+    )
+    check(
+        "with one, it moves and says plainly that nothing was removed",
+        (code, "resolved at position 1" in out, "still on disk" in out),
+        (0, True, True),
+    )
+    declared = json.loads(sorted(moves.glob("0001-*.json"))[0].read_text())
+    check(
+        "the move records who decided and why, which is what those fields are for",
+        (declared["status"], declared["by"], declared["note"], declared["after"]),
+        ("closed", "the-caller", "mine stands", 1),
+    )
+    code, out = run(home, repo, "handoff", "accept", handoff_id)
+    check("and the everyday verbs work on it again", (code, "is now accepted" in out), (0, True))
+    # Still exit 1, for as long as the handoff exists. That is the design and not a leftover: the
+    # two moves that disagree are a thing that happened, and `resolve` records a decision on top of
+    # them rather than making them go away.
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "while the tie itself is still reported by every reader",
+        (code, "position 0" in out, handoff_id in out),
+        (1, True, True),
+    )
+    code, out = run(
+        home, repo, "handoff", "resolve", handoff_id, "--status", "open", "--note", "no"
+    )
+    check(
+        "and resolve refuses a handoff that is no longer frozen",
+        (code, "nothing to resolve" in out),
+        (1, True),
+    )
+
 with tempfile.TemporaryDirectory() as tmp:
     # A record from before #44, with `status` and `history` in it. `additionalProperties` is false,
     # so it is refused by name rather than half-read - the row leaves the list and a problem says

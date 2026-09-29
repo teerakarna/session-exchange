@@ -156,7 +156,7 @@ survives a version bump.
 ## Commands
 
 **Look** `show` `doctor` `handoff list`
-**Say** `claim` `handoff post` `handoff accept` `handoff close`
+**Say** `claim` `handoff post` `handoff accept` `handoff close` `handoff resolve`
 **Set up** `init`
 **Not built yet** `migrate`
 
@@ -187,6 +187,13 @@ that two writers acting on the same state land on the same number - which is the
 a concurrent pair detectable, and a count stops matching the position as soon as one pair exists. Two
 moves made against the same state are reported and left alone rather than resolved, at whatever
 position they sit, because guessing which came first is how a closed handoff comes back open.
+
+A tie at the *last* position is the one case that stops a handoff moving at all: it has no current
+status, so `accept` and `close` both refuse it. `handoff resolve <id> --status X --note "why"` is the
+way out, and it settles the handoff without touching the tie - it writes one more move past it,
+recording who decided and on what grounds. The disagreement stays on disk and every reader goes on
+reporting it, so `handoff list` and `doctor` still exit non-zero over that handoff. That is the point:
+somebody chose, and the record says so, rather than the tool quietly picking a winner.
 
 Writes stay at the terminal rather than behind a tool the model can call. Reads are pushed by hooks,
 because a read surface that has to be asked for would reintroduce the exact failure this replaces,

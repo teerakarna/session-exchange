@@ -369,6 +369,7 @@ def cmd_doctor(args):
         *claim_problems,
         *record_problems,
         *handoffs.unconverted(root),
+        *handoffs.unresolved(root),
         *handoffs.orphan_moves(root),
         *store.litter(root),
     ]
@@ -497,6 +498,30 @@ def cmd_handoff_close(args):
     return _transition(args, handoffs.CLOSED)
 
 
+def cmd_handoff_resolve(args):
+    # A separate verb rather than `--force` on `close`, and this is the one command here that
+    # writes a status nothing derived from the moves already on disk. Keeping it separate is what
+    # stops the everyday verbs from being able to do it by accident: `accept` and `close` refuse a
+    # handoff with no current status, and that refusal is correct, so the way out has to be typed
+    # on purpose.
+    resolution = _resolved(args)
+    if resolution is None:
+        return 1
+    own = registry.own_entry() or {}
+    move, problem = handoffs.resolve(
+        resolution.root, args.id, args.status, by=own.get("name"), note=args.note
+    )
+    if problem:
+        print(f"problem: {problem}")
+        return 1
+    print(f"{args.id} is now {move['status']}, resolved at position {move['after']}")
+    # Said every time, because the tie is still there and every later reader will still report it.
+    # A command that looked like it had cleaned something up would be the wrong impression to leave:
+    # what it did was add a decision on top of a disagreement that stays on the record.
+    print("  the moves that disagree are still on disk and still reported; nothing was removed.")
+    return 0
+
+
 def cmd_handoff_list(args):
     resolution = _resolved(args)
     if resolution is None:
@@ -582,6 +607,19 @@ def build_parser():
     hclose.add_argument("id")
     hclose.add_argument("--note")
     hclose.set_defaults(func=cmd_handoff_close)
+
+    hresolve = hsub.add_parser(
+        "resolve", help="declare the status of a handoff frozen by two disagreeing moves"
+    )
+    hresolve.add_argument("id")
+    hresolve.add_argument(
+        "--status", required=True, choices=handoffs.STATUSES, help="the status you are declaring"
+    )
+    # Required, unlike on `accept` and `close`. Those two record a move anyone can derive from what
+    # the moves already say; this one records a judgement, and a judgement with no reason on it is
+    # the thing the next reader of the tie cannot do anything with.
+    hresolve.add_argument("--note", required=True, help="why this way rather than the other")
+    hresolve.set_defaults(func=cmd_handoff_resolve)
 
     hlist = hsub.add_parser("list", help="handoffs under this root, open ones by default")
     hlist.add_argument("--all", action="store_true", help="include closed ones")

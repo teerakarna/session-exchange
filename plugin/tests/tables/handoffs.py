@@ -478,4 +478,57 @@ MUTATIONS = [
         new="        if False:",
         caught_by="test_cli.py",
     ),
+    # #52. Both directions again. A `resolve` that refuses everything leaves the handoff frozen,
+    # which is the state the verb was added for; one that refuses nothing is `set_status` with the
+    # already-in-that-status guard taken out, and it is the only verb here that writes a status
+    # nothing derived from the moves on disk.
+    Mutation(
+        module="handoffs",
+        rule="a handoff frozen by a tie at its last position can be declared",
+        old="    if _settled(seen):",
+        new="    if True:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and one that is not frozen cannot be, resolve not being a second close",
+        old="    if _settled(seen):",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    # The declaration goes after the tie rather than into it. At the tied position it is a third
+    # disagreeing move, which is the state it was called to get out of.
+    Mutation(
+        module="handoffs",
+        rule="a declaration lands one past the tie, like every other move",
+        old=(
+            "    return _move("
+            'root, handoff_id, status, 1 + max(e["after"] for e in seen), by, note, at)'
+        ),
+        new=(
+            "    return _move("
+            'root, handoff_id, status, max(e["after"] for e in seen), by, note, at)'
+        ),
+        caught_by="test_handoffs.py",
+    ),
+    # An unreadable move could be one of the two that are tied, so which statuses disagree cannot
+    # be read - and resolving a tie that may not be the tie on disk is the one guess this verb
+    # exists to avoid making.
+    Mutation(
+        module="handoffs",
+        rule="a tie with an unreadable move beside it is refused rather than declared",
+        old="    if problems:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    # And the report that names the verb names only the handoffs it applies to. Every handoff
+    # carrying the recipe is the same as none of them doing: the one that is actually stuck is not
+    # findable.
+    Mutation(
+        module="handoffs",
+        rule="the recipe is printed for a frozen handoff and not for a healthy one",
+        old="        if faults or _settled(seen):\n            continue",
+        new="        if False:\n            continue",
+        caught_by="test_handoffs.py",
+    ),
 ]
