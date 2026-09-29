@@ -590,6 +590,56 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "show")
     check("show reports it too, rather than rendering a count over it", code, 1)
 
+    # #52. Until `resolve` there was no verb that answered this and nothing in the docs that said
+    # what to do, in a repo whose whole argument is that hand-editing the store is how things go
+    # wrong.
+    code, out = run(home, repo, "doctor")
+    check(
+        "doctor calls it frozen and prints the verb that clears it",
+        (code, "is frozen at position 0" in out, f"handoff resolve {handoff_id}" in out),
+        (1, True, True),
+    )
+
+    code, out = run(home, repo, "handoff", "resolve", handoff_id, "--status", "closed")
+    check(
+        "resolving with no reason given is refused, a judgement being no use without one",
+        (code, "--note" in out, len(list(moves.glob("*.json")))),
+        (2, True, 2),
+    )
+    code, out = run(
+        home, repo, "handoff", "resolve", handoff_id, "--status", "closed", "--note", "mine stands"
+    )
+    check(
+        "with one, it moves and says plainly that nothing was removed",
+        (code, "resolved at position 1" in out, "still on disk" in out),
+        (0, True, True),
+    )
+    declared = json.loads(sorted(moves.glob("0001-*.json"))[0].read_text())
+    check(
+        "the move records who decided and why, which is what those fields are for",
+        (declared["status"], declared["by"], declared["note"], declared["after"]),
+        ("closed", "the-caller", "mine stands", 1),
+    )
+    code, out = run(home, repo, "handoff", "accept", handoff_id)
+    check("and the everyday verbs work on it again", (code, "is now accepted" in out), (0, True))
+    # Still exit 1, for as long as the handoff exists. That is the design and not a leftover: the
+    # two moves that disagree are a thing that happened, and `resolve` records a decision on top of
+    # them rather than making them go away.
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "while the tie itself is still reported by every reader",
+        (code, "position 0" in out, handoff_id in out),
+        (1, True, True),
+    )
+    code, out = run(
+        home, repo, "handoff", "resolve", handoff_id, "--status", "open", "--note", "no"
+    )
+    check(
+        "and resolve refuses a handoff that is no longer frozen",
+        (code, "nothing to resolve" in out),
+        (1, True),
+    )
+
 with tempfile.TemporaryDirectory() as tmp:
     # A record from before #44, with `status` and `history` in it. `additionalProperties` is false,
     # so it is refused by name rather than half-read - the row leaves the list and a problem says
@@ -611,6 +661,130 @@ with tempfile.TemporaryDirectory() as tmp:
         (code, "unexpected key 'status'" in out, "0 stored" in out),
         (1, True, True),
     )
+
+print("doctor, on the files under the store rather than the records in it")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The negative half first, because every check below this one passes just as well against a
+    # doctor that reports unconditionally, and this is the only one that would notice.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    run(home, repo, "handoff", "post", "--repo", "repo", "--body", "nothing wrong with this")
+    code, out = run(home, repo, "doctor")
+    check(
+        "a store with nothing wrong in it says so, and is not a fault",
+        (code, "store     0 fault(s)" in out),
+        (0, True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #51. The same pre-#44 record as above, seen by `doctor` rather than by `list`. `list` says
+    # which file and which key, which is all a reader needs to delete a handoff and nothing they
+    # need to keep one.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "posted long ago")
+    handoff_id = posted_id(out)
+    path = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json"
+    legacy_record = json.loads(path.read_text())
+    legacy_record["status"] = "closed"
+    legacy_record["history"] = [{"at": legacy_record["created"], "status": "closed"}]
+    path.write_text(json.dumps(legacy_record))
+
+    code, out = run(home, repo, "doctor")
+    check(
+        "a record from before #44 is a fault, named by the file it is in",
+        (code, f"{handoff_id}.json" in out),
+        (1, True),
+    )
+    # The pair is the point: the generic refusal is what every other reader shows, and the second
+    # line is the only place that says the record can be kept.
+    check(
+        "reported as that rather than only as an invalid file",
+        ("written before #44" in out, "unexpected key 'status'" in out),
+        (True, True),
+    )
+    check("naming both of the keys that date it", "status, history" in out, True)
+    check(
+        "and the conversion, including where the moves it describes go",
+        (f"{handoff_id}.d/" in out, '"after"' in out),
+        (True, True),
+    )
+    # Nothing was rewritten. A diagnostic that fixed it would be option 3 in #51, which was refused:
+    # `post` is the only thing here that writes a record, and it writes it once.
+    check("and the record is left exactly as it was", json.loads(path.read_text()), legacy_record)
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #53. A moves directory whose record has gone. `rm handoffs/<id>.json` is the route in, there
+    # being no `handoff delete`, and nothing that walks records can see what is left.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "soon orphaned")
+    handoff_id = posted_id(out)
+    run(home, repo, "handoff", "close", handoff_id)
+    (area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json").unlink()
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "the readers that walk records see nothing at all, which is the fault",
+        (code, handoff_id in out),
+        (0, False),
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "doctor names the directory and counts what is sitting in it",
+        (code, f"{handoff_id}.d" in out, "1 move(s)" in out),
+        (1, True, True),
+    )
+    check(
+        "and says the id is spent, which is what it costs",
+        "posted under that id again" in out,
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #53's other half. A writer killed between `_staged`'s write and the link leaves one of these
+    # behind, and `read_each` filters the name, so the move is lost rather than miscounted - right,
+    # and the reason nothing has ever said the file is there. Both directories, because `claims`
+    # goes through `_staged` too and a sweep of the handoffs alone would be a fix narrower than the
+    # fault.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "fine")
+    handoff_id = posted_id(out)
+    run(home, repo, "handoff", "accept", handoff_id)
+    exchange = area / ".claude" / "exchange"
+    (exchange / "handoffs" / f"{handoff_id}.d" / ".tmp-999-0001-abcdef.json").write_text("{")
+    (exchange / "sessions" / ".tmp-999-real-one.json").write_text("{")
+    # And the directory above both, which is where the marker is staged. An `init` killed between
+    # the write and the link leaves this one, and it was the case the first cut of the sweep missed
+    # while its own docstring said "every directory this store writes into".
+    (area / ".claude" / ".tmp-999-marker-x.json").write_text("{")
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "neither file is read, so the handoff reads as accepted and nothing is said",
+        (code, "accepted" in out, ".tmp-" in out),
+        (0, True, False),
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "doctor names all three: the handoff moves, the claims, and the marker's own directory",
+        (
+            code,
+            ".tmp-999-0001-abcdef.json" in out,
+            ".tmp-999-real-one.json" in out,
+            ".tmp-999-marker-x.json" in out,
+        ),
+        (1, True, True, True),
+    )
+    check("and says it is safe to delete them", "Safe to delete" in out, True)
+    check(
+        "the orphan count is not confused by one, there being no orphan here",
+        "move(s) with no" in out,
+        False,
+    )
+
 
 print("a handoff addressed to a session nobody is running says so while it can")
 
@@ -697,6 +871,82 @@ with tempfile.TemporaryDirectory() as tmp:
         "a record written by something other than this CLI still renders inert",
         (code, "\033" in out, "to r[2Kp" in out),
         (0, False, True),
+    )
+
+print("the caps in the marker are caps the list actually applies")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #61. `max_handoffs_listed` was in the schema, had a default, and was asserted to have one by a
+    # check on the schema. No code read it. A setting nothing reads is worse than no setting: it is
+    # raised, believed, and the rest of the list is still missing.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    marker = area / ".claude" / "exchange.json"
+    marker.write_text(json.dumps({"name": "area", "max_handoffs_listed": 2}))
+    for n in range(4):
+        run(home, repo, "handoff", "post", "--repo", "repo", "--body", f"body {n}")
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "the list stops where the marker says, not where the default does",
+        (code, "4 stored, 2 shown" in out),
+        (0, True),
+    )
+    check(
+        "and what it left out is counted, naming the lever and the file it is in",
+        ("+2 older not shown" in out, "max_handoffs_listed" in out, str(marker) in out),
+        (True, True, True),
+    )
+    # Which end the cap takes, which is the half a count does not tell you. Written by hand with
+    # three distinct `created` values, and not by posting three times: the stamps are seconds, so
+    # three posts in one second are one timestamp and a random suffix, and a check over those would
+    # be asserting the ordering of `secrets.token_hex`. Seconds is also the real resolution of this
+    # ordering, which is worth having in a test rather than only in a comment.
+    handoffs_dir = area / ".claude" / "exchange" / "handoffs"
+    for created, mark in (("2026-01-01T00:00:00Z", "oldest"), ("2026-06-01T00:00:00Z", "middle")):
+        handoff_id = created.replace("-", "").replace(":", "") + "-aaaaaa"
+        handoffs_dir.joinpath(f"{handoff_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": handoff_id,
+                    "from": {"cwd": "/tmp"},
+                    "to": {"repo": "repo"},
+                    "created": created,
+                    "body": f"the {mark} one",
+                }
+            )
+        )
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "the cap keeps the newest, those being the ones nobody has read yet",
+        (code, "6 stored, 2 shown" in out, "the oldest one" in out, "the middle one" in out),
+        (0, True, False, False),
+    )
+
+    # The width half, which is the same question asked about one row rather than about the list:
+    # what does the reader see when something was left out. A body has `minLength` and no
+    # `maxLength`, and one line is no bound at all - the row that went into every session at 23 KB
+    # was a single line.
+    marker.write_text(json.dumps({"name": "area", "max_focus_chars": 20}))
+    run(home, repo, "handoff", "post", "--repo", "repo", "--body", "x" * 400)
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "a body wider than the cap is cut, with the rest counted rather than dropped",
+        (code, "x" * 20 + " +380 more chars" in out, "x" * 21 in out),
+        (0, True, False),
+    )
+
+    # And the marker the caps come from being unreadable is not a reason to refuse a post. The exit
+    # code says something is wrong, as it does everywhere a problem line is printed, so the line has
+    # to say the write happened: a caller reading the non-zero as "it did not post" retries, the id
+    # is random, and the root ends up with two handoffs for one intent.
+    before = len(list(handoffs_dir.glob("*.json")))
+    marker.write_text("{not json")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "posted anyway")
+    check(
+        "an unreadable marker does not cost the post, and the problem line says so",
+        (code, len(list(handoffs_dir.glob("*.json"))) - before, "the handoff is written" in out),
+        (1, 1, True),
     )
 
 print("what is not built yet says so, and does not look like a failure")

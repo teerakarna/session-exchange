@@ -152,6 +152,48 @@ with tempfile.TemporaryDirectory() as tmp:
         as_string = f"raised {type(exc).__name__}"
     check("a directory given as a string reads the same", as_string, ["good-one"])
 
+print("which rows are peers, which is not the same question")
+
+with tempfile.TemporaryDirectory() as tmp:
+    sessions = pathlib.Path(tmp) / "sessions"
+    # The arrangement measured on this machine when #31 was filed: an interactive session and a
+    # background job it spawned, same `name`, different `sessionId`. Rendering both shows two
+    # identical rows and invites a reader to coordinate with something that cannot answer.
+    write(sessions, 1, sessionId="the-session", pid=LIVE, name="shared", kind="interactive")
+    write(sessions, 2, sessionId="the-job", pid=LIVE, name="shared", kind="bg")
+    # And a row from the version that has no `kind` field. It counts as a peer: dropping it renders
+    # nobody present on that version, which is a worse failure than one row too many, and without
+    # this fixture a filter that dropped every unknown kind would pass the check below.
+    write(sessions, 3, sessionId="no-kind", pid=LIVE, name="older")
+
+    check(
+        "a background job is not a peer",
+        [r["sessionId"] for r in registry.entries(sessions)],
+        ["no-kind", "the-session"],
+    )
+    # A set, not a list. The two peer rows share a `name`, so their relative order is a stable-sort
+    # tie broken by the read order of the directory, and this file already has a note about not
+    # asserting anything that resolves to the filesystem's business.
+    check(
+        "and comes back when the caller says peerhood is not the question",
+        {r["sessionId"] for r in registry.entries(sessions, peers_only=False)},
+        {"no-kind", "the-session", "the-job"},
+    )
+    check("a row with no kind is a peer", registry.is_peer({}), True)
+    check("an interactive row is a peer", registry.is_peer({"kind": "interactive"}), True)
+    check("a bg row is not", registry.is_peer({"kind": "bg"}), False)
+    # A kind nobody here has seen. Kept, and that is the whole reason the predicate is a blocklist:
+    # an allowlist would drop whatever Claude Code adds next without saying so, and a session
+    # present and unrendered is the failure this project was written about. One row too many is
+    # visible.
+    check("and a kind nothing here knows about is too", registry.is_peer({"kind": "wat"}), True)
+
+    # `by_session_id` answers "what is this row", so it has to see the job. A filter there returns
+    # None for a background job, which is indistinguishable from an id the registry never had - and
+    # the caller that most needs the difference is the hook deciding whether to seed a claim.
+    job = registry.by_session_id("the-job", sessions)
+    check("an identity lookup still resolves a background job", job and job.get("kind"), "bg")
+
 print("in what order, since presence is rendered straight from it")
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -307,6 +349,18 @@ else:
         # above by accident.
         write(sessions, ANCESTOR, sessionId="string-pid", pid=str(ANCESTOR), name="ancestor")
         check("a string pid still matches the chain", owner(sessions), "string-pid")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        sessions = pathlib.Path(tmp) / "sessions"
+        # Two registry pids in one chain, which is what being inside a background job looks like:
+        # the job's own row on this process, and the interactive session that spawned it above.
+        # Nearest first would answer with the job, and a claim written from there lands under an id
+        # no presence render shows - a write that cannot be read back, and a handoff from a sender
+        # nobody can find. Skipping to the interactive ancestor attributes the work to the session
+        # a human can reach, which is the same call #31 makes about what a row means.
+        write(sessions, LIVE, sessionId="the-job", pid=LIVE, name="shared", kind="bg")
+        write(sessions, ANCESTOR, sessionId="the-session", pid=ANCESTOR, name="shared")
+        check("own entry skips this process's own background row", owner(sessions), "the-session")
 
 with tempfile.TemporaryDirectory() as tmp:
     sessions = pathlib.Path(tmp) / "sessions"

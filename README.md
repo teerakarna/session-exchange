@@ -90,7 +90,7 @@ customised ever travels with the code:
 |---|---|
 | `name` | What this root is called in injected context, so a session can tell which exchange it is reading |
 | `stale_days` | When a claim or handoff starts being flagged as old rather than shown as current. Default 7 |
-| `max_focus_chars`, `max_hot_paths`, `max_handoffs_listed` | Caps on what gets rendered into a session's context. Anything past a cap is counted, never silently dropped |
+| `max_focus_chars`, `max_hot_paths`, `max_handoffs_listed` | Caps on what gets rendered into a session's context. Anything past a cap is counted, never silently dropped. `max_focus_chars` bounds every one-line render of text another session wrote: a claim's focus, and a handoff's scope, sender and body preview. `max_handoffs_listed` keeps the newest and says how many older ones it did not show, the one posted a minute ago being the one nobody has read |
 | `labels` | Display-only directory-to-label map. Never a matching key, because a hand-typed label having to agree with another hand-typed label is the defect this design removes |
 
 The defaults are the `default` values in
@@ -156,7 +156,7 @@ survives a version bump.
 ## Commands
 
 **Look** `show` `doctor` `handoff list`
-**Say** `claim` `handoff post` `handoff accept` `handoff close`
+**Say** `claim` `handoff post` `handoff accept` `handoff close` `handoff resolve`
 **Set up** `init`
 **Not built yet** `migrate`
 
@@ -187,6 +187,13 @@ that two writers acting on the same state land on the same number - which is the
 a concurrent pair detectable, and a count stops matching the position as soon as one pair exists. Two
 moves made against the same state are reported and left alone rather than resolved, at whatever
 position they sit, because guessing which came first is how a closed handoff comes back open.
+
+A tie at the *last* position is the one case that stops a handoff moving at all: it has no current
+status, so `accept` and `close` both refuse it. `handoff resolve <id> --status X --note "why"` is the
+way out, and it settles the handoff without touching the tie - it writes one more move past it,
+recording who decided and on what grounds. The disagreement stays on disk and every reader goes on
+reporting it, so `handoff list` and `doctor` still exit non-zero over that handoff. That is the point:
+somebody chose, and the record says so, rather than the tool quietly picking a winner.
 
 Writes stay at the terminal rather than behind a tool the model can call. Reads are pushed by hooks,
 because a read surface that has to be asked for would reintroduce the exact failure this replaces,

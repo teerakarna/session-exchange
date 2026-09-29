@@ -373,6 +373,25 @@ check(
 )
 
 print()
+print("and bounded in width, one line of it being all a reader gets")
+
+check("text inside the cap is untouched", store.capped_text("abcdef", 6), "abcdef")
+# The boundary in the other direction. `>= cap` was the first cut and appended "+0 more chars" to a
+# line nothing had been cut from, which is a false statement in the one place this function exists
+# to make a true one.
+check(
+    "one character over, and the remainder is counted",
+    store.capped_text("abcdefg", 6),
+    "abcdef +1 more chars",
+)
+check("an empty string is not a special case here either", store.capped_text("", 6), "")
+check(
+    "a 23 KB line arrives bounded, which is the row all these caps are about",
+    store.capped_text("x" * 23000, 240),
+    "x" * 240 + " +22760 more chars",
+)
+
+print()
 print("a scope path, which is the same two fields on a handoff and on a claim")
 
 check(
@@ -467,7 +486,19 @@ check(
 check(
     "the cap counts what the reader sees, not what the writer wrote",
     claims.describe_focus({"focus": "\033[2K\033[2Kabcdef"}, 6),
-    "[2K[2K",
+    "[2K[2K +6 more chars",
+)
+# #61. `[:cap]` was what this did, and a focus line that stops at the cap with nothing to say so
+# reads as the whole of what that session claimed to be doing.
+check(
+    "and what it cut off is counted rather than dropped",
+    claims.describe_focus({"focus": "a" * 300}, 240),
+    "a" * 240 + " +60 more chars",
+)
+check(
+    "a focus inside the cap is rendered whole, with nothing appended",
+    claims.describe_focus({"focus": "short enough"}, 240),
+    "short enough",
 )
 check(
     "a display name is stripped, being copied out of another session's registry entry",

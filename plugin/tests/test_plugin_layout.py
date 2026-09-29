@@ -128,6 +128,24 @@ for name in subcommands:
     # A command the doc does not mention is a command nobody will run.
     check(f"the doc mentions {name}", f"`{name}" in command_doc, True)
 
+# And the same one level down, where the verbs actually are. `handoff` is the only command with its
+# own verbs, and the check above passes on the word `handoff` alone however many of them the doc
+# has quietly stopped listing - which is how `resolve` could ship documented nowhere but the
+# argument hint.
+handoff_verbs = sorted(
+    name
+    for action in parser._subparsers._group_actions
+    for verbs in action.choices["handoff"]._subparsers._group_actions
+    for name in verbs.choices
+)
+check(
+    "handoff offers the verbs it was designed with",
+    handoff_verbs,
+    ["accept", "close", "list", "post", "resolve"],
+)
+for name in handoff_verbs:
+    check(f"the doc mentions handoff {name}", f"`handoff {name}" in command_doc, True)
+
 print("and no file in the tree holds a character a reviewer cannot see")
 
 # Three commits on this branch shipped a literal invisible character into source: a ZWJ, a U+3000,
@@ -193,6 +211,45 @@ check(
     "and it read the tree rather than nothing",
     str(pathlib.Path(__file__).resolve().relative_to(REPO)) in scanned,
     True,
+)
+
+print("the two jobs that run the mutation sweep allow it the same time")
+
+
+def job_timeout(path, job):
+    """`timeout-minutes` for one job, or a sentence saying why there is none.
+
+    Text rather than a YAML parse because the suite is standard-library only and the shape here is
+    fixed: two files this repo writes, two-space job keys, four-space job settings.
+    """
+    block = re.search(rf"\n  {job}:\n(.*?)(?=\n  \w|\Z)", (REPO / path).read_text(), re.S)
+    if block is None:
+        return f"{path} has no job called {job}"
+    found = re.search(r"^    timeout-minutes: (\d+)$", block.group(1), re.M)
+    return int(found.group(1)) if found else f"{path}:{job} sets no timeout"
+
+
+# One number in two files. `ci.yml`'s `mutate` job runs the full sweep whenever a change is wide
+# enough - the harness, what a table entry is, which tables exist, `test_cli.py` - so a cap it
+# cannot finish under makes a harness change unmergeable while the weekly run stays green, and
+# the red then points at a rule that is not broken. `sweep.yml` said "generous next to `ci`'s 15"
+# for a fortnight after `ci` went to 45, and nothing objected, which is what a number restated in
+# a second file does.
+narrowed = job_timeout(".github/workflows/ci.yml", "mutate")
+full = job_timeout(".github/workflows/sweep.yml", "sweep")
+# First, because the comparison below passes on two identical sentences. The default is 360 minutes
+# and a hang bills every one of them, so a job here having no cap is its own finding.
+check(
+    "both of them set one at all, the default being six hours of billed hang",
+    [cap for cap in (narrowed, full) if not isinstance(cap, int)],
+    [],
+)
+# Held against each other rather than against a literal, which would be the same number written a
+# third time and would have to be edited whenever either moves.
+check(
+    "and the narrowed sweep allows itself exactly what the full one does",
+    (narrowed, full),
+    (full, full),
 )
 
 print()

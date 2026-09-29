@@ -141,4 +141,76 @@ MUTATIONS = [
         new='            f"U+{ord(ch):04X}" for ch in value if printable(ch) != ch',
         caught_by="test_store_claims.py",
     ),
+    # #53. A `.tmp-` file is inert because `read_each` filters the name, and that is also why
+    # nothing has ever mentioned one. Inert and invisible at once is one property too many: the
+    # filter is load-bearing for correctness now - a counted temp file would be a move at a
+    # position nobody wrote - so the day it goes is the day the litter starts being read.
+    Mutation(
+        module="store",
+        rule="a half-written file left behind by a killed writer is reported",
+        old="        for path in found:",
+        new="        for path in []:",
+        caught_by="test_cli.py",
+    ),
+    # Both writers, not the one the issue happened to be about. `claims` goes through `_staged` too.
+    Mutation(
+        module="store",
+        rule="in every directory this store writes into, not only the handoffs",
+        old="    directories = [marker_path(root).parent, sessions_dir(root), handoffs_dir(root)]",
+        new="    directories = [marker_path(root).parent, handoffs_dir(root)]",
+        caught_by="test_cli.py",
+    ),
+    # And the directory above both, which is where the marker is staged, so an `init` killed between
+    # the write and the link leaves litter too. Missing from the first cut of this sweep, under a
+    # docstring that said "every directory this store writes into" - the narrower-than-the-problem
+    # shape, in the fix for it.
+    Mutation(
+        module="store",
+        rule="including the one the marker itself is staged into, above the records",
+        old="    directories = [marker_path(root).parent, sessions_dir(root), handoffs_dir(root)]",
+        new="    directories = [sessions_dir(root), handoffs_dir(root)]",
+        caught_by="test_cli.py",
+    ),
+    # And one directory further down again, which is where a move's temp file lands.
+    Mutation(
+        module="store",
+        rule="including the moves directories under the records",
+        old="    directories += [path for path in moves if path.is_dir()]",
+        new="    directories += []",
+        caught_by="test_cli.py",
+    ),
+    # #61. The text half of the caps. Both directions, because a capper that never cuts and one that
+    # always appends a count are different lies: the first reads as the whole of what the sender
+    # wrote, the second says characters were dropped from a line nothing was dropped from.
+    Mutation(
+        module="store",
+        rule="text longer than the cap is cut, so one row cannot take a terminal",
+        old="    if len(value) <= cap:",
+        new="    if False:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="and text inside it is returned whole, with nothing appended",
+        old="    if len(value) <= cap:",
+        new="    if True:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="what was cut off is counted rather than silently dropped",
+        old='    return f"{value[:cap]} +{len(value) - cap} more chars"',
+        new="    return value[:cap]",
+        caught_by="test_store_claims.py",
+    ),
+    # The marker is one path in one function, for the reason `TMP_PREFIX` is one constant: `init`
+    # writing a file `config` does not read would leave every cap at its default with a marker in
+    # the repo saying otherwise, and nothing would fail.
+    Mutation(
+        module="store",
+        rule="the marker is the file init writes and config reads, at one path",
+        old='    return pathlib.Path(root) / ".claude" / "exchange.json"',
+        new='    return pathlib.Path(root) / "exchange.json"',
+        caught_by="test_cli.py",
+    ),
 ]

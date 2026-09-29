@@ -153,8 +153,12 @@ def describe_focus(claim, cap):
     terminal, and counting characters that render as nothing spends the budget on invisible ones -
     so the two operations in the other order give a row shorter than the cap, by an amount the
     reader cannot see and the writer chose.
+
+    Through `store.capped_text` rather than `[:cap]`, so what was cut off is counted. A focus line
+    that stops at 240 characters with nothing to say so reads as the whole of what that session
+    claimed to be doing, which is the same silent-truncation shape as the lists (#61).
     """
-    return store.printable(claim.get("focus") or "(no focus stated)")[:cap]
+    return store.capped_text(store.printable(claim.get("focus") or "(no focus stated)"), cap)
 
 
 def describe_name(claim):

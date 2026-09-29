@@ -387,10 +387,29 @@ MUTATIONS = [
         module="handoffs",
         rule="a narrowed scope is described with the paths that narrow it",
         old=(
-            "    return f\"{repo}: {', '.join(store.printable(p) for p in paths)}\" "
+            "    phrase = f\"{repo}: {', '.join(store.printable(p) for p in paths)}\" "
             "if paths else repo"
         ),
-        new="    return repo",
+        new="    phrase = repo",
+        caught_by="test_handoffs.py",
+    ),
+    # #61. The width bound on each of the three, separately, for the reason the stripping entries
+    # below are separate: a cap on two of them reads as done and the third is the 23 KB row.
+    Mutation(
+        module="handoffs",
+        rule="and the phrase is bounded in width, a path list having no length limit",
+        old="    return store.capped_text(phrase, cap)",
+        new="    return phrase",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="so is a session scope, which is the branch that returns before the other one",
+        old=(
+            "        return store.capped_text("
+            "f\"session {store.printable(to['session_id'])}\", cap)"
+        ),
+        new="        return f\"session {store.printable(to['session_id'])}\"",
         caught_by="test_handoffs.py",
     ),
     # #46. The guard itself moved to `store`, because a claim has the same two fields and the point
@@ -432,15 +451,129 @@ MUTATIONS = [
     Mutation(
         module="handoffs",
         rule="so does the sender, whose name is free text and whose cwd is a path",
-        old='    return store.printable(record["from"].get("name") or record["from"]["cwd"])',
-        new='    return record["from"].get("name") or record["from"]["cwd"]',
+        old=(
+            "    return store.capped_text(\n"
+            '        store.printable(record["from"].get("name") or record["from"]["cwd"]), cap\n'
+            "    )"
+        ),
+        new=(
+            "    return store.capped_text(\n"
+            '        record["from"].get("name") or record["from"]["cwd"], cap\n'
+            "    )"
+        ),
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
         rule="and the body preview, which is the field the issue was filed about",
-        old="    return store.printable(body.splitlines()[0])",
-        new="    return body.splitlines()[0]",
+        old="    return store.capped_text(store.printable(body.splitlines()[0]), cap)",
+        new="    return store.capped_text(body.splitlines()[0], cap)",
+        caught_by="test_handoffs.py",
+    ),
+    # #51. `load_all` already refuses a pre-#44 record and names the file and the key, which is all
+    # a reader needs to delete a handoff and nothing they need to keep one. The conversion exists;
+    # until this, nothing said so.
+    Mutation(
+        module="handoffs",
+        rule="a record written before #44 is reported as convertible, not only as invalid",
+        old="        present = [key for key in PRE_44_KEYS if key in record]",
+        new="        present = []",
+        caught_by="test_cli.py",
+    ),
+    # Both fields #44 removed, rather than whichever one a record happens to carry. A record with
+    # `history` and no `status` is the same record and the same conversion.
+    Mutation(
+        module="handoffs",
+        rule="and dated by either of the two fields it removed",
+        old='PRE_44_KEYS = ("status", "history")',
+        new='PRE_44_KEYS = ("status",)',
+        caught_by="test_cli.py",
+    ),
+    # #53. Both directions, because a diagnostic that reports every moves directory as an orphan and
+    # one that reports none of them are both silent about the real one - the first by drowning it.
+    Mutation(
+        module="handoffs",
+        rule="a moves directory with no record beside it is reported",
+        old="        if record.exists():\n            continue",
+        new="        if True:\n            continue",
+        caught_by="test_cli.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and one with its record still there is not",
+        old="        if record.exists():",
+        new="        if False:",
+        caught_by="test_cli.py",
+    ),
+    # #52. Both directions again. A `resolve` that refuses everything leaves the handoff frozen,
+    # which is the state the verb was added for; one that refuses nothing is `set_status` with the
+    # already-in-that-status guard taken out, and it is the only verb here that writes a status
+    # nothing derived from the moves on disk.
+    Mutation(
+        module="handoffs",
+        rule="a handoff frozen by a tie at its last position can be declared",
+        old="    if _settled(seen):",
+        new="    if True:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and one that is not frozen cannot be, resolve not being a second close",
+        old="    if _settled(seen):",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    # The declaration goes after the tie rather than into it. At the tied position it is a third
+    # disagreeing move, which is the state it was called to get out of.
+    Mutation(
+        module="handoffs",
+        rule="a declaration lands one past the tie, like every other move",
+        old=(
+            "    return _move("
+            'root, handoff_id, status, 1 + max(e["after"] for e in seen), by, note, at)'
+        ),
+        new=(
+            "    return _move("
+            'root, handoff_id, status, max(e["after"] for e in seen), by, note, at)'
+        ),
+        caught_by="test_handoffs.py",
+    ),
+    # An unreadable move could be one of the two that are tied, so which statuses disagree cannot
+    # be read - and resolving a tie that may not be the tie on disk is the one guess this verb
+    # exists to avoid making.
+    Mutation(
+        module="handoffs",
+        rule="a tie with an unreadable move beside it is refused rather than declared",
+        old="    if problems:",
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    # And the report that names the verb names only the handoffs it applies to. Every handoff
+    # carrying the recipe is the same as none of them doing: the one that is actually stuck is not
+    # findable.
+    Mutation(
+        module="handoffs",
+        rule="the recipe is printed for a frozen handoff and not for a healthy one",
+        old="        if faults or _settled(seen):\n            continue",
+        new="        if False:\n            continue",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the sender is bounded in width too, name and cwd both being unbounded in the schema",
+        old=(
+            "    return store.capped_text(\n"
+            '        store.printable(record["from"].get("name") or record["from"]["cwd"]), cap\n'
+            "    )"
+        ),
+        new='    return store.printable(record["from"].get("name") or record["from"]["cwd"])',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and so is the body preview, one line being no bound at all on a line with no length",
+        old="    return store.capped_text(store.printable(body.splitlines()[0]), cap)",
+        new="    return store.printable(body.splitlines()[0])",
         caught_by="test_handoffs.py",
     ),
 ]

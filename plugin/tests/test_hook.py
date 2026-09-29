@@ -285,6 +285,71 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
 
+print("a store with something wrong in it, which the session is told about")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #32. `show` named these by filename and the hook said nothing, so the one place every session
+    # is guaranteed to look was the one place a corrupt store was invisible. Both record types,
+    # because claims were what the issue reported and the handoff half is the same silence one
+    # directory over.
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    exchange = root / ".claude" / "exchange"
+    (exchange / "sessions").mkdir(parents=True, exist_ok=True)
+    (exchange / "handoffs").mkdir(parents=True, exist_ok=True)
+    (exchange / "sessions" / "wrecked.json").write_text("{ not json")
+    (exchange / "handoffs" / "20260101T000000Z-aaaaaa.json").write_text(
+        json.dumps({"id": "20260101T000000Z-aaaaaa", "status": "closed"})
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-corrupt", "cwd": str(repo)},
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("an unreadable claim is named, by the filename it is in", "wrecked.json" in context, True)
+    check(
+        "and an invalid handoff record too, not only the claims",
+        "20260101T000000Z-aaaaaa.json" in context,
+        True,
+    )
+    # Rule 2. A fault in the store is somebody else's record being wrong, not this session failing.
+    check("and the session still starts", code, 0)
+    check(
+        "and it still seeded its own claim",
+        (root / ".claude" / "exchange" / "sessions" / "sess-corrupt.json").is_file(),
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # Past the cap the remainder is counted rather than dropped. A report that quietly stops at
+    # three reads exactly like a store with three faults in it, which is this repo's recurring
+    # shape.
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    sessions = root / ".claude" / "exchange" / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    for n in range(6):
+        (sessions / f"wrecked-{n}.json").write_text("{ not json")
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-many", "cwd": str(repo)},
+        home,
+    )
+    context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+    check("six faults are not six lines", context.count("wrecked-"), 3)
+    check("and the remainder is counted", "3 more problem(s)" in context, True)
+    check("and names where to read the rest", "`exchange show`" in context, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The negative half, which is the one that matters: a store with nothing wrong in it says
+    # nothing. Every check above passes just as well against a hook that reports unconditionally.
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-clean", "cwd": str(repo)},
+        home,
+    )
+    check("a store with nothing wrong in it injects nothing", (code, out), (0, None))
+
 print("rule 3: no root, no output, no files")
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -359,6 +424,51 @@ with tempfile.TemporaryDirectory() as tmp:
         "the claim carries the name the registry knows this session by",
         json.loads(seeded.read_text()).get("name"),
         "macgyver-2",
+    )
+
+# A background job fires SessionStart with an id of its own, and it is not a second session.
+# Seeding for it gives the root two claims for what the user sees as one, both carrying the same
+# registry `name`, and `SessionEnd` clears only the one that ended - so the leftover renders as a
+# peer with a duplicate name and nothing says which is which. Live on this machine when #31 was
+# measured: two rows for one session, same name, different ids. Both halves are asserted: no claim
+# written, and nothing injected either, with the legacy wiring in place so "nothing injected" is a
+# real answer rather than the answer this fixture gives anyway.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    (home / ".claude" / "sessions" / "bg.json").write_text(
+        json.dumps(
+            {"sessionId": "sess-bg", "name": "shared-name", "pid": os.getpid(), "kind": "bg"}
+        )
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-bg", "cwd": str(repo)},
+        home,
+    )
+    check(
+        "a background job seeds no claim of its own",
+        (root / ".claude" / "exchange" / "sessions" / "sess-bg.json").is_file(),
+        False,
+    )
+    check("and injects nothing into a context it shares with its session", out, None)
+    check("and the session still starts", code, 0)
+
+    # The same fixture with the kind removed, which is the version of Claude Code that predates the
+    # field. It has to seed: treating an unknown kind as not-a-peer renders nobody present at all,
+    # which is worse than rendering one row too many. Without this check the guard above passes just
+    # as well when it drops every session on that version.
+    (home / ".claude" / "sessions" / "bg.json").write_text(
+        json.dumps({"sessionId": "sess-nokind", "name": "shared-name", "pid": os.getpid()})
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-nokind", "cwd": str(repo)},
+        home,
+    )
+    check(
+        "a row with no kind at all is still a session",
+        (root / ".claude" / "exchange" / "sessions" / "sess-nokind.json").is_file(),
+        True,
     )
 
 # A marker that exists and does not parse is still a root, because `resolve` only asks whether the

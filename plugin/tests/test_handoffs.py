@@ -26,6 +26,10 @@ import store
 
 failures = []
 
+# Wider than anything the stripping checks render, so those checks say what they say about stripping
+# and nothing about width. The cap itself is asserted separately, on its own text.
+WIDE = 10_000
+
 
 def check(name, got, want):
     if got == want:
@@ -91,10 +95,10 @@ check(
 )
 check(
     "describe names a narrowed scope",
-    handoffs.describe({"repo": "r", "paths": ["a", "b"]}),
+    handoffs.describe({"repo": "r", "paths": ["a", "b"]}, WIDE),
     "r: a, b",
 )
-check("and a session scope reads as one", handoffs.describe({"session_id": "s"}), "session s")
+check("and a session scope reads as one", handoffs.describe({"session_id": "s"}, WIDE), "session s")
 
 check(
     "an absolute repo is refused, naming the flag and the shape",
@@ -161,28 +165,56 @@ print("another session's text, on its way to a terminal")
 
 check(
     "describe strips an escape out of a repo, which the schema still allows through",
-    handoffs.describe({"repo": "r\033[2K", "paths": ["p\rq"]}),
+    handoffs.describe({"repo": "r\033[2K", "paths": ["p\rq"]}, WIDE),
     "r[2K: pq",
 )
 check(
     "a sender's name is not the typist's, so it is stripped as well",
-    handoffs.describe_sender({"from": {"name": "peer\033[1;31m", "cwd": "/tmp"}}),
+    handoffs.describe_sender({"from": {"name": "peer\033[1;31m", "cwd": "/tmp"}}, WIDE),
     "peer[1;31m",
 )
 check(
     "and the cwd it falls back to, which is a path and can hold anything a path can",
-    handoffs.describe_sender({"from": {"cwd": "/tmp/w\007d"}}),
+    handoffs.describe_sender({"from": {"cwd": "/tmp/w\007d"}}, WIDE),
     "/tmp/wd",
 )
 check(
     "a body preview is one line, stripped",
-    handoffs.preview("first\033[2K line\nsecond line"),
+    handoffs.preview("first\033[2K line\nsecond line", WIDE),
     "first[2K line",
 )
 # Checked rather than assumed, because the empty-list case would be a crash on a record whose
 # content the sender chooses. `minLength: 1` makes "" unreachable from disk; a lone terminator is
 # not unreachable, and it is the one that splits to [''] rather than [].
-check("a body that is only a newline previews as empty, not as a crash", handoffs.preview("\n"), "")
+check(
+    "a body that is only a newline previews as empty, not as a crash",
+    handoffs.preview("\n", WIDE),
+    "",
+)
+
+# #61. One line was the only bound these had, and a line has no length: `body` has `minLength` and
+# no `maxLength`, so a single-line 23 KB body rendered whole into whoever's terminal listed it. Each
+# of the three renderers separately, because a cap applied to two of them reads as done.
+check(
+    "a long body preview is cut at the cap, with the rest counted",
+    handoffs.preview("b" * 300, 240),
+    "b" * 240 + " +60 more chars",
+)
+check(
+    "a scope with more paths than fit is bounded too, being joined before it is capped",
+    handoffs.describe({"repo": "r", "paths": ["p" * 40] * 10}, 60),
+    f"r: {'p' * 40}, {'p' * 15} +361 more chars",
+)
+check(
+    "a session scope as well, that being the branch which returns before the other one",
+    handoffs.describe({"session_id": "s" * 40}, 12),
+    "session ssss +36 more chars",
+)
+check(
+    "and a sender, whose name and cwd both have a length nothing constrains",
+    handoffs.describe_sender({"from": {"cwd": "/tmp/" + "d" * 300}}, 20),
+    "/tmp/ddddddddddddddd +285 more chars",
+)
 
 print("posting never overwrites")
 
@@ -515,6 +547,158 @@ with tempfile.TemporaryDirectory() as tmp:
         len(list(store.transitions_dir(root, "h1").glob("*.json"))),
         2,
     )
+
+print("a tie at the last position is declared, not erased")
+
+
+def frozen(root, handoff_id="h1"):
+    """A handoff with two disagreeing moves at its last position, which nothing can move on from."""
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id=handoff_id)
+    handoffs.set_status(root, handoff_id, handoffs.CLOSED)
+    store.create_json(
+        handoffs.transition_path(root, handoff_id, 0),
+        {"at": store.now(), "status": handoffs.ACCEPTED, "after": 0},
+        handoffs.TRANSITION,
+    )
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    frozen(root)
+    # The state #52 was filed about: honest, permanent, and with no verb anywhere that answered it.
+    check(
+        "the ordinary verbs still refuse it, which is what resolve is for",
+        handoffs.set_status(root, "h1", handoffs.CLOSED)[0],
+        None,
+    )
+
+    move, problem = handoffs.resolve(root, "h1", handoffs.CLOSED, by="me", note="both of us closed")
+    # Read through a `or {}` rather than straight off `move`, so a resolve that refuses this fails
+    # the check by name instead of killing the file on a subscript and reporting nothing at all.
+    written = move or {}
+    check(
+        "resolve writes one more move at the next position, saying who and why",
+        (
+            problem,
+            written.get("after"),
+            written.get("status"),
+            written.get("by"),
+            written.get("note"),
+        ),
+        (None, 1, "closed", "me", "both of us closed"),
+    )
+    status, problems = handoffs.state_of(root, "h1")
+    # The tie is still on disk and still reported. A verb that made the disagreement go away would
+    # be the lost update this whole layout exists to prevent, arriving as a feature.
+    check(
+        "the tie stays reported, and the handoff has a status again",
+        (status, len(problems), "position 0" in (problems[0] if problems else "")),
+        ("closed", 1, True),
+    )
+    check("and the two moves are both still there", len(handoffs.transitions(root, "h1")[0]), 3)
+    check(
+        "so the everyday verbs work on it again",
+        handoffs.set_status(root, "h1", handoffs.OPEN)[1],
+        None,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    handoffs.set_status(root, "h1", handoffs.ACCEPTED)
+    # Refused on a handoff that is not frozen, and this is the check that matters most: without it
+    # `resolve` is `set_status` with the already-in-that-status guard taken out, so the one verb
+    # that writes a status nothing derived would also be the one reachable by typo. The moved-once
+    # handoff goes first because a never-moved one has no position to write past, so a resolve that
+    # stopped refusing would die on that rather than fail a check here and name the rule it broke.
+    settled = handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not")
+    check(
+        "a handoff with nothing wrong with it is refused, and told which verbs to use",
+        (
+            settled[0],
+            "nothing to resolve" in (settled[1] or ""),
+            "accept or close" in (settled[1] or ""),
+        ),
+        (None, True, True),
+    )
+    check("and nothing was written", len(handoffs.transitions(root, "h1")[0]), 1)
+    check(
+        "the refusal names the status it does have, so the reader knows where it stands",
+        "(accepted)" in (settled[1] or ""),
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
+    check(
+        "a handoff nobody has moved yet is refused as well, being open rather than stuck",
+        "(open)" in (handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not")[1] or ""),
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    frozen(root)
+    # An unreadable move on a frozen handoff. Which two statuses are tied cannot be read, so the tie
+    # being resolved may not be the tie on disk - the one guess this verb exists to avoid making.
+    (store.transitions_dir(root, "h1") / "0000-bad.json").write_text("{ truncated")
+    refused = handoffs.resolve(root, "h1", handoffs.CLOSED, note="reading past it")
+    check(
+        "a tie with an unreadable move beside it is still refused",
+        (refused[0], "could not be read" in (refused[1] or "")),
+        (None, True),
+    )
+    check(
+        "leaving the directory as it was",
+        len(list(store.transitions_dir(root, "h1").glob("*.json"))),
+        3,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    frozen(root)
+    # The three refusals `resolve` shares with `set_status`, which is why they are one function: a
+    # second copy would be three rules with only one of them swept.
+    check(
+        "an unknown status is refused",
+        handoffs.resolve(root, "h1", "finished", note="w")[0],
+        None,
+    )
+    check(
+        "so is an id that cannot be a filename",
+        handoffs.resolve(root, "../h1", handoffs.CLOSED, note="w")[0],
+        None,
+    )
+    check(
+        "and an id nothing posted",
+        handoffs.resolve(root, "h2", handoffs.CLOSED, note="w")[1],
+        "no handoff with id h2 under this root",
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    frozen(root)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h2")
+    handoffs.set_status(root, "h2", handoffs.CLOSED)
+    reported = handoffs.unresolved(root)
+    check(
+        "only the frozen one is listed, and it names the verb and the flags",
+        (
+            len(reported),
+            reported[0].startswith("h1 is frozen at position 0") if reported else False,
+            "exchange handoff resolve h1" in (reported[0] if reported else ""),
+            "--note" in (reported[0] if reported else ""),
+        ),
+        (1, True, True, True),
+    )
+    check(
+        "and both of the statuses that are tied, so nobody has to go and read the files",
+        ("accepted and closed" in reported[0]) if reported else False,
+        True,
+    )
+    handoffs.resolve(root, "h1", handoffs.CLOSED, note="decided")
+    check("once resolved, it is not reported as frozen again", handoffs.unresolved(root), [])
 
 print("a moves directory is a name in its own right")
 

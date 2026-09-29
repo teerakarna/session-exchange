@@ -151,4 +151,46 @@ MUTATIONS = [
         new='    problem = claims.clear(root, data.get("session_id"))\n    if False:',
         caught_by="test_hook.py",
     ),
+    Mutation(
+        module="hook",
+        # #31. Without it the root gets two claims for one session, both carrying the same registry
+        # name, and SessionEnd clears only the one that ended.
+        rule="a background job seeds no claim of its own",
+        old="    if not registry.is_peer(known):\n        return",
+        new="    if False:\n        return",
+        caught_by="test_hook.py",
+    ),
+    # #32. The hook was silent about a store `show` names by filename, in the one place every
+    # session is guaranteed to look.
+    Mutation(
+        module="hook",
+        rule="a corrupt record reaches the session that starts, not only `show`",
+        old=(
+            "    for problem in problems[:MAX_PROBLEMS]:\n"
+            "        lines.append(hookio.problem(problem))"
+        ),
+        new="    for problem in []:\n        lines.append(hookio.problem(problem))",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="both record types are enumerated, not just the one the issue reported",
+        old="    for load in (claims.load_all, handoffs.load_all):",
+        new="    for load in (claims.load_all,):",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="the cap on injected problems is a cap",
+        old="    for problem in problems[:MAX_PROBLEMS]:",
+        new="    for problem in problems:",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="and what it leaves out is counted rather than dropped",
+        old="    if len(problems) > MAX_PROBLEMS:",
+        new="    if False:",
+        caught_by="test_hook.py",
+    ),
 ]

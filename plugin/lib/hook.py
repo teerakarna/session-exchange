@@ -24,10 +24,19 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import claims
 import exchange_root
+import handoffs
 import hookio
 import legacy
 import registry
 import store
+
+# How many store problems one session start will carry. A cap rather than the whole list, because a
+# store with fifty unreadable files would otherwise put fifty lines into every session on the
+# machine and push out the thing the session was started to do. Not a setting in the marker: the
+# marker's caps bound *content*, which is a judgement about how much detail is useful, and this
+# bounds a fault report, where the only useful number is "enough to act on one". The remainder is
+# counted, never dropped, which is the same rule `_capped` states for a claim's lists.
+MAX_PROBLEMS = 3
 
 
 def session_start(data, root, lines):
@@ -36,6 +45,20 @@ def session_start(data, root, lines):
     # payload does carry, rather than by walking the process tree, which is the same answer for the
     # price of one directory read.
     known = registry.by_session_id(session_id) or {}
+    # A background job fires SessionStart with its own id, so without this the root gets two claims
+    # for what the user thinks is one session, each with the same `name` copied out of the
+    # registry, and `SessionEnd` clears only the one that ended. Nothing then renders that leftover
+    # as anything but a peer. `registry.is_peer` rather than a comparison here, so the absent-kind
+    # default lives in one place - and it is that default which handles the empty row: an id the
+    # registry has never heard of reads as a peer and still seeds, because "no row yet" is a timing
+    # question and refusing it would be a session with no presence at all. An `if known and ...` in
+    # front of this was the first cut and was dead, `is_peer({})` being true already.
+    #
+    # Returning rather than seeding-and-saying-nothing-else: the legacy warnings below go into the
+    # same conversation the interactive half already got them in, so emitting them here is the
+    # duplicate rendering this plugin exists to stop, one layer down. See #31.
+    if not registry.is_peer(known):
+        return
     _, problem = claims.seed(
         root, session_id, data.get("cwd") or os.getcwd(), name=known.get("name")
     )
@@ -45,6 +68,31 @@ def session_start(data, root, lines):
     _, config_problem = store.config(root)
     if config_problem:
         lines.append(hookio.problem(config_problem))
+
+    # #32. `show` names an unreadable record by filename and this said nothing, so the one place
+    # every session is guaranteed to look was the one place a corrupt store was invisible. `show`
+    # is a command somebody has to think to run, which is the failure this plugin was built about.
+    #
+    # Both record types, not just claims. Claims were what #32 reported and the handoff half is the
+    # same silence one directory over - the live pre-#44 record on this machine is a handoff, and
+    # it is reported by `show`, by `doctor`, and until now by nothing a session sees. The added
+    # cost is one directory read plus one per handoff for its moves, which is the read `show`
+    # already does and which the handoff rendering that lands next needs anyway.
+    problems = []
+    for load in (claims.load_all, handoffs.load_all):
+        _, found = load(root)
+        problems += found
+    for problem in problems[:MAX_PROBLEMS]:
+        lines.append(hookio.problem(problem))
+    if len(problems) > MAX_PROBLEMS:
+        # Counted rather than truncated silently, and it names the command that shows the rest. A
+        # report that quietly stops at three reads exactly like a store with three faults in it.
+        lines.append(
+            hookio.problem(
+                f"and {len(problems) - MAX_PROBLEMS} more problem(s) in the store; "
+                "`exchange show` lists all of them"
+            )
+        )
 
     # Presence and handoff rendering land next. Until then the only thing worth injecting is the
     # migration guard, which is the one that must not wait: a half-migrated machine looks identical

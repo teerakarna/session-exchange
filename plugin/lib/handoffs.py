@@ -187,6 +187,88 @@ def transitions(root, handoff_id):
     return sorted(entries, key=lambda entry: entry["after"]), faults
 
 
+def _moving(root, handoff_id, status):
+    """What both move verbs check before writing anything.
+
+    Returns `(seen, problems, refusal)`: the moves already recorded, whatever went wrong reading
+    them, and a refusal that stands whatever the caller was trying to do. Three values rather than
+    two because the two verbs part company on `problems` - `set_status` folds it in with the contest
+    report and `resolve` refuses on it alone - and a shared function that decided that would be
+    deciding the one thing they disagree about.
+
+    Shared so that "which ids and which statuses exist, and does the record read" is one answer.
+    `resolve` is a second writer of moves, and a second copy of those three refusals would be three
+    things that drift with only one of them the one under test.
+    """
+    if status not in STATUSES:
+        return None, [], f"{status!r} is not a handoff status; one of {', '.join(STATUSES)}"
+    if store.safe_id(handoff_id) is None:
+        return None, [], f"{handoff_id!r} cannot be a filename, so it cannot be a handoff id"
+    # Read to confirm the handoff exists and validates, never to modify it. A transition filed under
+    # an id nothing posted is a status for a handoff no reader will ever go looking for.
+    record, problem = store.read_json(path(root, handoff_id), SCHEMA)
+    if record is None:
+        return None, [], problem or f"no handoff with id {handoff_id} under this root"
+    # No second `if problem` after that. `read_json`'s contract is that every failure returns a
+    # `None` record, so a record in hand means there is no problem to check for, and the check that
+    # used to be here was unfalsifiable: mutating it to `if False:` left the suite green, which this
+    # repo treats as a defect rather than as coverage.
+    seen, problems = transitions(root, handoff_id)
+    return seen, problems, None
+
+
+def _move(root, handoff_id, status, after, by, note, at):
+    """Write one move at `after`. Returns `(transition, problem)`.
+
+    The only writer of a transition file, for both verbs. Which fields a move carries and how it
+    reaches disk is then one thing rather than two that agree today.
+    """
+    entry = {"at": at or store.now(), "status": status, "after": after}
+    if by:
+        entry["by"] = by
+    if note:
+        entry["note"] = note
+
+    problem = store.create_json(transition_path(root, handoff_id, after), entry, TRANSITION)
+    return (None, problem) if problem else (entry, None)
+
+
+def resolve(root, handoff_id, status, by=None, note=None, at=None):
+    """Declare the status of a handoff whose last position is tied. Returns `(transition, problem)`.
+
+    #52. Two disagreeing moves at the *last* position leave no current status to move on from, so
+    `set_status` refuses every further move and `list` and `show` exit 1 for good. Reporting the
+    disagreement rather than resolving it is right - guessing which of two concurrent moves came
+    first is how a closed handoff comes back open - but the state was then unrecoverable through the
+    tool, in a repo whose whole argument is that hand-editing the store is how things go wrong.
+
+    Nothing is erased and nothing is decided on anyone's behalf. The tie stays on disk, `_contested`
+    goes on reporting it for as long as the handoff exists, and this writes one more move at
+    `max + 1` with `by` and `note` recording who resolved it and why, which is what those two fields
+    are for. All that changes is that the handoff can move again.
+
+    Refused unless the last position really is tied. Without that check this is `set_status` with
+    the already-in-that-status guard taken out, reachable by typo, and the one verb here that
+    writes a status nothing derived would also be the easiest one to use by accident.
+    """
+    seen, problems, refusal = _moving(root, handoff_id, status)
+    if refusal:
+        return None, refusal
+    if problems:
+        # Still a refusal, and this is the case it would be tempting to wave through: an unreadable
+        # move could be one of the two at the last position, so which statuses are tied cannot be
+        # read, and resolving a tie that may not be the tie on disk is exactly the guess this verb
+        # exists to avoid making.
+        return None, "; ".join(problems)
+    if _settled(seen):
+        current, _ = _status_of(handoff_id, seen)
+        return None, (
+            f"{handoff_id} has one status at its last position ({current}), so there is nothing to "
+            "resolve; accept or close it"
+        )
+    return _move(root, handoff_id, status, 1 + max(e["after"] for e in seen), by, note, at)
+
+
 def set_status(root, handoff_id, status, by=None, note=None, at=None):
     """Move a handoff to `status` by writing the move. Returns `(transition, problem)`.
 
@@ -200,27 +282,16 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     Before, one of the two entries was gone and nothing said so; now there are two truthful
     records of two sessions closing the same handoff, which is what happened.
     """
-    if status not in STATUSES:
-        return None, f"{status!r} is not a handoff status; one of {', '.join(STATUSES)}"
-
-    if store.safe_id(handoff_id) is None:
-        return None, f"{handoff_id!r} cannot be a filename, so it cannot be a handoff id"
-    # Read to confirm the handoff exists and validates, never to modify it. A transition filed under
-    # an id nothing posted is a status for a handoff no reader will ever go looking for.
-    record, problem = store.read_json(path(root, handoff_id), SCHEMA)
-    if record is None:
-        return None, problem or f"no handoff with id {handoff_id} under this root"
-    # No second `if problem` after that. `read_json`'s contract is that every failure returns a
-    # `None` record, so a record in hand means there is no problem to check for, and the check that
-    # used to be here was unfalsifiable: mutating it to `if False:` left the suite green, which this
-    # repo treats as a defect rather than as coverage.
-
-    seen, problems = transitions(root, handoff_id)
+    seen, problems, refusal = _moving(root, handoff_id, status)
+    if refusal:
+        return None, refusal
     current, faults = _status_of(handoff_id, seen)
     if problems or not _settled(seen):
         # Refusing rather than guessing. An unreadable move could be the latest one, and a
         # contested last position has no latest one, so `current` may not be current - and moving
-        # from a status that is not the real one is how a closed handoff comes back open.
+        # from a status that is not the real one is how a closed handoff comes back open. `resolve`
+        # is the way out of the second of those, and it is a separate verb because it writes a
+        # status nothing derived.
         return None, "; ".join([*problems, *faults])
     if current == status:
         return None, f"{handoff_id} is already {status}"
@@ -231,14 +302,7 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     # any position holds two moves: the count stops equalling the position, so two sessions acting
     # on the same status file at different positions and neither one is reported.
     after = (1 + max(entry["after"] for entry in seen)) if seen else 0
-    entry = {"at": at or store.now(), "status": status, "after": after}
-    if by:
-        entry["by"] = by
-    if note:
-        entry["note"] = note
-
-    problem = store.create_json(transition_path(root, handoff_id, after), entry, TRANSITION)
-    return (None, problem) if problem else (entry, None)
+    return _move(root, handoff_id, status, after, by, note, at)
 
 
 def state_of(root, handoff_id):
@@ -335,8 +399,112 @@ def load_all(root):
     return pairs, problems
 
 
-def describe(to):
+# The two fields #44 removed. `additionalProperties` is false, so the current shape cannot hold
+# either one, which makes their presence a positive test for the old shape rather than a guess at
+# why a record was refused.
+PRE_44_KEYS = ("status", "history")
+
+
+def unconverted(root):
+    """Records written before #44, as problems that say which fix applies. See #51.
+
+    `load_all` already refuses these and names the file and the key, and that refusal is the right
+    direction for the breakage to travel: reading the record and ignoring the two fields would
+    silently reopen every handoff that was closed under the old shape. What it does not say is that
+    there is a conversion at all, so the line reads as a corrupt file and the only action it
+    suggests is deleting one - which for a handoff is the loss this plugin exists to stop.
+
+    Keyed on the fields rather than on the validator's message. The message is prose, a schema
+    change rewrites it, and a diagnostic that matches on it goes quiet at exactly the moment the
+    shape changes again.
+    """
+    problems = []
+    # No schema, deliberately: the whole point is to read a record the current schema refuses.
+    found, _ = store.read_each(store.handoffs_dir(root))
+    for file, record in found:
+        if not isinstance(record, dict):
+            continue
+        present = [key for key in PRE_44_KEYS if key in record]
+        if not present:
+            continue
+        moves = store.transitions_dir(root, file.stem).name
+        problems.append(
+            f"{file.name} was written before #44 and still carries {', '.join(present)}, so it is "
+            "refused rather than read. To convert it: drop those keys from the record, then write "
+            f"one file per old history entry into {moves}/, named 0000-<hex>.json upwards, each "
+            '{"at": the entry\'s at, "status": its status, "after": its position counting from 0}.'
+        )
+    return problems
+
+
+def unresolved(root):
+    """Handoffs frozen by a tie at their last position, as problems naming the verb. See #52.
+
+    `_contested` already reports the disagreement itself, and this is a second line about the same
+    handoff on purpose: that one says what happened, and until `resolve` existed there was nothing
+    anywhere that said what to do about it. Only a tie at the *last* position, because that is the
+    only one that stops a handoff moving - an earlier one is reported forever and blocks nothing.
+    """
+    problems = []
+    found, _ = store.read_each(store.handoffs_dir(root), SCHEMA)
+    for _, record in found:
+        seen, faults = transitions(root, record["id"])
+        if faults or _settled(seen):
+            continue
+        last = seen[-1]["after"]
+        tied = sorted({entry["status"] for entry in seen if entry["after"] == last})
+        problems.append(
+            f"{record['id']} is frozen at position {last}: {' and '.join(tied)} were both moved "
+            "against the same state, so it has no current status and no further move is accepted. "
+            f"`exchange handoff resolve {record['id']} --status <{'|'.join(STATUSES)}> "
+            "--note <why>` writes one at the next position, recording who decided "
+            "rather than erasing the tie."
+        )
+    return problems
+
+
+def orphan_moves(root):
+    """Moves directories with no record beside them, as problems. See #53.
+
+    Nothing iterates directories - `load_all` walks records and asks each one for its moves - so a
+    `<id>.d` whose `<id>.json` has gone is read by nothing at all. `rm handoffs/<id>.json` is the
+    route in, there being no `handoff delete`, and the dangerous half of it is already closed: #50
+    made `post` refuse an id that has moves under it, so a new handoff cannot inherit a stranger's
+    status. What is left is that the directory is invisible. It costs that id forever, and the only
+    symptom is a refusal message the next time anyone picks the same id, which for a timestamped id
+    is never.
+    """
+    directory = store.handoffs_dir(root)
+    found, problems = store.names(directory, "*.d")
+    for moves in found:
+        if not moves.is_dir():
+            continue
+        # `<id>.d` back to `<id>` by removing the suffix this layout adds, rather than by `stem`,
+        # which would also take a dot inside the id: `note.json.d` is the moves of `note.json`.
+        record = directory / f"{moves.name[: -len('.d')]}.json"
+        if record.exists():
+            continue
+        entries, _ = store.names(moves, "*.json")
+        # What a reader would have counted, so the same `.tmp-` names `read_each` drops. A count
+        # that included one would say the orphan holds a move that nothing was ever going to read,
+        # and `litter` reports those on their own line anyway.
+        kept = [path for path in entries if not path.name.startswith(store.TMP_PREFIX)]
+        problems.append(
+            f"{moves.name} holds {len(kept)} move(s) with no {record.name} beside it, so nothing "
+            "reads it and no handoff can ever be posted under that id again. Either write the "
+            "record back or delete the directory."
+        )
+    return problems
+
+
+def describe(to, cap):
     """The addressing, in one short phrase, for a human reading a list.
+
+    `cap` is required rather than defaulted, as on the other two renderers here and on
+    `claims.describe_focus`. These render text a different session wrote, at whatever width it wrote
+    it, and a cap with a default is a cap a future caller forgets to pass and nothing reports. #61
+    was filed because the handoff list was the one render in the plugin with no width bound at all,
+    and an optional argument is how it would become that again.
 
     Through `store.printable`, like the two below, and that is why these three live here rather than
     in the caller that prints them. `cli` is in `DECLINED`, on the argument that its output is wrong
@@ -364,26 +532,37 @@ def describe(to):
     made safe by this call.
     """
     if "session_id" in to:
-        return f"session {store.printable(to['session_id'])}"
+        return store.capped_text(f"session {store.printable(to['session_id'])}", cap)
     paths = to.get("paths")
     repo = store.printable(to["repo"])
-    return f"{repo}: {', '.join(store.printable(p) for p in paths)}" if paths else repo
+    # Capped after joining, so a scope with forty paths in it is bounded by width the way every
+    # other line here is. `max_hot_paths` bounds a claim's lists by count; this side has no such
+    # setting and does not need one, the question being how much of a terminal one row may take.
+    phrase = f"{repo}: {', '.join(store.printable(p) for p in paths)}" if paths else repo
+    return store.capped_text(phrase, cap)
 
 
-def describe_sender(record):
+def describe_sender(record, cap):
     """Who posted it, in one short phrase.
 
     `name` is free text in the schema and `cwd` is a filesystem path, so both can hold anything a
-    path can hold, which on Linux is everything except `/` and NUL. Neither is the typist's own.
+    path can hold, which on Linux is everything except `/` and NUL. Neither is the typist's own,
+    and neither has a length limit in the schema, which is what `cap` is for.
     """
-    return store.printable(record["from"].get("name") or record["from"]["cwd"])
+    return store.capped_text(
+        store.printable(record["from"].get("name") or record["from"]["cwd"]), cap
+    )
 
 
-def preview(body):
-    """The first line of a body, safe to print.
+def preview(body, cap):
+    """The first line of a body, safe to print and bounded in width.
 
     `splitlines()[0]` cannot `IndexError` here: `body` has `minLength: 1`, and a string that is only
     a line terminator splits to `['']` rather than `[]`. Checked rather than assumed, because the
     empty-list case would be a crash on a record a sender fully controls.
+
+    One line was the only bound this had, and a line has no length: the body is prose from another
+    session with `minLength` and no `maxLength`, so a single-line 23 KB body rendered whole. Same
+    row, same size, same defect as the ledger this plugin replaced.
     """
-    return store.printable(body.splitlines()[0])
+    return store.capped_text(store.printable(body.splitlines()[0]), cap)
