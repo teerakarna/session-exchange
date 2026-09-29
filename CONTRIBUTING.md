@@ -174,8 +174,15 @@ third-party import is not a dependency decision, it is an `ImportError` at sessi
 machine but yours. CI fails the build on one.
 
 The same reasoning sets the floor at **Python 3.9**, which is what a stock macOS ships. CI runs 3.9,
-3.11 and 3.13 on Linux, and 3.13 on macOS. One macOS leg rather than two: the platform-sensitive parts
-are `os.kill` and `ps`, which do not vary by interpreter version, and macOS minutes bill at 10x.
+3.11 and 3.13 on Linux in one job, and 3.13 on macOS in another. One macOS run rather than two: the
+platform-sensitive parts are `os.kill` and `ps`, which do not vary by interpreter version, and macOS
+minutes bill at 10x.
+
+That 10x is also why the macOS job runs on every push to `main` but on a pull request only once it is
+out of draft. **Open PRs with `gh pr create --draft` and `gh pr ready` when they are done.** A draft
+cannot be merged, so nothing reaches `main` without having been through macOS, and the six pushes it
+takes to write a branch stop costing ten billed minutes each. Forgetting costs you nothing but the
+minutes.
 
 Lint and the shell handlers, matching what CI runs:
 
@@ -204,8 +211,9 @@ exists inside CI.
 | Tier | Command | In CI |
 |---|---|---|
 | Lint and shape | `uvx ruff@0.16.9 check .`, `ruff format --check .`, `shellcheck plugin/hooks-handlers/*.sh`, `claude plugin validate --strict ./plugin` and `--strict .` | `checks`, every push |
-| The suite | `python3 plugin/tests/run.py` | `test`, every push, on 3.9/3.11/3.13 and macOS |
-| Sweep, narrowed | `python3 plugin/tests/mutate.py --since origin/main` | `mutate`, every push |
+| The suite | `python3 plugin/tests/run.py` | `test`, every push, on 3.9/3.11/3.13 |
+| The suite on macOS | `python3 plugin/tests/run.py` | `test-macos`, on `main` and on PRs out of draft |
+| Sweep, narrowed | `python3 plugin/tests/mutate.py --since origin/main` | `mutate`, every push to a PR |
 | Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |
 | Secrets | none, unless you have `gitleaks` installed | `secrets`, every push, full history |
 
@@ -235,8 +243,8 @@ authority on whether a change is good, and every hook in there runs a command fr
 buys is the round trip, a format failure found in under a second rather than two minutes later in a
 log. The sweep is in neither stage, for the arithmetic below.
 
-The one tier that is not run on every push is the full sweep, and the reason is arithmetic rather than
-taste. A sweep is one full suite run per mutation, and every figure here is labelled with the count it
+Of the tiers held back from some pushes, the full sweep is the one held back purely by arithmetic
+rather than taste. A sweep is one full suite run per mutation, and every figure here is labelled with the count it
 was taken at, because a number that quietly re-labels itself as the tables grow is the whole problem:
 six tables was 87 mutations and just over four minutes locally, eight was 144 and eight and a half, and
 the ninth table was measured at 14m51s while it stood at 177 mutations. It is 191 now and sixteen and a
@@ -315,8 +323,16 @@ raises on the next line still reads as an ordinary catch, and the rules after th
 still credited. Telling that apart needs the number of checks the file owed, and nothing has it, which
 is #57.
 
-Nothing else is tiered. The test matrix is four fixed legs that do not grow, and a PR gate weaker than
-the gate on `main` is the failure mode this repo is about, so it stays as it is.
+Two other things are tiered, and both were sized off a measurement rather than an instinct (#73, which
+has the billed-minute breakdown). The sweep does not run on a push to `main`, because after a squash
+merge `--since` gives exactly the diff the PR already swept - the interaction case, where `main` moved
+under the branch, is the weekly full sweep's job and it covers every table rather than a narrowed set.
+And the macOS job runs on `main` and on PRs out of draft, not on every draft push.
+
+Neither makes the gate on a merge weaker than the gate on `main`, which is the line that does not move:
+a draft cannot be merged, so everything that lands has been through macOS, and the full sweep on `main`
+is weekly rather than absent. A PR gate weaker than the gate on `main` is the failure mode this repo is
+about, and the way to cut a bill is to stop paying for the same answer twice, not to stop asking.
 
 None of that reads a check and asks whether it could fail, which is the one thing this repo cares most
 about, so a review of the diff is expected before a PR as well. `CLAUDE.md` states how to size it and
@@ -390,16 +406,24 @@ none and finish inside the same minute `checks` does. The reasons for the split 
 rate did, and the comment says so.
 
 `ci` is the aggregate job at the bottom of the workflow, and it is the only check the ruleset names.
-That is deliberate: naming the matrix legs individually would put every OS and Python version into a
-repo setting, so dropping one would block `main` forever on a check that can never report again. Add a
+That is deliberate: naming the jobs individually would put every OS and Python version into a repo
+setting, so dropping one would block `main` forever on a check that can never report again - which is
+what splitting `test-macos` out of the matrix would have done if the ruleset named anything else. Add a
 job to the workflow and add it to `ci`'s `needs`, or it gates nothing. A step inside `ci` asserts that
 now, because for eleven jobs and four consolidations the rule was kept by hand, on the one list every
 other gate hangs off, and forgetting it looks exactly like remembering it: the job runs, reports, goes
 red, and the merge button stays green. Inside `ci` rather than in `checks`, where it was first written,
 because from there the one name it could not check was `checks` - and it also means the assertion is
-part of the only check the ruleset requires. The cost of that is one thing it forbids: a job that runs
-conditionally is `skipped` on the runs where its condition is false, and `ci` reads that as failure, so
-a conditional job needs both the loop and the assertion changed rather than a name added to a list.
+part of the only check the ruleset requires.
+
+A job that runs conditionally is `skipped` on the runs where its condition is false, and `ci` reads a
+skip as a failure unless the job is named in `MAY_SKIP` in that same assert step. Adding a job with an
+`if:` therefore means editing two things, which is the point: `MAY_SKIP` is written down there and also
+derived from which jobs carry an `if:`, and the step fails when the two disagree. Derived alone, adding
+an `if:` would silently buy a job permission to skip. Written alone, the name outlives the `if:` and the
+gate starts reading "skipped because something upstream broke" as a pass. The exemption is only ever
+safe for a job whose condition can be false on a **passing** run - `test-macos` skips on a draft PR,
+and a draft cannot be merged.
 
 **A new job is not free, and the unit is not the second.** Actions bills per job, rounded up to a
 whole minute, and macOS bills that minute at 10x. The eleven jobs this workflow had before it was
