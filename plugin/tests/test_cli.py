@@ -3,10 +3,9 @@
 
 `HOME` is pointed at a tmpdir throughout, which isolates the session registry, the legacy scripts
 and the user settings in one move. The registry fixture names this test process as the session's
-pid,
-because that is how the CLI works out who is calling it: it walks up the process tree until a pid
-matches a registry row, since a command run through a tool call has no other way to learn its own
-session id and matching on cwd picks the wrong session the moment two of them share a directory.
+pid, because that is how the CLI works out who is calling it: it walks up the process tree until a
+pid matches a registry row, since a command run through a tool call has no other way to learn its
+own session id and matching on cwd picks the wrong session the moment two of them share a directory.
 """
 
 import json
@@ -238,6 +237,114 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "and marks the one with no live session as stale", "no longer in the registry" in out, True
+    )
+
+    # #46 on the other side of the comparison it was filed about. The guard was on `handoff post`
+    # alone for one commit, which contains nothing: the matcher compares `to.repo` against a claim's
+    # `repos`, so an absolute path refused on one route arrives by the other. Three flags, because
+    # `--set-path` writes the field `--path` appends to and a guard on two of the three is the same
+    # bug one flag over.
+    for flag, value in (
+        ("--repo", "/etc"),
+        ("--repo", "../../../../etc"),
+        ("--path", "/etc/shadow"),
+        ("--path", "a/../../b"),
+        ("--set-path", "/etc"),
+    ):
+        code, out = run(home, repo, "claim", flag, value)
+        check(
+            f"claim {flag} {value} is refused, as it is on a handoff",
+            (code, "problem:" in out),
+            (1, True),
+        )
+    code, out = run(home, repo, "claim", "--repo", "\t/etc")
+    check(
+        "and so is one that only renders as an absolute path",
+        (code, "cannot hold characters a terminal does not show" in out),
+        (1, True),
+    )
+    # The codepoint, not only the shape it renders as. `/etc` on its own is a string the typist can
+    # see nothing wrong with, so a refusal carrying that alone is one they cannot act on.
+    check("and the refusal names what to remove", "U+0009" in out, True)
+    written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
+    check("and none of them reached the record", written["repos"], ["one"])
+    code, out = run(home, repo, "claim", "--repo", "two/../two")
+    check("a .. in the middle is refused as well as one at the front", code, 1)
+    # Not a blanket refusal of anything with dots in it, which is the way a guard like this usually
+    # goes wrong: `..` is a whole component or it is nothing.
+    code, out = run(home, repo, "claim", "--repo", "a..b")
+    check("an ordinary repo whose name merely contains dots still claims", code, 0)
+
+print("another session's claim does not get to drive the reader's terminal")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The claim half of #47. `show` renders five fields off someone else's claim and none of them
+    # carries a pattern in the schema - `focus` is described as "in its own words". It rendered all
+    # five raw. A human's terminal is the whole of the reach today: `hook.py` renders no claim
+    # content and says presence rendering lands next, so nothing here reaches a model's context yet.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    nasty = "HARMLESS\033[2K\033[1;31mURGENT\007"
+    code, out = run(
+        home, repo, "claim", "--session", "peer-1", "--focus", nasty, "--ticket", "T\0071"
+    )
+    peer = area / ".claude" / "exchange" / "sessions" / "peer-1.json"
+    stored = json.loads(peer.read_text())
+    # Stored verbatim, like a handoff body: the store is not the place to edit someone's prose.
+    check("the claim keeps the focus exactly as it was written", stored["focus"], nasty)
+    # The echo is a render too, and it was the one the first cut of this block missed while it fixed
+    # `show`. With `--session` the record being read back belongs to another session, so these lines
+    # carry that session's text, and `--focus` is the flag whose whole job is free text.
+    check(
+        "and the echo confirming it is inert as well",
+        ("\033" in out, "\007" in out, "focus: HARMLESS[2K[1;31mURGENT" in out),
+        (False, False, True),
+    )
+    check("including a list field in that echo", ("T1" in out, "\007" in out), (True, False))
+
+    code, out = run(home, repo, "show")
+    check(
+        "and show renders it inert",
+        ("\033" in out, "\007" in out, "HARMLESS[2K[1;31mURGENT" in out),
+        (False, False, True),
+    )
+    # The name comes out of the registry, which is another session's process rather than this one's.
+    stored["name"] = "peer\033[2Kx"
+    peer.write_text(json.dumps(stored))
+    code, out = run(home, repo, "show")
+    check(
+        "a display name another session chose renders inert too",
+        ("\033" in out, "peer[2Kx" in out),
+        (False, True),
+    )
+    # And in the echo, which is the other render of the same field. The claim already holds the name
+    # by now, so `claim` echoes it back without the registry being involved a second time.
+    code, out = run(home, repo, "claim", "--session", "peer-1", "--ticket", "T2")
+    check(
+        "and in the line the echo leads with",
+        ("\033" in out, "claimed as peer[2Kx" in out),
+        (False, True),
+    )
+    # A list field, and not only its first element. Re-read before editing: the `claim` above wrote
+    # a ticket and a fresh timestamp, and putting back the dict that was read before it would drop
+    # both, leaving a check further down asserting against a record this file had already replaced.
+    stored = json.loads(peer.read_text())
+    stored["paths"] = ["ok", "two\033[2K"]
+    peer.write_text(json.dumps(stored))
+    code, out = run(home, repo, "show")
+    check(
+        "and so does every element of a list field",
+        ("\033" in out, "ok, two[2K" in out),
+        (False, True),
+    )
+    # And that same field through the echo, which is where the guard on the way in stops being the
+    # answer: `--path` is held by `store.scope_fault`, but this `paths` was written into the file
+    # directly, the way an older record or a hand edit does, and the way step 4's importer will.
+    code, out = run(home, repo, "claim", "--session", "peer-1")
+    check(
+        "a scope the guard never saw is still inert when the echo reads it back",
+        ("\033" in out, "paths: ok, two[2K" in out),
+        (False, True),
     )
 
 print("doctor")
@@ -503,6 +610,93 @@ with tempfile.TemporaryDirectory() as tmp:
         "a record carrying its own status is refused by name, not read around",
         (code, "unexpected key 'status'" in out, "0 stored" in out),
         (1, True, True),
+    )
+
+print("a handoff addressed to a session nobody is running says so while it can")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #45 decided that addressing is a hint rather than access control, so the mistyped id is the
+    # only real failure left in it, and a note at post time is the whole fix. Both halves are
+    # checked here: the note when nothing holds the id, and no note when something does - a warning
+    # that fires either way says nothing, and that is the easier of the two to ship by accident.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+
+    code, out = run(home, repo, "handoff", "post", "--session", "no-such-session", "--body", "hi")
+    check(
+        "an unheld id is a note, not a refusal, and the handoff is posted",
+        (code, "no live session is registered as no-such-session" in out, "posted" in out),
+        (0, True, True),
+    )
+    check(
+        "and the note says any session can move it, since that is what was decided",
+        "any session can" in out,
+        True,
+    )
+
+    # The fixture registers this test process, so its own session id is one the registry holds.
+    own = json.loads(next((pathlib.Path(home) / ".claude" / "sessions").glob("*.json")).read_text())
+    code, out = run(home, repo, "handoff", "post", "--session", own["sessionId"], "--body", "hi")
+    check(
+        "a live id gets no note, or the warning means nothing",
+        (code, "no live session is registered" in out),
+        (0, False),
+    )
+
+print("another session's text does not get to drive the reader's terminal")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # End to end, and the reason it is here as well as in `test_handoffs.py`: the rule lives in
+    # `handoffs` so the sweep can reach it, and nothing stops a later edit inlining the rendering
+    # back into `cli`, where it would be correct on the day and unswept afterwards. This check is
+    # what would notice. `cli` is in DECLINED on the argument that its output is wrong in front of
+    # the person who typed the command, and that argument is exactly what fails here: an erase-line
+    # escape makes the output look right to the only witness.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    nasty = "HARMLESS\033[2K\033[1;31mURGENT\007"
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", nasty)
+    handoff_id = posted_id(out)
+
+    stored = json.loads(
+        (area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json").read_text()
+    )
+    # Stored verbatim. The store is not the place to edit someone's prose, and a body that came back
+    # altered would be a worse bug than the one being fixed: the record is the evidence.
+    check("the record keeps the body exactly as it was posted", stored["body"], nasty)
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "and the rendered line carries no escape at all",
+        (code, "\033" in out, "\007" in out, "HARMLESS[2K[1;31mURGENT" in out),
+        (0, False, False, True),
+    )
+    # Not just the body. Three fields on that block come from the sender. `to` used to be reachable
+    # with an escape in it and is not any more: `scope_fault` refuses a scope whose printable form
+    # differs from the value, because a stored scope that renders as something else is both a
+    # misleading line and two things the matcher cannot tell apart. So the CLI path is a refusal
+    # now.
+    code, out = run(home, repo, "handoff", "post", "--repo", "r\033[2Kp", "--body", "scope")
+    check(
+        "a repo with an escape in it is refused rather than posted",
+        (code, "\033" in out, "cannot hold characters a terminal does not show" in out),
+        (1, False, True),
+    )
+    check("and that refusal names the codepoint rather than only the shape", "U+001B" in out, True)
+
+    # And the rendering still strips, which is the half that refusal does not cover. Written
+    # straight to disk here, because that is the case that remains: a record an importer wrote, or
+    # one that predates the guard, or anything else that is not this CLI. Without this the
+    # `describe` stripping would have no end-to-end check left at all, since the only caller that
+    # could produce the input now refuses to - which is how a guard added upstream quietly retires
+    # the one downstream.
+    aged = dict(stored, id="20260101T000000Z-aaaaaa", to={"repo": "r\033[2Kp"})
+    (area / ".claude" / "exchange" / "handoffs" / f"{aged['id']}.json").write_text(json.dumps(aged))
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "a record written by something other than this CLI still renders inert",
+        (code, "\033" in out, "to r[2Kp" in out),
+        (0, False, True),
     )
 
 print("what is not built yet says so, and does not look like a failure")

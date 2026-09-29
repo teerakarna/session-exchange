@@ -96,6 +96,94 @@ check(
 )
 check("and a session scope reads as one", handoffs.describe({"session_id": "s"}), "session s")
 
+check(
+    "an absolute repo is refused, naming the flag and the shape",
+    handoffs.to_scope(repo="/etc")[1],
+    "--repo is relative to the root, so it cannot start with /: /etc",
+)
+check(
+    "so is one that climbs out, and it is a different message because it is a different mistake",
+    handoffs.to_scope(repo="../../../../etc")[1],
+    "--repo cannot climb out of the root with ..: ../../../../etc",
+)
+check(
+    "a .. anywhere in the repo counts, not only at the front",
+    handoffs.to_scope(repo="a/../../b")[1],
+    "--repo cannot climb out of the root with ..: a/../../b",
+)
+# The half a guard written for `repo` alone leaves behind. Separate checks per shape and per field,
+# because one check over a loop passes as soon as any element is refused.
+check(
+    "a path that climbs out is refused too, with a repo that is fine",
+    handoffs.to_scope(repo="ok", paths=["../../etc"])[1],
+    "--path cannot climb out of the root with ..: ../../etc",
+)
+check(
+    "and an absolute one",
+    handoffs.to_scope(repo="ok", paths=["/etc"])[1],
+    "--path is relative to the root, so it cannot start with /: /etc",
+)
+check(
+    "a later path is reached, so the loop does not stop at the first element",
+    handoffs.to_scope(repo="ok", paths=["fine", "also/fine", "../out"])[1],
+    "--path cannot climb out of the root with ..: ../out",
+)
+check(
+    "a refused scope returns no scope, so a caller ignoring the problem writes nothing",
+    handoffs.to_scope(repo="/etc")[0],
+    None,
+)
+# The shape that only becomes one of the two above once something renders it. `\t/etc` does not
+# start with `/`, so the first check in this block passes it, and then every renderer here shows
+# `/etc`.
+check(
+    "a repo that merely renders as an absolute path is refused as well",
+    handoffs.to_scope(repo="\t/etc")[1],
+    "--repo cannot hold characters a terminal does not show: U+0009. "
+    "Without them it reads as '/etc'",
+)
+check(
+    "and so is a path, the two fields being constrained identically",
+    handoffs.to_scope(repo="ok", paths=["fine", "p\033[2Kq"])[1],
+    "--path cannot hold characters a terminal does not show: U+001B. "
+    "Without them it reads as 'p[2Kq'",
+)
+# `..` as a component, not as a substring. These are ordinary names and refusing them would be the
+# guard being wrong in the direction nobody reports, because the handoff just never posts.
+check("a name containing dots is not a climb", handoffs.to_scope(repo="a..b/..bashrc")[1], None)
+check(
+    "and that scope is the one that was asked for",
+    handoffs.to_scope(repo="a..b/..bashrc")[0],
+    {"repo": "a..b/..bashrc"},
+)
+
+print("another session's text, on its way to a terminal")
+
+check(
+    "describe strips an escape out of a repo, which the schema still allows through",
+    handoffs.describe({"repo": "r\033[2K", "paths": ["p\rq"]}),
+    "r[2K: pq",
+)
+check(
+    "a sender's name is not the typist's, so it is stripped as well",
+    handoffs.describe_sender({"from": {"name": "peer\033[1;31m", "cwd": "/tmp"}}),
+    "peer[1;31m",
+)
+check(
+    "and the cwd it falls back to, which is a path and can hold anything a path can",
+    handoffs.describe_sender({"from": {"cwd": "/tmp/w\007d"}}),
+    "/tmp/wd",
+)
+check(
+    "a body preview is one line, stripped",
+    handoffs.preview("first\033[2K line\nsecond line"),
+    "first[2K line",
+)
+# Checked rather than assumed, because the empty-list case would be a crash on a record whose
+# content the sender chooses. `minLength: 1` makes "" unreachable from disk; a lone terminator is
+# not unreachable, and it is the one that splits to [''] rather than [].
+check("a body that is only a newline previews as empty, not as a crash", handoffs.preview("\n"), "")
+
 print("posting never overwrites")
 
 with tempfile.TemporaryDirectory() as tmp:

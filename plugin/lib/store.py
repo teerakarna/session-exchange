@@ -89,6 +89,112 @@ def safe_id(value):
     return value if isinstance(value, str) and SAFE_ID.fullmatch(value) else None
 
 
+def printable(value):
+    """`value` with every character a terminal acts on rather than shows removed.
+
+    For text one session wrote and another session's terminal renders. `safe_id` is the same lesson
+    one field over - its docstring is about a newline ending a markdown row early - and the reason
+    this is a second function rather than a second caller of that one is that prose has to survive
+    it. An id may be refused; a body has to be shown.
+
+    `str.isprintable` rather than a blacklist of the escapes seen so far. It already excludes every
+    C0 and C1 control, so `\\033`, `\\r` and `\\007` go without being named, and it also excludes
+    the `Cf` category, which is where the bidi overrides live - a class nobody here thought of, kept
+    out by picking the question "would a terminal show this" over "is this one of the bad ones". Tab
+    is not printable and goes, which is correct for a one-line preview: the character is there to
+    move the cursor.
+
+    What that question costs, stated rather than discovered later. U+0020 is the only space it
+    keeps: every other `Zs` goes, including U+3000, which is the ordinary space in Japanese and
+    Chinese prose, and U+00A0, which arrives in anything pasted out of a browser. `Cf` takes the
+    bidi overrides and also ZWJ and ZWNJ, which are orthographic rather than decorative - dropping
+    them joins words in Persian, changes which glyph an Indic conjunct renders as, and splits an
+    emoji family into three people. Accented Latin, Greek, Cyrillic, CJK, Thai, Arabic, Hebrew,
+    Devanagari, combining accents and single emoji all survive, which is the half that matters for
+    prose. The trade is accepted because the alternative is naming escapes one at a time and the
+    next one is always the one nobody named, but it is a trade and not a free win.
+
+    Dropping rather than escaping. `repr` was the alternative and it backslashes every quote and
+    backslash in ordinary prose, so the common case pays for the rare one. Dropping does mean the
+    rendered line can differ from the stored one, which is worth stating plainly - but that is
+    already true of the text this exists for, and an erase-line escape makes the difference the
+    reader's problem instead of the writer's.
+    """
+    return "".join(ch for ch in value if ch.isprintable())
+
+
+def scope_fault(flag, value):
+    """Why `value` cannot be a root-relative scope path, or None.
+
+    Here rather than in either record's module because both records have these fields and they mean
+    the same thing in both: a handoff's `to.repo` and `to.paths`, and a claim's `repos` and `paths`.
+    The whole point of the shape is that the two get compared - #46 was filed on the sentence
+    "matching a handoff to a recipient means comparing `to.repo` against a claim's `repos`" - so a
+    guard on one side of that comparison and not the other contains nothing. It was on the handoff
+    side alone for one commit. `store` is the module both importers already have.
+
+    Root-relative is what both schemas say these are, and `minLength: 1` was the whole of what they
+    enforced. Not a pattern in the schemas, for the reason `to`'s docstring gives about `oneOf`: a
+    pattern refuses with "does not match", and the useful sentence names which flag and which shape.
+
+    Nothing dereferences either field as a path today, so this is containment ahead of the matcher
+    rather than a fix for a live escape - one function now against two consumers later. The three
+    cases are separate messages because they are separate mistakes: a leading `/` is usually a
+    habit, a `..` is usually a misunderstanding of what the field is relative to, and an invisible
+    character is usually a paste.
+
+    Split on `/` rather than resolved with `pathlib`: resolving asks the filesystem what exists,
+    which makes the refusal depend on the machine it runs on. `..` as a whole component, so `a..b`
+    and `..bashrc` stay legal, which they are.
+
+    The `printable` case is a refusal and not a strip, and that is the load-bearing part rather than
+    its position in the list. `\\t/etc` does not start with `/`, so the check above passes it, and
+    every renderer here strips the tab and shows `/etc` - the exact shape that check exists to
+    refuse, manufactured after it ran. Stripping on the way in would have the same problem one layer
+    down. A field that gets compared cannot afford it for a second reason that has nothing to do
+    with terminals: two scopes differing only by a character nothing displays look identical to the
+    person deciding whether they collide. So a scope is stored only if it is the same string the
+    reader sees.
+
+    Order between the three changes which message comes back and nothing else, all three being
+    refusals. It is first because an invisible character is the one a reader cannot diagnose from
+    the other two messages.
+
+    That message names codepoints, and it has to. It cannot carry the value: printing the raw one
+    puts the escape back into the line that refuses it. It cannot carry the stripped one alone
+    either, which is what it did first - `--path` holding a tab refused with "rather than shows:
+    /etc", and `/etc` is a string the typist can see nothing wrong with, so the refusal read as
+    arbitrary and there was nothing to act on. For a value that is invisible end to end the stripped
+    form is empty and the message said nothing at all. `U+0009` is actionable; the shape it renders
+    as stays in the message after it, because that is the half that says why anyone cares.
+
+    The predicate is `printable` applied to one character rather than a second copy of
+    `isprintable`, for the reason `_staged` gives about one refusal in one place: two copies of it
+    drift and only one is the one under test.
+
+    Wider than "characters a terminal acts on": U+00A0 and U+3000 are refused too, and `printable`'s
+    docstring is explicit that it drops them. For prose that is a cost. For a scope it is the point.
+    A path component differing from another only by a non-breaking space is the collision case this
+    guard exists for, it is what #62 is about, and a store holding both spellings cannot tell anyone
+    which one they meant. So the refusal stays wide and the message names the codepoint, rather than
+    the refusal narrowing to `Cc` and `Cf` and letting the two spellings in.
+    """
+    shown = printable(value)
+    if shown != value:
+        dropped = ", ".join(
+            f"U+{ord(ch):04X}" for ch in dict.fromkeys(value) if printable(ch) != ch
+        )
+        return (
+            f"{flag} cannot hold characters a terminal does not show: {dropped}. "
+            f"Without them it reads as {shown!r}"
+        )
+    if value.startswith("/"):
+        return f"{flag} is relative to the root, so it cannot start with /: {value}"
+    if ".." in value.split("/"):
+        return f"{flag} cannot climb out of the root with ..: {value}"
+    return None
+
+
 def _staged(path, obj, schema):
     """Validate, then write a temp file beside the target. Returns `(tmp, problem)`.
 

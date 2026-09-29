@@ -185,6 +185,16 @@ uvx ruff@0.16.9 format --check .
 shellcheck plugin/hooks-handlers/*.sh
 ```
 
+`ruff format` will not fix E501 in a comment or a docstring, because it does not rewrap prose, and
+there is a lot of prose here. Rewrapping it by hand left a stub line ("pid," alone) in three
+consecutive commits on #56 and the same stub survived into #59, so a script is the better idea - but
+only if it can tell prose from code. One written for this reflowed a `check(...)` call as though the
+arguments were a paragraph, which put a line break inside a string literal in two files and left them
+unparseable. Whatever does the reflowing has to key on the run of lines sharing a `#` or being inside
+a docstring, never on "this line is too long", and `python3 -c 'import ast; ast.parse(...)'` on every
+file it touched is the cheap check that it did. A long string is split with implicit concatenation
+instead, which `ruff format` then leaves alone.
+
 ## What runs when, and how to run it yourself
 
 Every gate here has a local command, because Actions goes down, the free minutes run out, and a gate
@@ -198,6 +208,17 @@ exists inside CI.
 | Sweep, narrowed | `python3 plugin/tests/mutate.py --since origin/main` | `mutate`, every push |
 | Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |
 | Secrets | none, unless you have `gitleaks` installed | `secrets`, every push, full history |
+
+To check one new rule without paying for a whole sweep, go through `mutate.run_suite(mutation)`, which
+copies the repo to a fresh temp directory per mutation. Do not patch a file in `plugin/lib` in place,
+run a test, and restore it. That reads like the same thing and is not: the mutated and restored files
+have different sizes but successive *mutations* often have the same one, `.pyc` invalidation is
+(mtime, size) with one-second mtime granularity, and two same-size mutations written inside one second
+make Python reuse the bytecode compiled from the first. Verifying the seven mutations of #45/#46/#47
+that way, two of them scored against the previous mutation's code and the failure named a check
+neither of them touched. The sweep itself is not exposed to this - fresh directory per mutation, and
+`__pycache__` is in `IGNORE` - but the shortcut around it is, and it fails by attributing a real
+failure to the wrong rule, which is the direction that does not look like a bug.
 
 `.pre-commit-config.yaml` wires lint, shellcheck and the suite to git, if you want them there.
 Not the two `claude plugin validate` calls, which need `claude` on PATH, so run those by hand or
@@ -224,9 +245,13 @@ would have predicted ten and a half at 177, and it took fifteen.
 
 Every figure in that paragraph is a laptop, and the runner is a different measurement rather than the
 same one scaled. Three full resweeps of the same 191 over three consecutive commits came in at 20m44s,
-17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. A spread
-of nearly half, which swallows every local figure at this count, so the observed band is the whole of
-4.5 to 6.5 seconds and a tighter reading of it is not supported. Naming one is the older mistake here:
+17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. Two more
+resweeps of the same count came in at 5.2s and 4.7s, inside those three, and then a resweep of 198 came
+in at 4.1s, below all five. So the band is 4.1 to 6.5 seconds. The sentence here said the two inside ones
+"fall inside those three rather than extending them", which was true when written and was falsified by the
+next run: a claim about a range, phrased as though the range were now settled, is the shape to avoid. Say
+what the samples are and let the band be whatever they say. A spread of more than half swallows every
+local figure at every count, so a tighter reading of it is not supported. Naming one is the older mistake:
 the comment in `ci.yml` carried "between four and a half and four and three quarters" for the
 87-mutation set with no samples recorded beside it, so where that quarter-minute came from is not
 answerable now, and four later resweeps put the runner spread at three to five minutes. The first
@@ -240,7 +265,10 @@ and was canceled.
 
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
-from 3.5s at 144 to 5.0s at 177, and is 5.2s at 191. That is already well past what a push should carry to
+from 3.5s at 144 to 5.0s at 177, was 5.2s at 191, 5.7s at 198 and is 7.1s at 207 on the same laptop. The
+last step is the paragraph's own point arriving: nine mutations were added and the suite went from 1577
+checks to 1649, so the per-mutation figure moved by more than the nine mutations cost on their own, and
+the full sweep went from 1128s to 1475s. That is well past what a push should carry to
 re-answer a question the last push answered about code it did not touch, and each table added makes it
 worse than the one before. So `ci` sweeps only the modules the change could have affected, and the full
 sweep runs weekly where the length of it does not matter. The run prints its own per-mutation figure
@@ -329,6 +357,13 @@ implement it and the meta-test will tell you when you have not.
 
 Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`). Branch and PR for everything; nothing lands
 on `main` directly. No `Co-Authored-By` trailers.
+
+Repeat the keyword for every issue a PR closes: `Closes #36, closes #27, closes #42`. GitHub parses only
+the issue immediately after the keyword, so `Closes #36, #27, #42` closes one and silently ignores the
+rest. #56 shipped with that shape in both the PR body and the squash message, closed #36, left three
+open, and nothing anywhere reported it - the merge succeeded and the PR said what it meant to do. The
+failure is invisible unless you go and look at the issues, which is the same shape as everything else
+in this file.
 
 That last part is enforced rather than trusted: a ruleset on `main` requires a pull request and a green
 `ci`, blocks force pushes and branch deletion, and has no bypass actors, so a direct push is rejected

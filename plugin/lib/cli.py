@@ -157,16 +157,16 @@ def cmd_show(args):
     print(f"claims    {len(held)}")
     for claim in held:
         mark = " " if claim["session_id"] in live else "!"
-        focus = claim.get("focus") or "(no focus stated)"
-        shown = focus[: config["max_focus_chars"]]
-        print(f" {mark} {claim.get('name') or claim['session_id']}  {shown}")
+        shown = claims.describe_focus(claim, config["max_focus_chars"])
+        print(f" {mark} {claims.describe_name(claim)}  {shown}")
         # Every list field a claim can hold, not just paths. `claim --repo` and `--ticket` were
         # accepted, validated and written, and then no reader rendered them: a write that succeeds
         # and cannot be read back is indistinguishable from one that was dropped, and handoffs are
         # addressed to repo-and-path scope, so half the scope was invisible to the people it is for.
         for field in claims.LIST_FIELDS:
             if claim.get(field):
-                print(f"     {field}: {_capped(claim[field], config['max_hot_paths'])}")
+                shown_list = claims.describe_list(claim[field])
+                print(f"     {field}: {_capped(shown_list, config['max_hot_paths'])}")
     if any(claim["session_id"] not in live for claim in held):
         print("  ! marks a claim whose session is no longer in the registry: stale, not current.")
     for problem in problems:
@@ -194,6 +194,31 @@ def cmd_claim(args):
             "any process above this one. Pass --session explicitly."
         )
         return 1
+
+    # The same guard the handoff side gets, on the other side of the comparison it exists for. #46
+    # is about `to.repo` being matched against a claim's `repos`, and a containment rule on one
+    # operand contains nothing: refusing `--repo /etc` on `handoff post` and accepting it on `claim`
+    # hands the matcher the same absolute path by a different route. `--set-path` goes through it
+    # too, because it writes the field that `--path` appends to.
+    #
+    # Here rather than in `claims.update`, which is where the sweep could reach it, for the reason
+    # the #45 note below is here: the message names the flag the person typed, and `claims.update`
+    # knows field names instead. That is only sound while this is the sole writer of these two
+    # fields, which it is - `hook.py` seeds `session_id`, `cwd` and `name` and nothing else, so
+    # there is no second route in. A second writer means moving this into `claims.update` and losing
+    # the flag names, rather than adding a copy here, because two copies of a containment rule is
+    # how one of them ends up being the older one. The checks in `test_cli.py` are what would notice
+    # this being deleted.
+    for flag, values in (
+        ("--repo", args.repo),
+        ("--path", args.path),
+        ("--set-path", args.set_path),
+    ):
+        for value in values or ():
+            fault = store.scope_fault(flag, value)
+            if fault:
+                print(f"problem: {fault}")
+                return 1
 
     # The display name is looked up for the id being claimed as, not for this process. With
     # `--session` those are different, and borrowing the caller's name would label someone else's
@@ -225,12 +250,8 @@ def cmd_claim(args):
     if problem:
         print(f"problem: {problem}")
         return 1
-    print(f"claimed as {claim.get('name') or claim['session_id']}")
-    if claim.get("focus"):
-        print(f"  focus: {claim['focus']}")
-    for field in claims.LIST_FIELDS:
-        if claim.get(field):
-            print(f"  {field}: {', '.join(claim[field])}")
+    for line in claims.describe_settings(claim):
+        print(line)
     return 0
 
 
@@ -400,6 +421,23 @@ def cmd_handoff_post(args):
         print(f"problem: {problem}")
         return 1
     print(f"posted {record['id']} to {handoffs.describe(record['to'])}")
+    if "session_id" in record["to"]:
+        # #45. A note here rather than a refusal in `handoffs`, and rather than a guard in
+        # `set_status`: addressing is a hint to a reader, not access control, so the only thing
+        # actually wrong with a mistyped id is that nobody is coming. Said at the moment it is
+        # typed, because that is the last moment anyone is looking - a handoff addressed to an id no
+        # session has is otherwise permanently open, unreachable, and counted in `show`'s "N not
+        # closed" forever, with nothing anywhere saying why.
+        #
+        # In `cli` deliberately, unlike the stripping in `handoffs.describe`. The argument in
+        # `DECLINED` is that this module's output is wrong in front of the person who typed the
+        # command, and here that is exactly true: they chose the id and they are reading the reply.
+        target = record["to"]["session_id"]
+        if not any(row.get("sessionId") == target for row in registry.entries()):
+            print(
+                f"  note: no live session is registered as {target}, so nobody is currently "
+                "addressed by this. It stays open until some session moves it; any session can."
+            )
     if not record["from"].get("session_id"):
         # Said out loud rather than left as an absent field. The recipient sees a handoff from a cwd
         # and no name, and "who sent this" is the first thing they will ask.
@@ -443,10 +481,12 @@ def cmd_handoff_list(args):
     shown = [pair for pair in stored if args.all or pair[1] != handoffs.CLOSED]
     print(f"handoffs  {len(stored)} stored, {len(shown)} shown")
     for record, status in shown:
-        sender = record["from"].get("name") or record["from"]["cwd"]
         print(f"  {record['id']}  {status}")
-        print(f"    to {handoffs.describe(record['to'])}, from {sender}, {record['created']}")
-        print(f"    {record['body'].splitlines()[0]}")
+        print(
+            f"    to {handoffs.describe(record['to'])}, "
+            f"from {handoffs.describe_sender(record)}, {record['created']}"
+        )
+        print(f"    {handoffs.preview(record['body'])}")
     for problem in problems:
         print(f"problem   {problem}")
     return 1 if problems else 0

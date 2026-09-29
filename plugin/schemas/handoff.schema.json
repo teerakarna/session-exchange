@@ -24,7 +24,7 @@
       "description": "Who posted it. `session_id` is absent on an imported entry, because the session that wrote it is long gone."
     },
     "to": {
-      "description": "Exactly one addressing mode. A scope reaches whoever is working there, now or later; a session_id reaches one live session and nobody else.",
+      "description": "Exactly one addressing mode. A scope reaches whoever is working there, now or later; a session_id names the one session it was written for. Naming, not access control, and this sentence used to claim otherwise - it said a session_id reaches \"one live session and nobody else\", which nothing enforced on either side: `handoff list` shows every handoff under the root whatever its addressing, and `set_status` never reads this block. #45 asked which half was the bug and the answer is this sentence. A session id is not an identity, and a session that has ended cannot close its own handoffs, so enforcing the claim would strand exactly the handoffs that most need moving on - permanently open, unreachable, counted in `show`'s \"N not closed\" forever. So: any session may accept or close any handoff, and `by` in the transition file records which one did. The first draft of this sentence said `history[].by`, which is the field #44 deleted two commits earlier and which line 5 of this file says is now refused by name - a sentence in the contract pointing at a mechanism nothing implements. A post to a session id no live session holds says so at the time, because that is the last moment anyone is looking.",
       "oneOf": [
         {
           "type": "object",

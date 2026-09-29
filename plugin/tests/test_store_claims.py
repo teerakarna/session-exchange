@@ -307,6 +307,187 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
 
+print("text one session wrote and another one's terminal renders")
+
+# The escape from the reproduction in #47, kept verbatim rather than described, because the point of
+# the bug was that a description of the output and the output itself were different things.
+check(
+    "an erase-line escape does not survive to the terminal",
+    store.printable("HARMLESS\033[2K\033[1;31mURGENT\007"),
+    "HARMLESS[2K[1;31mURGENT",
+)
+check(
+    "a carriage return goes, being the cheap way to do the same thing",
+    store.printable("a\rb"),
+    "ab",
+)
+check(
+    "and so does a bidi override, which nobody here thought of and a blacklist would have missed",
+    store.printable("safe\u202egnorw"),
+    "safegnorw",
+)
+# The argument against `repr`, as a check rather than as a sentence in the docstring: if this ever
+# fails, prose has started paying for the escapes.
+check(
+    "ordinary prose keeps its quotes, backslashes and spaces",
+    store.printable("""it's a c:\\path, "quoted", 50% done"""),
+    """it's a c:\\path, "quoted", 50% done""",
+)
+check(
+    "a tab goes, because in a one-line preview it is there to move the cursor",
+    store.printable("a\tb"),
+    "ab",
+)
+check("an empty string is not a special case", store.printable(""), "")
+# The other direction of the predicate. Without these, narrowing the rule to ASCII would pass every
+# check above it and quietly take every non-English claim in the store with it: the prose check
+# three above is ASCII-only, so it is a check of the example rather than of the rule.
+check(
+    "accented Latin survives, the stripper being about terminals and not about ASCII",
+    store.printable("café déjà vu"),
+    "café déjà vu",
+)
+check(
+    "so does CJK, which is where a terminal-width argument would have gone wrong",
+    store.printable("日本語のテキスト"),
+    "日本語のテキスト",
+)
+check(
+    "and Thai, Arabic and Devanagari, none of which a Latin blacklist would have considered",
+    store.printable("ทดสอบ مرحبا नमस्ते"),
+    "ทดสอบ مرحبا नमस्ते",
+)
+check("and a single emoji", store.printable("shipped 🚀"), "shipped 🚀")
+# What the rule costs, asserted rather than left in a docstring, so that the cost is a thing someone
+# has to edit a check to change. U+3000 is the ordinary space in Japanese prose and U+200D holds an
+# emoji family together; both are swept up by "would a terminal show this" and both are a real loss.
+check(
+    "an ideographic space goes, which is a cost of the rule and not a win",
+    store.printable("日本\u3000語"),
+    "日本語",
+)
+check(
+    "and a zero-width joiner, which splits a family emoji into three people",
+    store.printable("\U0001f468\u200d\U0001f469\u200d\U0001f467"),
+    "\U0001f468\U0001f469\U0001f467",
+)
+
+print()
+print("a scope path, which is the same two fields on a handoff and on a claim")
+
+check(
+    "an absolute repo is refused, the field being relative to the root",
+    store.scope_fault("--repo", "/etc"),
+    "--repo is relative to the root, so it cannot start with /: /etc",
+)
+check(
+    "a repo that climbs out with .. is refused, with the other message",
+    store.scope_fault("--repo", "../../etc"),
+    "--repo cannot climb out of the root with ..: ../../etc",
+)
+check(
+    "a .. anywhere in the path is refused, not only at the front",
+    store.scope_fault("--path", "a/../../b"),
+    "--path cannot climb out of the root with ..: a/../../b",
+)
+# The shape the other two made necessary: a tab is a legal filename character, so the guard passed
+# it and every renderer then displayed `/etc`, which is the string the first check above refuses.
+# The refusal names the codepoint rather than only the stripped form, and the reason is this exact
+# value: `/etc` on its own is a string the typist can see nothing wrong with, so the message read as
+# arbitrary and left nothing to act on.
+check(
+    "a tab in front of an absolute path is refused rather than passed and then stripped",
+    store.scope_fault("--repo", "\t/etc"),
+    "--repo cannot hold characters a terminal does not show: U+0009. "
+    "Without them it reads as '/etc'",
+)
+check(
+    "and the message it comes back with carries no escape of its own",
+    "\033" in store.scope_fault("--repo", "x\033[2Ky"),
+    False,
+)
+# A value that is invisible end to end. The stripped form is empty, so the codepoint is the whole of
+# what the message has to say - which is what the earlier message could not do at all.
+check(
+    "a value with nothing visible in it still says what is in it",
+    store.scope_fault("--path", "\t\u200b"),
+    "--path cannot hold characters a terminal does not show: U+0009, U+200B. "
+    "Without them it reads as ''",
+)
+# Two of the same character is one entry, not two: the message lists what to remove, and repeating a
+# codepoint per occurrence makes a long paste unreadable without adding anything.
+check(
+    "a codepoint is named once however many times it occurs",
+    store.scope_fault("--path", "a\tb\tc"),
+    "--path cannot hold characters a terminal does not show: U+0009. "
+    "Without them it reads as 'abc'",
+)
+check(
+    "a trailing newline is the same shape and the same refusal",
+    store.scope_fault("--repo", "..\n"),
+    "--repo cannot hold characters a terminal does not show: U+000A. Without them it reads as '..'",
+)
+# The refusal is wider than "characters a terminal acts on" and that is deliberate for this field.
+# U+00A0 renders as a space, so a scope holding one and a scope holding U+0020 are two strings
+# nobody can tell apart and the store would hold both. #62 is that problem; this is the half of
+# it that can be refused. Written as an escape rather than as the character, because a literal one
+# in this file would be a comment nobody could read correctly and a paste nobody could repeat.
+check(
+    "a space that is not a space is refused too, two scopes nobody can distinguish being the point",
+    store.scope_fault("--path", "docs\u00a0shared"),
+    "--path cannot hold characters a terminal does not show: U+00A0. "
+    "Without them it reads as 'docsshared'",
+)
+check(
+    "an ordinary root-relative repo is fine",
+    store.scope_fault("--repo", "plugin/lib"),
+    None,
+)
+check(
+    "so is a name that merely contains dots, .. being a whole component or nothing",
+    store.scope_fault("--path", "a..b/..bashrc"),
+    None,
+)
+
+print()
+print("a claim another session wrote, rendered")
+
+check(
+    "a focus loses the characters a terminal acts on",
+    claims.describe_focus({"focus": "HARMLESS\033[2K\033[1;31mURGENT\007"}, 200),
+    "HARMLESS[2K[1;31mURGENT",
+)
+check(
+    "a claim with no focus says so rather than rendering an empty line",
+    claims.describe_focus({}, 200),
+    "(no focus stated)",
+)
+# Stripped, then capped. The other order gives a row shorter than the cap by however many invisible
+# characters the writer put in front of the text, which the reader cannot see and cannot query.
+check(
+    "the cap counts what the reader sees, not what the writer wrote",
+    claims.describe_focus({"focus": "\033[2K\033[2Kabcdef"}, 6),
+    "[2K[2K",
+)
+check(
+    "a display name is stripped, being copied out of another session's registry entry",
+    claims.describe_name({"session_id": "s1", "name": "peer\033[2Kx"}),
+    "peer[2Kx",
+)
+check(
+    "a claim with no name falls back to the id",
+    claims.describe_name({"session_id": "s1"}),
+    "s1",
+)
+# Every element. These fields are usually one entry long, so a stripper applied to `values[0]` looks
+# right in every case anyone tries by hand.
+check(
+    "every element of a list field is stripped, not the first one",
+    claims.describe_list(["ok", "two\033[2K", "three\007"]),
+    ["ok", "two[2K", "three"],
+)
+check("an empty list field is not a special case", claims.describe_list([]), [])
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
