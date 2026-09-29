@@ -126,3 +126,52 @@ def clear(root, session_id):
 def load_all(root):
     """Every claim under this root, plus problems. Never one without the other."""
     return store.read_all(store.sessions_dir(root), SCHEMA)
+
+
+# The three below are the claim half of #47, and they are here for the same reason the handoff half
+# is in `handoffs`: `cli` is in `DECLINED` on the argument that its output is wrong in front of the
+# person who typed the command, and that argument is unavailable for a field some other session
+# wrote. A claim is exactly that field. `exchange show` renders another session's `focus`, `name`,
+# `repos`, `paths` and `tickets`, none of which carry a pattern in the schema and one of which the
+# schema describes as "in its own words", and it rendered all five raw for as long as the command
+# existed. The handoff half landed one commit earlier with the same reasoning and did not reach
+# these, which is the narrower-fix-than-problem shape this repo keeps catching: the commit subject
+# said "a record one session writes is data to every other one" and a claim is the other record.
+#
+# Today this reaches a human's terminal only. `hook.py` says presence and handoff rendering land
+# next and it renders no claim content yet, so the model's context is not on this path - which is
+# the reason to fix it now rather than the reason it is urgent: when that rendering lands it reads
+# claims, and a stripper added afterwards is a stripper added after the first injection.
+
+
+def describe_focus(claim, cap):
+    """What a claim says it is doing, in one line, capped and safe to print.
+
+    Stripped before capping, not after. The cap is there to bound what one row can take out of a
+    terminal, and counting characters that render as nothing spends the budget on invisible ones -
+    so the two operations in the other order give a row shorter than the cap, by an amount the
+    reader cannot see and the writer chose.
+    """
+    return store.printable(claim.get("focus") or "(no focus stated)")[:cap]
+
+
+def describe_name(claim):
+    """What to call a claim's session: its name, or the id if it has none.
+
+    `session_id` is held by `store.SAFE_ID` and cannot carry anything the stripper removes; `name`
+    is free text copied out of the registry, which is a different session's process. The stripper is
+    applied to the result rather than to the `name` branch alone, for the reason `handoffs.describe`
+    gives about one rule in one place, and with the same caveat: the id branch is a no-op and is not
+    what makes the id safe.
+    """
+    return store.printable(claim.get("name") or claim["session_id"])
+
+
+def describe_list(values):
+    """A claim's list field, element by element, safe to print.
+
+    Every element rather than the first, which is the same mistake `to_scope` had for one commit and
+    is easier to make here: these fields are usually one entry long, so a stripper applied to
+    `values[0]` looks right in every case anyone tries by hand.
+    """
+    return [store.printable(v) for v in values]

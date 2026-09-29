@@ -157,16 +157,16 @@ def cmd_show(args):
     print(f"claims    {len(held)}")
     for claim in held:
         mark = " " if claim["session_id"] in live else "!"
-        focus = claim.get("focus") or "(no focus stated)"
-        shown = focus[: config["max_focus_chars"]]
-        print(f" {mark} {claim.get('name') or claim['session_id']}  {shown}")
+        shown = claims.describe_focus(claim, config["max_focus_chars"])
+        print(f" {mark} {claims.describe_name(claim)}  {shown}")
         # Every list field a claim can hold, not just paths. `claim --repo` and `--ticket` were
         # accepted, validated and written, and then no reader rendered them: a write that succeeds
         # and cannot be read back is indistinguishable from one that was dropped, and handoffs are
         # addressed to repo-and-path scope, so half the scope was invisible to the people it is for.
         for field in claims.LIST_FIELDS:
             if claim.get(field):
-                print(f"     {field}: {_capped(claim[field], config['max_hot_paths'])}")
+                shown_list = claims.describe_list(claim[field])
+                print(f"     {field}: {_capped(shown_list, config['max_hot_paths'])}")
     if any(claim["session_id"] not in live for claim in held):
         print("  ! marks a claim whose session is no longer in the registry: stale, not current.")
     for problem in problems:
@@ -194,6 +194,31 @@ def cmd_claim(args):
             "any process above this one. Pass --session explicitly."
         )
         return 1
+
+    # The same guard the handoff side gets, on the other side of the comparison it exists for. #46
+    # is about `to.repo` being matched against a claim's `repos`, and a containment rule on one
+    # operand contains nothing: refusing `--repo /etc` on `handoff post` and accepting it on `claim`
+    # hands the matcher the same absolute path by a different route. `--set-path` goes through it
+    # too, because it writes the field that `--path` appends to.
+    #
+    # Here rather than in `claims.update`, which is where the sweep could reach it, for the reason
+    # the #45 note below is here: the message names the flag the person typed, and `claims.update`
+    # knows field names instead. That is only sound while this is the sole writer of these two
+    # fields, which it is - `hook.py` seeds `session_id`, `cwd` and `name` and nothing else, so
+    # there is no second route in. A second writer means moving this into `claims.update` and losing
+    # the flag names, rather than adding a copy here, because two copies of a containment rule is
+    # how one of them ends up being the older one. The checks in `test_cli.py` are what would notice
+    # this being deleted.
+    for flag, values in (
+        ("--repo", args.repo),
+        ("--path", args.path),
+        ("--set-path", args.set_path),
+    ):
+        for value in values or ():
+            fault = store.scope_fault(flag, value)
+            if fault:
+                print(f"problem: {fault}")
+                return 1
 
     # The display name is looked up for the id being claimed as, not for this process. With
     # `--session` those are different, and borrowing the caller's name would label someone else's

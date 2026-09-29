@@ -236,9 +236,12 @@ would have predicted ten and a half at 177, and it took fifteen.
 Every figure in that paragraph is a laptop, and the runner is a different measurement rather than the
 same one scaled. Three full resweeps of the same 191 over three consecutive commits came in at 20m44s,
 17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. Two more
-resweeps of the same count since, 5.2s and 4.7s, fall inside those three rather than extending them. A
-spread of nearly half, which swallows every local figure at this count, so the observed band is the whole
-of 4.5 to 6.5 seconds and a tighter reading of it is not supported. Naming one is the older mistake here:
+resweeps of the same count came in at 5.2s and 4.7s, inside those three, and then a resweep of 198 came
+in at 4.1s, below all five. So the band is 4.1 to 6.5 seconds. The sentence here said the two inside ones
+"fall inside those three rather than extending them", which was true when written and was falsified by the
+next run: a claim about a range, phrased as though the range were now settled, is the shape to avoid. Say
+what the samples are and let the band be whatever they say. A spread of more than half swallows every
+local figure at every count, so a tighter reading of it is not supported. Naming one is the older mistake:
 the comment in `ci.yml` carried "between four and a half and four and three quarters" for the
 87-mutation set with no samples recorded beside it, so where that quarter-minute came from is not
 answerable now, and four later resweeps put the runner spread at three to five minutes. The first
@@ -252,7 +255,10 @@ and was canceled.
 
 The cost is mutations times suite length, not mutations, so a new table pays twice - its own mutations,
 and the checks it adds to the suite that every older table's mutations then run. Per-mutation cost went
-from 3.5s at 144 to 5.0s at 177, and is 5.2s at 191. That is already well past what a push should carry to
+from 3.5s at 144 to 5.0s at 177, was 5.2s at 191, 5.7s at 198 and is 7.1s at 207 on the same laptop. The
+last step is the paragraph's own point arriving: nine mutations were added and the suite went from 1577
+checks to 1649, so the per-mutation figure moved by more than the nine mutations cost on their own, and
+the full sweep went from 1128s to 1475s. That is well past what a push should carry to
 re-answer a question the last push answered about code it did not touch, and each table added makes it
 worse than the one before. So `ci` sweeps only the modules the change could have affected, and the full
 sweep runs weekly where the length of it does not matter. The run prints its own per-mutation figure

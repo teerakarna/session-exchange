@@ -133,6 +133,19 @@ check(
     handoffs.to_scope(repo="/etc")[0],
     None,
 )
+# The shape that only becomes one of the two above once something renders it. `\t/etc` does not
+# start with `/`, so the first check in this block passes it, and then every renderer here shows
+# `/etc`.
+check(
+    "a repo that merely renders as an absolute path is refused as well",
+    handoffs.to_scope(repo="\t/etc")[1],
+    "--repo cannot hold characters a terminal acts on rather than shows: /etc",
+)
+check(
+    "and so is a path, the two fields being constrained identically",
+    handoffs.to_scope(repo="ok", paths=["fine", "p\033[2Kq"])[1],
+    "--path cannot hold characters a terminal acts on rather than shows: p[2Kq",
+)
 # `..` as a component, not as a substring. These are ordinary names and refusing them would be the
 # guard being wrong in the direction nobody reports, because the handoff just never posts.
 check("a name containing dots is not a climb", handoffs.to_scope(repo="a..b/..bashrc")[1], None)

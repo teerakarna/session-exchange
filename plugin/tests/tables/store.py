@@ -67,4 +67,56 @@ MUTATIONS = [
         new='    return "".join(ch for ch in value if True)',
         caught_by="test_store_claims.py",
     ),
+    # The other direction of the same predicate, and the reason it is worth a second entry: the one
+    # above is satisfied by any rule that drops an escape, including a narrowing to ASCII, which
+    # would silently take every accented, CJK and Thai character in the store with it. The check it
+    # names asserted only ASCII prose, so the narrowing was available and nothing would have gone
+    # red.
+    Mutation(
+        module="store",
+        rule="and keeps the ones it only renders, which is most of the world's prose",
+        old='    return "".join(ch for ch in value if ch.isprintable())',
+        new='    return "".join(ch for ch in value if ch.isascii() and ch.isprintable())',
+        caught_by="test_store_claims.py",
+    ),
+    # #46, moved here with the guard. Three shapes, three mutations, because one guard covering all
+    # of them would pass on any single half and the messages are deliberately different: a leading
+    # `/` is a habit, a `..` is a misunderstanding, an invisible character is a paste.
+    Mutation(
+        module="store",
+        rule="a scope path cannot be absolute, because the field is relative to the root",
+        old='    if value.startswith("/"):',
+        new="    if False:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="and cannot climb out of the root with ..",
+        old='    if ".." in value.split("/"):',
+        new="    if False:",
+        caught_by="test_store_claims.py",
+    ),
+    # The over-refusing direction, which is the one a guard like this actually fails in. `..` is a
+    # whole component or it is nothing: as a substring it takes `a..b` and `..bashrc`, both ordinary
+    # names, and the failure is a handoff or a claim that simply never posts - so nobody reports it
+    # as a bug, they just stop using the flag. Worth its own entry because every check above is
+    # satisfied by a guard that refuses too much.
+    Mutation(
+        module="store",
+        rule="and .. means a whole component, so an ordinary name containing dots still passes",
+        old='    if ".." in value.split("/"):',
+        new='    if ".." in value:',
+        caught_by="test_store_claims.py",
+    ),
+    # The third shape, and the one the other two made necessary. `\t/etc` starts with a tab, so the
+    # check above passes it, and every renderer strips the tab and shows `/etc` - the refused shape,
+    # manufactured after the refusal ran. A refusal rather than a strip, so that a stored scope is
+    # the same string the reader sees and the same string the matcher compares.
+    Mutation(
+        module="store",
+        rule="a scope cannot hold a character that renders as nothing",
+        old="    if shown != value:",
+        new="    if False:",
+        caught_by="test_store_claims.py",
+    ),
 ]

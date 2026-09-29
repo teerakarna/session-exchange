@@ -74,30 +74,6 @@ def new_id(at=None):
     return f"{stamp}-{secrets.token_hex(SUFFIX_BYTES)}"
 
 
-def scope_fault(flag, value):
-    """Why `value` cannot be a scope path, or None.
-
-    Root-relative is what the schema says `repo` is, and `minLength: 1` was the whole of what it
-    enforced. Here rather than in the schema for the reason the docstring below gives about `oneOf`:
-    a pattern would refuse this with "does not match", and the useful sentence names which flag and
-    which of the two shapes.
-
-    Nothing dereferences either field as a path today, so this is containment ahead of the matcher
-    rather than a fix for a live escape - one function now against two consumers later. The absolute
-    and the `..` case are separate messages because they are separate mistakes: a leading `/` is
-    usually a habit, and a `..` is usually a misunderstanding of what the field is relative to.
-
-    Split on `/` rather than resolved with `pathlib`: resolving asks the filesystem what exists,
-    which makes the refusal depend on the machine it runs on. `..` as a whole component, so `a..b`
-    and `..bashrc` stay legal, which they are.
-    """
-    if value.startswith("/"):
-        return f"{flag} is relative to the root, so it cannot start with /: {value}"
-    if ".." in value.split("/"):
-        return f"{flag} cannot climb out of the root with ..: {value}"
-    return None
-
-
 def to_scope(repo=None, paths=(), session_id=None):
     """The `to` block, or a problem. Exactly one addressing mode, and never neither.
 
@@ -117,7 +93,7 @@ def to_scope(repo=None, paths=(), session_id=None):
             return None, "--path narrows a repo scope, so it cannot go with --session"
         return {"session_id": session_id}, None
     if repo:
-        fault = scope_fault("--repo", repo)
+        fault = store.scope_fault("--repo", repo)
         if fault:
             return None, fault
         scope = {"repo": repo}
@@ -127,7 +103,7 @@ def to_scope(repo=None, paths=(), session_id=None):
             # reads as done. The schema constrains the two identically, so a caller that can put a
             # `..` in one can put it in the other.
             for path in paths:
-                fault = scope_fault("--path", path)
+                fault = store.scope_fault("--path", path)
                 if fault:
                     return None, fault
             scope["paths"] = list(dict.fromkeys(paths))
@@ -370,9 +346,15 @@ def describe(to):
     notice. A rule whose failure is invisible to the only witness belongs where the sweep can reach
     it. See #47.
 
-    `session_id` is pattern-constrained and could not carry an escape, so it is passed through the
-    same call as the other two: one rule, one place, rather than a per-field judgement that has to
-    be re-made correctly every time the schema changes.
+    The `session_id` call is a no-op today and is not a guard. `store.SAFE_ID` holds that field on
+    the way to disk and again on the way back out, so no value reaching here can contain anything
+    the call would remove, and the mutation table claims no coverage for it because there is none to
+    claim: replacing it with a bare interpolation leaves every check in the suite green. It is here
+    so that the rule is "everything in this block goes through the stripper" rather than a per-field
+    judgement that has to be re-made correctly each time a schema changes. That is a real choice
+    with a real cost - CONTRIBUTING's line about an untestable rule reading as protection applies to
+    it - so the next reader should know that the pattern is what holds this field, and relaxing the
+    pattern is not made safe by this call.
     """
     if "session_id" in to:
         return f"session {store.printable(to['session_id'])}"

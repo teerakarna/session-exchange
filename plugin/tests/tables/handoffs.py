@@ -393,22 +393,23 @@ MUTATIONS = [
         new="    return repo",
         caught_by="test_handoffs.py",
     ),
-    # #46. Two shapes, two mutations, because one guard covering both would pass on either half and
-    # the messages are deliberately different. The third is the `paths` loop, which is the half a
-    # guard written for `repo` alone leaves behind - and note it is a separate entry from the two
-    # above it rather than a variation of them: what it breaks is the iteration, not the test.
+    # #46. The guard itself moved to `store`, because a claim has the same two fields and the point
+    # of the shape is that the two get compared - so its three mutations are in `tables/store.py`
+    # now. What stays here is the calling: `to_scope` has to run it, and has to run it over every
+    # path rather than the first one, which is the half a guard written for `repo` alone leaves
+    # behind.
     Mutation(
         module="handoffs",
-        rule="a scope path cannot be absolute, because the field is relative to the root",
-        old='    if value.startswith("/"):',
-        new="    if False:",
+        rule="a scope a handoff is addressed to goes through the guard at all",
+        old='        fault = store.scope_fault("--repo", repo)',
+        new="        fault = None",
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
-        rule="and cannot climb out of the root with ..",
-        old='    if ".." in value.split("/"):',
-        new="    if False:",
+        rule="and so does every path that narrows it",
+        old='                fault = store.scope_fault("--path", path)',
+        new="                fault = None",
         caught_by="test_handoffs.py",
     ),
     Mutation(

@@ -173,4 +173,38 @@ MUTATIONS = [
         new="        return None",
         caught_by="test_store_claims.py",
     ),
+    # #47's claim half. One per field again, for the reason the handoff half records: a single check
+    # over three fields passes as soon as one of them is stripped, and the other two then have no
+    # check at all. `show` renders five claim fields and none of them carries a pattern.
+    Mutation(
+        module="claims",
+        rule="a focus another session wrote goes through the stripper",
+        old='    return store.printable(claim.get("focus") or "(no focus stated)")[:cap]',
+        new='    return (claim.get("focus") or "(no focus stated)")[:cap]',
+        caught_by="test_store_claims.py",
+    ),
+    # Stripping after capping is the subtle half, and it is a separate entry because a check that
+    # only asserts the escape is gone passes either way. What it costs is a row shorter than the cap
+    # by however many invisible characters the writer put in front of the text.
+    Mutation(
+        module="claims",
+        rule="and is stripped before it is capped, so the cap counts what the reader sees",
+        old='    return store.printable(claim.get("focus") or "(no focus stated)")[:cap]',
+        new='    return store.printable((claim.get("focus") or "(no focus stated)")[:cap])',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="so does a display name, which is copied out of another session's registry entry",
+        old='    return store.printable(claim.get("name") or claim["session_id"])',
+        new='    return claim.get("name") or claim["session_id"]',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="and every element of a list field, not the first one",
+        old="    return [store.printable(v) for v in values]",
+        new="    return [store.printable(values[0])] + list(values[1:])",
+        caught_by="test_store_claims.py",
+    ),
 ]
