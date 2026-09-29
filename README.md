@@ -90,7 +90,7 @@ customised ever travels with the code:
 |---|---|
 | `name` | What this root is called in injected context, so a session can tell which exchange it is reading |
 | `stale_days` | When a claim or handoff starts being flagged as old rather than shown as current. Default 7 |
-| `max_focus_chars`, `max_hot_paths`, `max_handoffs_listed` | Caps on what gets rendered into a session's context. Anything past a cap is counted, never silently dropped. `max_focus_chars` bounds every one-line render of text another session wrote: a claim's focus, and a handoff's scope, sender and body preview |
+| `max_focus_chars`, `max_hot_paths`, `max_handoffs_listed` | Caps on what gets rendered into a session's context. Anything past a cap is counted, never silently dropped. `max_focus_chars` bounds every one-line render of text another session wrote: a claim's focus, and a handoff's scope, sender and body preview. `max_handoffs_listed` keeps the newest and says how many older ones it did not show, the one posted a minute ago being the one nobody has read |
 | `labels` | Display-only directory-to-label map. Never a matching key, because a hand-typed label having to agree with another hand-typed label is the defect this design removes |
 
 The defaults are the `default` values in

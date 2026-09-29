@@ -377,10 +377,12 @@ def litter(root):
     the filter goes is the day the litter starts being read.
 
     Every directory this store writes into, not just the handoffs. `claims` goes through `_staged`
-    too, and the moves live one directory further down again; a sweep that covered the record
-    directory alone would be this repo's recurring defect, a fix narrower than the thing it fixes.
+    too, the moves live one directory further down again, and the marker itself is a staged write
+    into the directory above all of them - so an `init` killed mid-write leaves litter as well. A
+    sweep that covered the record directory alone would be this repo's recurring defect, a fix
+    narrower than the thing it fixes, and the first cut of this one was exactly that.
     """
-    directories = [sessions_dir(root), handoffs_dir(root)]
+    directories = [marker_path(root).parent, sessions_dir(root), handoffs_dir(root)]
     moves, problems = names(handoffs_dir(root), "*.d")
     directories += [path for path in moves if path.is_dir()]
     for directory in directories:

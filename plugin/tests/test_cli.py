@@ -756,6 +756,10 @@ with tempfile.TemporaryDirectory() as tmp:
     exchange = area / ".claude" / "exchange"
     (exchange / "handoffs" / f"{handoff_id}.d" / ".tmp-999-0001-abcdef.json").write_text("{")
     (exchange / "sessions" / ".tmp-999-real-one.json").write_text("{")
+    # And the directory above both, which is where the marker is staged. An `init` killed between
+    # the write and the link leaves this one, and it was the case the first cut of the sweep missed
+    # while its own docstring said "every directory this store writes into".
+    (area / ".claude" / ".tmp-999-marker-x.json").write_text("{")
 
     code, out = run(home, repo, "handoff", "list")
     check(
@@ -765,9 +769,14 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     code, out = run(home, repo, "doctor")
     check(
-        "doctor names both, under the handoff moves and under the claims",
-        (code, ".tmp-999-0001-abcdef.json" in out, ".tmp-999-real-one.json" in out),
-        (1, True, True),
+        "doctor names all three: the handoff moves, the claims, and the marker's own directory",
+        (
+            code,
+            ".tmp-999-0001-abcdef.json" in out,
+            ".tmp-999-real-one.json" in out,
+            ".tmp-999-marker-x.json" in out,
+        ),
+        (1, True, True, True),
     )
     check("and says it is safe to delete them", "Safe to delete" in out, True)
     check(
@@ -885,8 +894,33 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "and what it left out is counted, naming the lever and the file it is in",
-        ("+2 more not shown" in out, "max_handoffs_listed" in out, str(marker) in out),
+        ("+2 older not shown" in out, "max_handoffs_listed" in out, str(marker) in out),
         (True, True, True),
+    )
+    # Which end the cap takes, which is the half a count does not tell you. Written by hand with
+    # three distinct `created` values, and not by posting three times: the stamps are seconds, so
+    # three posts in one second are one timestamp and a random suffix, and a check over those would
+    # be asserting the ordering of `secrets.token_hex`. Seconds is also the real resolution of this
+    # ordering, which is worth having in a test rather than only in a comment.
+    handoffs_dir = area / ".claude" / "exchange" / "handoffs"
+    for created, mark in (("2026-01-01T00:00:00Z", "oldest"), ("2026-06-01T00:00:00Z", "middle")):
+        handoff_id = created.replace("-", "").replace(":", "") + "-aaaaaa"
+        handoffs_dir.joinpath(f"{handoff_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": handoff_id,
+                    "from": {"cwd": "/tmp"},
+                    "to": {"repo": "repo"},
+                    "created": created,
+                    "body": f"the {mark} one",
+                }
+            )
+        )
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "the cap keeps the newest, those being the ones nobody has read yet",
+        (code, "6 stored, 2 shown" in out, "the oldest one" in out, "the middle one" in out),
+        (0, True, False, False),
     )
 
     # The width half, which is the same question asked about one row rather than about the list:
@@ -900,6 +934,19 @@ with tempfile.TemporaryDirectory() as tmp:
         "a body wider than the cap is cut, with the rest counted rather than dropped",
         (code, "x" * 20 + " +380 more chars" in out, "x" * 21 in out),
         (0, True, False),
+    )
+
+    # And the marker the caps come from being unreadable is not a reason to refuse a post. The exit
+    # code says something is wrong, as it does everywhere a problem line is printed, so the line has
+    # to say the write happened: a caller reading the non-zero as "it did not post" retries, the id
+    # is random, and the root ends up with two handoffs for one intent.
+    before = len(list(handoffs_dir.glob("*.json")))
+    marker.write_text("{not json")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "posted anyway")
+    check(
+        "an unreadable marker does not cost the post, and the problem line says so",
+        (code, len(list(handoffs_dir.glob("*.json"))) - before, "the handoff is written" in out),
+        (1, 1, True),
     )
 
 print("what is not built yet says so, and does not look like a failure")

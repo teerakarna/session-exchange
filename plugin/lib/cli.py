@@ -451,7 +451,11 @@ def cmd_handoff_post(args):
     config, config_problem = store.config(resolution.root)
     print(f"posted {record['id']} to {handoffs.describe(record['to'], config['max_focus_chars'])}")
     if config_problem:
-        print(f"problem   {config_problem}")
+        # Says the handoff is on disk, because the exit code below is 1 and on its own it does not.
+        # A caller reading the non-zero as "it did not post" retries, ids are random so the retry
+        # writes a second record, and the root then holds two handoffs for one intent with nothing
+        # anywhere comparing them.
+        print(f"problem   the handoff is written; {config_problem}")
     if "session_id" in record["to"]:
         # #45. A note here rather than a refusal in `handoffs`, and rather than a guard in
         # `set_status`: addressing is a hint to a reader, not access control, so the only thing
@@ -540,6 +544,12 @@ def cmd_handoff_list(args):
     if config_problem:
         problems = [config_problem, *problems]
     matching = [pair for pair in stored if args.all or pair[1] != handoffs.CLOSED]
+    # Newest first, so the cap below keeps the newest. `load_all` returns filename order, which for
+    # timestamp-prefixed ids is oldest first, and a cap over that hides the handoff somebody posted
+    # a minute ago behind a count - the thing #61 is about, arriving through the fix for it. Sorted
+    # on the record rather than reversing what the store returned, so this does not quietly depend
+    # on a sort order two modules away.
+    matching.sort(key=lambda pair: (pair[0]["created"], pair[0]["id"]), reverse=True)
     # #61: `max_handoffs_listed` was in the schema, had a default, was asserted to have one, and no
     # code read it. A setting nothing reads is worse than no setting, because somebody raises it and
     # believes they have seen the rest.
@@ -556,9 +566,10 @@ def cmd_handoff_list(args):
         print(f"    {handoffs.preview(record['body'], width)}")
     if len(matching) > len(shown):
         # Counted, and naming the lever and the file it is in. A list that stops at eight reads
-        # exactly like a root with eight handoffs under it, which is the whole of #61.
+        # exactly like a root with eight handoffs under it, which is the whole of #61. "Older",
+        # because which end the cap took is the first thing the reader needs to know about it.
         print(
-            f"  +{len(matching) - len(shown)} more not shown: raise max_handoffs_listed in "
+            f"  +{len(matching) - len(shown)} older not shown: raise max_handoffs_listed in "
             f"{store.marker_path(root)}"
         )
     for problem in problems:

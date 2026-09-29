@@ -156,8 +156,19 @@ MUTATIONS = [
     Mutation(
         module="store",
         rule="in every directory this store writes into, not only the handoffs",
-        old="    directories = [sessions_dir(root), handoffs_dir(root)]",
-        new="    directories = [handoffs_dir(root)]",
+        old="    directories = [marker_path(root).parent, sessions_dir(root), handoffs_dir(root)]",
+        new="    directories = [marker_path(root).parent, handoffs_dir(root)]",
+        caught_by="test_cli.py",
+    ),
+    # And the directory above both, which is where the marker is staged, so an `init` killed between
+    # the write and the link leaves litter too. Missing from the first cut of this sweep, under a
+    # docstring that said "every directory this store writes into" - the narrower-than-the-problem
+    # shape, in the fix for it.
+    Mutation(
+        module="store",
+        rule="including the one the marker itself is staged into, above the records",
+        old="    directories = [marker_path(root).parent, sessions_dir(root), handoffs_dir(root)]",
+        new="    directories = [sessions_dir(root), handoffs_dir(root)]",
         caught_by="test_cli.py",
     ),
     # And one directory further down again, which is where a move's temp file lands.
