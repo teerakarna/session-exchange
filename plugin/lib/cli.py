@@ -400,6 +400,23 @@ def cmd_handoff_post(args):
         print(f"problem: {problem}")
         return 1
     print(f"posted {record['id']} to {handoffs.describe(record['to'])}")
+    if "session_id" in record["to"]:
+        # #45. A note here rather than a refusal in `handoffs`, and rather than a guard in
+        # `set_status`: addressing is a hint to a reader, not access control, so the only thing
+        # actually wrong with a mistyped id is that nobody is coming. Said at the moment it is
+        # typed, because that is the last moment anyone is looking - a handoff addressed to an id no
+        # session has is otherwise permanently open, unreachable, and counted in `show`'s "N not
+        # closed" forever, with nothing anywhere saying why.
+        #
+        # In `cli` deliberately, unlike the stripping in `handoffs.describe`. The argument in
+        # `DECLINED` is that this module's output is wrong in front of the person who typed the
+        # command, and here that is exactly true: they chose the id and they are reading the reply.
+        target = record["to"]["session_id"]
+        if not any(row.get("sessionId") == target for row in registry.entries()):
+            print(
+                f"  note: no live session is registered as {target}, so nobody is currently "
+                "addressed by this. It stays open until some session moves it; any session can."
+            )
     if not record["from"].get("session_id"):
         # Said out loud rather than left as an absent field. The recipient sees a handoff from a cwd
         # and no name, and "who sent this" is the first thing they will ask.
@@ -443,10 +460,12 @@ def cmd_handoff_list(args):
     shown = [pair for pair in stored if args.all or pair[1] != handoffs.CLOSED]
     print(f"handoffs  {len(stored)} stored, {len(shown)} shown")
     for record, status in shown:
-        sender = record["from"].get("name") or record["from"]["cwd"]
         print(f"  {record['id']}  {status}")
-        print(f"    to {handoffs.describe(record['to'])}, from {sender}, {record['created']}")
-        print(f"    {record['body'].splitlines()[0]}")
+        print(
+            f"    to {handoffs.describe(record['to'])}, "
+            f"from {handoffs.describe_sender(record)}, {record['created']}"
+        )
+        print(f"    {handoffs.preview(record['body'])}")
     for problem in problems:
         print(f"problem   {problem}")
     return 1 if problems else 0

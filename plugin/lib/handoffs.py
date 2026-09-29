@@ -74,6 +74,30 @@ def new_id(at=None):
     return f"{stamp}-{secrets.token_hex(SUFFIX_BYTES)}"
 
 
+def scope_fault(flag, value):
+    """Why `value` cannot be a scope path, or None.
+
+    Root-relative is what the schema says `repo` is, and `minLength: 1` was the whole of what it
+    enforced. Here rather than in the schema for the reason the docstring below gives about `oneOf`:
+    a pattern would refuse this with "does not match", and the useful sentence names which flag and
+    which of the two shapes.
+
+    Nothing dereferences either field as a path today, so this is containment ahead of the matcher
+    rather than a fix for a live escape - one function now against two consumers later. The absolute
+    and the `..` case are separate messages because they are separate mistakes: a leading `/` is
+    usually a habit, and a `..` is usually a misunderstanding of what the field is relative to.
+
+    Split on `/` rather than resolved with `pathlib`: resolving asks the filesystem what exists,
+    which makes the refusal depend on the machine it runs on. `..` as a whole component, so `a..b`
+    and `..bashrc` stay legal, which they are.
+    """
+    if value.startswith("/"):
+        return f"{flag} is relative to the root, so it cannot start with /: {value}"
+    if ".." in value.split("/"):
+        return f"{flag} cannot climb out of the root with ..: {value}"
+    return None
+
+
 def to_scope(repo=None, paths=(), session_id=None):
     """The `to` block, or a problem. Exactly one addressing mode, and never neither.
 
@@ -93,8 +117,19 @@ def to_scope(repo=None, paths=(), session_id=None):
             return None, "--path narrows a repo scope, so it cannot go with --session"
         return {"session_id": session_id}, None
     if repo:
+        fault = scope_fault("--repo", repo)
+        if fault:
+            return None, fault
         scope = {"repo": repo}
         if paths:
+            # Every element, not the first one. `paths` is the half of this that is easy to leave
+            # out: it is optional, it is usually one entry, and a guard written for `repo` alone
+            # reads as done. The schema constrains the two identically, so a caller that can put a
+            # `..` in one can put it in the other.
+            for path in paths:
+                fault = scope_fault("--path", path)
+                if fault:
+                    return None, fault
             scope["paths"] = list(dict.fromkeys(paths))
         return scope, None
     if paths:
@@ -325,8 +360,41 @@ def load_all(root):
 
 
 def describe(to):
-    """The addressing, in one short phrase, for a human reading a list."""
+    """The addressing, in one short phrase, for a human reading a list.
+
+    Through `store.printable`, like the two below, and that is why these three live here rather than
+    in the caller that prints them. `cli` is in `DECLINED`, on the argument that its output is wrong
+    in front of the person who typed the command - which holds for every other line it prints and
+    not for these, because the text in them was written by a different session. An escape that
+    erases the line makes the output look right, so the person reading it is the last one who would
+    notice. A rule whose failure is invisible to the only witness belongs where the sweep can reach
+    it. See #47.
+
+    `session_id` is pattern-constrained and could not carry an escape, so it is passed through the
+    same call as the other two: one rule, one place, rather than a per-field judgement that has to
+    be re-made correctly every time the schema changes.
+    """
     if "session_id" in to:
-        return f"session {to['session_id']}"
+        return f"session {store.printable(to['session_id'])}"
     paths = to.get("paths")
-    return f"{to['repo']}: {', '.join(paths)}" if paths else to["repo"]
+    repo = store.printable(to["repo"])
+    return f"{repo}: {', '.join(store.printable(p) for p in paths)}" if paths else repo
+
+
+def describe_sender(record):
+    """Who posted it, in one short phrase.
+
+    `name` is free text in the schema and `cwd` is a filesystem path, so both can hold anything a
+    path can hold, which on Linux is everything except `/` and NUL. Neither is the typist's own.
+    """
+    return store.printable(record["from"].get("name") or record["from"]["cwd"])
+
+
+def preview(body):
+    """The first line of a body, safe to print.
+
+    `splitlines()[0]` cannot `IndexError` here: `body` has `minLength: 1`, and a string that is only
+    a line terminator splits to `['']` rather than `[]`. Checked rather than assumed, because the
+    empty-list case would be a crash on a record a sender fully controls.
+    """
+    return store.printable(body.splitlines()[0])

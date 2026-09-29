@@ -89,6 +89,30 @@ def safe_id(value):
     return value if isinstance(value, str) and SAFE_ID.fullmatch(value) else None
 
 
+def printable(value):
+    """`value` with every character a terminal acts on rather than shows removed.
+
+    For text one session wrote and another session's terminal renders. `safe_id` is the same lesson
+    one field over - its docstring is about a newline ending a markdown row early - and the reason
+    this is a second function rather than a second caller of that one is that prose has to survive
+    it. An id may be refused; a body has to be shown.
+
+    `str.isprintable` rather than a blacklist of the escapes seen so far. It already excludes every
+    C0 and C1 control, so `\\033`, `\\r` and `\\007` go without being named, and it also excludes
+    the `Cf` category, which is where the bidi overrides live - a class nobody here thought of, kept
+    out by picking the question "would a terminal show this" over "is this one of the bad ones".
+    Space is printable and stays. Tab is not and goes, which is correct for a one-line preview: the
+    character is there to move the cursor.
+
+    Dropping rather than escaping. `repr` was the alternative and it backslashes every quote and
+    backslash in ordinary prose, so the common case pays for the rare one. Dropping does mean the
+    rendered line can differ from the stored one, which is worth stating plainly - but that is
+    already true of the text this exists for, and an erase-line escape makes the difference the
+    reader's problem instead of the writer's.
+    """
+    return "".join(ch for ch in value if ch.isprintable())
+
+
 def _staged(path, obj, schema):
     """Validate, then write a temp file beside the target. Returns `(tmp, problem)`.
 

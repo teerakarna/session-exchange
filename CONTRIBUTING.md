@@ -199,6 +199,17 @@ exists inside CI.
 | Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |
 | Secrets | none, unless you have `gitleaks` installed | `secrets`, every push, full history |
 
+To check one new rule without paying for a whole sweep, go through `mutate.run_suite(mutation)`, which
+copies the repo to a fresh temp directory per mutation. Do not patch a file in `plugin/lib` in place,
+run a test, and restore it. That reads like the same thing and is not: the mutated and restored files
+have different sizes but successive *mutations* often have the same one, `.pyc` invalidation is
+(mtime, size) with one-second mtime granularity, and two same-size mutations written inside one second
+make Python reuse the bytecode compiled from the first. Verifying the seven mutations of #45/#46/#47
+that way, two of them scored against the previous mutation's code and the failure named a check
+neither of them touched. The sweep itself is not exposed to this - fresh directory per mutation, and
+`__pycache__` is in `IGNORE` - but the shortcut around it is, and it fails by attributing a real
+failure to the wrong rule, which is the direction that does not look like a bug.
+
 `.pre-commit-config.yaml` wires lint, shellcheck and the suite to git, if you want them there.
 Not the two `claude plugin validate` calls, which need `claude` on PATH, so run those by hand or
 leave them to `checks`:
@@ -224,9 +235,10 @@ would have predicted ten and a half at 177, and it took fifteen.
 
 Every figure in that paragraph is a laptop, and the runner is a different measurement rather than the
 same one scaled. Three full resweeps of the same 191 over three consecutive commits came in at 20m44s,
-17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. A spread
-of nearly half, which swallows every local figure at this count, so the observed band is the whole of
-4.5 to 6.5 seconds and a tighter reading of it is not supported. Naming one is the older mistake here:
+17m08s and 14m15s - 6.5s, 5.4s and 4.5s per mutation, getting faster while the suite got longer. Two more
+resweeps of the same count since, 5.2s and 4.7s, fall inside those three rather than extending them. A
+spread of nearly half, which swallows every local figure at this count, so the observed band is the whole
+of 4.5 to 6.5 seconds and a tighter reading of it is not supported. Naming one is the older mistake here:
 the comment in `ci.yml` carried "between four and a half and four and three quarters" for the
 87-mutation set with no samples recorded beside it, so where that quarter-minute came from is not
 answerable now, and four later resweeps put the runner spread at three to five minutes. The first
@@ -329,6 +341,13 @@ implement it and the meta-test will tell you when you have not.
 
 Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`). Branch and PR for everything; nothing lands
 on `main` directly. No `Co-Authored-By` trailers.
+
+Repeat the keyword for every issue a PR closes: `Closes #36, closes #27, closes #42`. GitHub parses only
+the issue immediately after the keyword, so `Closes #36, #27, #42` closes one and silently ignores the
+rest. #56 shipped with that shape in both the PR body and the squash message, closed #36, left three
+open, and nothing anywhere reported it - the merge succeeded and the PR said what it meant to do. The
+failure is invisible unless you go and look at the issues, which is the same shape as everything else
+in this file.
 
 That last part is enforced rather than trusted: a ruleset on `main` requires a pull request and a green
 `ci`, blocks force pushes and branch deletion, and has no bypass actors, so a direct push is rejected

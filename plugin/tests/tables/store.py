@@ -57,4 +57,14 @@ MUTATIONS = [
         new="    except (OSError, ValueError):\n        return None, None",
         caught_by="test_store_claims.py",
     ),
+    # #47. `if True` rather than deleting the comprehension, so what breaks is the predicate and not
+    # the shape of the function: a mutation that also changes the return type is caught by anything
+    # that calls it, which would score a catch this rule has not earned.
+    Mutation(
+        module="store",
+        rule="text another session wrote loses the characters a terminal acts on",
+        old='    return "".join(ch for ch in value if ch.isprintable())',
+        new='    return "".join(ch for ch in value if True)',
+        caught_by="test_store_claims.py",
+    ),
 ]

@@ -505,6 +505,76 @@ with tempfile.TemporaryDirectory() as tmp:
         (1, True, True),
     )
 
+print("a handoff addressed to a session nobody is running says so while it can")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #45 decided that addressing is a hint rather than access control, so the mistyped id is the
+    # only real failure left in it, and a note at post time is the whole fix. Both halves are
+    # checked here: the note when nothing holds the id, and no note when something does - a warning
+    # that fires either way says nothing, and that is the easier of the two to ship by accident.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+
+    code, out = run(home, repo, "handoff", "post", "--session", "no-such-session", "--body", "hi")
+    check(
+        "an unheld id is a note, not a refusal, and the handoff is posted",
+        (code, "no live session is registered as no-such-session" in out, "posted" in out),
+        (0, True, True),
+    )
+    check(
+        "and the note says any session can move it, since that is what was decided",
+        "any session can" in out,
+        True,
+    )
+
+    # The fixture registers this test process, so its own session id is one the registry holds.
+    own = json.loads(next((pathlib.Path(home) / ".claude" / "sessions").glob("*.json")).read_text())
+    code, out = run(home, repo, "handoff", "post", "--session", own["sessionId"], "--body", "hi")
+    check(
+        "a live id gets no note, or the warning means nothing",
+        (code, "no live session is registered" in out),
+        (0, False),
+    )
+
+print("another session's text does not get to drive the reader's terminal")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # End to end, and the reason it is here as well as in `test_handoffs.py`: the rule lives in
+    # `handoffs` so the sweep can reach it, and nothing stops a later edit inlining the rendering
+    # back into `cli`, where it would be correct on the day and unswept afterwards. This check is
+    # what would notice. `cli` is in DECLINED on the argument that its output is wrong in front of
+    # the person who typed the command, and that argument is exactly what fails here: an erase-line
+    # escape makes the output look right to the only witness.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    nasty = "HARMLESS\033[2K\033[1;31mURGENT\007"
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", nasty)
+    handoff_id = posted_id(out)
+
+    stored = json.loads(
+        (area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json").read_text()
+    )
+    # Stored verbatim. The store is not the place to edit someone's prose, and a body that came back
+    # altered would be a worse bug than the one being fixed: the record is the evidence.
+    check("the record keeps the body exactly as it was posted", stored["body"], nasty)
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "and the rendered line carries no escape at all",
+        (code, "\033" in out, "\007" in out, "HARMLESS[2K[1;31mURGENT" in out),
+        (0, False, False, True),
+    )
+    # Not just the body. Three fields on that block come from the sender, and `to` is the one the
+    # schema still allows an escape through even after #46, which only refuses path shapes.
+    code, out = run(home, repo, "handoff", "post", "--repo", "r\033[2Kp", "--body", "scope")
+    check("a repo is posted with the escape in it, the schema allowing it", code, 0)
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "and the addressing renders inert too, not only the body",
+        (code, "\033" in out, "to r[2Kp" in out),
+        (0, False, True),
+    )
+
 print("what is not built yet says so, and does not look like a failure")
 
 with tempfile.TemporaryDirectory() as tmp:

@@ -386,8 +386,60 @@ MUTATIONS = [
     Mutation(
         module="handoffs",
         rule="a narrowed scope is described with the paths that narrow it",
-        old="    return f\"{to['repo']}: {', '.join(paths)}\" if paths else to[\"repo\"]",
-        new='    return to["repo"]',
+        old=(
+            "    return f\"{repo}: {', '.join(store.printable(p) for p in paths)}\" "
+            "if paths else repo"
+        ),
+        new="    return repo",
+        caught_by="test_handoffs.py",
+    ),
+    # #46. Two shapes, two mutations, because one guard covering both would pass on either half and
+    # the messages are deliberately different. The third is the `paths` loop, which is the half a
+    # guard written for `repo` alone leaves behind - and note it is a separate entry from the two
+    # above it rather than a variation of them: what it breaks is the iteration, not the test.
+    Mutation(
+        module="handoffs",
+        rule="a scope path cannot be absolute, because the field is relative to the root",
+        old='    if value.startswith("/"):',
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and cannot climb out of the root with ..",
+        old='    if ".." in value.split("/"):',
+        new="    if False:",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="every path is checked, not the first one",
+        old="            for path in paths:",
+        new="            for path in paths[:1]:",
+        caught_by="test_handoffs.py",
+    ),
+    # #47. One per field. The reason is the lesson from #44's review: a single check over three
+    # fields passes as soon as one of them is sanitised, so the two that are not have no check at
+    # all. Three fields reach the terminal on that block, and the issue said one.
+    Mutation(
+        module="handoffs",
+        rule="a repo reaching a terminal goes through the stripper, the schema having allowed it",
+        old='    repo = store.printable(to["repo"])',
+        new='    repo = to["repo"]',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="so does the sender, whose name is free text and whose cwd is a path",
+        old='    return store.printable(record["from"].get("name") or record["from"]["cwd"])',
+        new='    return record["from"].get("name") or record["from"]["cwd"]',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and the body preview, which is the field the issue was filed about",
+        old="    return store.printable(body.splitlines()[0])",
+        new="    return body.splitlines()[0]",
         caught_by="test_handoffs.py",
     ),
 ]

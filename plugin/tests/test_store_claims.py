@@ -307,6 +307,39 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
 
+print("text one session wrote and another one's terminal renders")
+
+# The escape from the reproduction in #47, kept verbatim rather than described, because the point of
+# the bug was that a description of the output and the output itself were different things.
+check(
+    "an erase-line escape does not survive to the terminal",
+    store.printable("HARMLESS\033[2K\033[1;31mURGENT\007"),
+    "HARMLESS[2K[1;31mURGENT",
+)
+check(
+    "a carriage return goes, being the cheap way to do the same thing",
+    store.printable("a\rb"),
+    "ab",
+)
+check(
+    "and so does a bidi override, which nobody here thought of and a blacklist would have missed",
+    store.printable("safe\u202egnorw"),
+    "safegnorw",
+)
+# The argument against `repr`, as a check rather than as a sentence in the docstring: if this ever
+# fails, prose has started paying for the escapes.
+check(
+    "ordinary prose keeps its quotes, backslashes and spaces",
+    store.printable("""it's a c:\\path, "quoted", 50% done"""),
+    """it's a c:\\path, "quoted", 50% done""",
+)
+check(
+    "a tab goes, because in a one-line preview it is there to move the cursor",
+    store.printable("a\tb"),
+    "ab",
+)
+check("an empty string is not a special case", store.printable(""), "")
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
