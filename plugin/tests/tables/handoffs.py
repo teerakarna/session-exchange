@@ -387,10 +387,29 @@ MUTATIONS = [
         module="handoffs",
         rule="a narrowed scope is described with the paths that narrow it",
         old=(
-            "    return f\"{repo}: {', '.join(store.printable(p) for p in paths)}\" "
+            "    phrase = f\"{repo}: {', '.join(store.printable(p) for p in paths)}\" "
             "if paths else repo"
         ),
-        new="    return repo",
+        new="    phrase = repo",
+        caught_by="test_handoffs.py",
+    ),
+    # #61. The width bound on each of the three, separately, for the reason the stripping entries
+    # below are separate: a cap on two of them reads as done and the third is the 23 KB row.
+    Mutation(
+        module="handoffs",
+        rule="and the phrase is bounded in width, a path list having no length limit",
+        old="    return store.capped_text(phrase, cap)",
+        new="    return phrase",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="so is a session scope, which is the branch that returns before the other one",
+        old=(
+            "        return store.capped_text("
+            "f\"session {store.printable(to['session_id'])}\", cap)"
+        ),
+        new="        return f\"session {store.printable(to['session_id'])}\"",
         caught_by="test_handoffs.py",
     ),
     # #46. The guard itself moved to `store`, because a claim has the same two fields and the point
@@ -432,15 +451,23 @@ MUTATIONS = [
     Mutation(
         module="handoffs",
         rule="so does the sender, whose name is free text and whose cwd is a path",
-        old='    return store.printable(record["from"].get("name") or record["from"]["cwd"])',
-        new='    return record["from"].get("name") or record["from"]["cwd"]',
+        old=(
+            "    return store.capped_text(\n"
+            '        store.printable(record["from"].get("name") or record["from"]["cwd"]), cap\n'
+            "    )"
+        ),
+        new=(
+            "    return store.capped_text(\n"
+            '        record["from"].get("name") or record["from"]["cwd"], cap\n'
+            "    )"
+        ),
         caught_by="test_handoffs.py",
     ),
     Mutation(
         module="handoffs",
         rule="and the body preview, which is the field the issue was filed about",
-        old="    return store.printable(body.splitlines()[0])",
-        new="    return body.splitlines()[0]",
+        old="    return store.capped_text(store.printable(body.splitlines()[0]), cap)",
+        new="    return store.capped_text(body.splitlines()[0], cap)",
         caught_by="test_handoffs.py",
     ),
     # #51. `load_all` already refuses a pre-#44 record and names the file and the key, which is all
@@ -529,6 +556,24 @@ MUTATIONS = [
         rule="the recipe is printed for a frozen handoff and not for a healthy one",
         old="        if faults or _settled(seen):\n            continue",
         new="        if False:\n            continue",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the sender is bounded in width too, name and cwd both being unbounded in the schema",
+        old=(
+            "    return store.capped_text(\n"
+            '        store.printable(record["from"].get("name") or record["from"]["cwd"]), cap\n'
+            "    )"
+        ),
+        new='    return store.printable(record["from"].get("name") or record["from"]["cwd"])',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and so is the body preview, one line being no bound at all on a line with no length",
+        old="    return store.capped_text(store.printable(body.splitlines()[0]), cap)",
+        new="    return store.printable(body.splitlines()[0])",
         caught_by="test_handoffs.py",
     ),
 ]

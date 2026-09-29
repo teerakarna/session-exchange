@@ -168,4 +168,38 @@ MUTATIONS = [
         new="    directories += []",
         caught_by="test_cli.py",
     ),
+    # #61. The text half of the caps. Both directions, because a capper that never cuts and one that
+    # always appends a count are different lies: the first reads as the whole of what the sender
+    # wrote, the second says characters were dropped from a line nothing was dropped from.
+    Mutation(
+        module="store",
+        rule="text longer than the cap is cut, so one row cannot take a terminal",
+        old="    if len(value) <= cap:",
+        new="    if False:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="and text inside it is returned whole, with nothing appended",
+        old="    if len(value) <= cap:",
+        new="    if True:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="what was cut off is counted rather than silently dropped",
+        old='    return f"{value[:cap]} +{len(value) - cap} more chars"',
+        new="    return value[:cap]",
+        caught_by="test_store_claims.py",
+    ),
+    # The marker is one path in one function, for the reason `TMP_PREFIX` is one constant: `init`
+    # writing a file `config` does not read would leave every cap at its default with a marker in
+    # the repo saying otherwise, and nothing would fail.
+    Mutation(
+        module="store",
+        rule="the marker is the file init writes and config reads, at one path",
+        old='    return pathlib.Path(root) / ".claude" / "exchange.json"',
+        new='    return pathlib.Path(root) / "exchange.json"',
+        caught_by="test_cli.py",
+    ),
 ]

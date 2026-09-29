@@ -497,8 +497,14 @@ def orphan_moves(root):
     return problems
 
 
-def describe(to):
+def describe(to, cap):
     """The addressing, in one short phrase, for a human reading a list.
+
+    `cap` is required rather than defaulted, as on the other two renderers here and on
+    `claims.describe_focus`. These render text a different session wrote, at whatever width it wrote
+    it, and a cap with a default is a cap a future caller forgets to pass and nothing reports. #61
+    was filed because the handoff list was the one render in the plugin with no width bound at all,
+    and an optional argument is how it would become that again.
 
     Through `store.printable`, like the two below, and that is why these three live here rather than
     in the caller that prints them. `cli` is in `DECLINED`, on the argument that its output is wrong
@@ -526,26 +532,37 @@ def describe(to):
     made safe by this call.
     """
     if "session_id" in to:
-        return f"session {store.printable(to['session_id'])}"
+        return store.capped_text(f"session {store.printable(to['session_id'])}", cap)
     paths = to.get("paths")
     repo = store.printable(to["repo"])
-    return f"{repo}: {', '.join(store.printable(p) for p in paths)}" if paths else repo
+    # Capped after joining, so a scope with forty paths in it is bounded by width the way every
+    # other line here is. `max_hot_paths` bounds a claim's lists by count; this side has no such
+    # setting and does not need one, the question being how much of a terminal one row may take.
+    phrase = f"{repo}: {', '.join(store.printable(p) for p in paths)}" if paths else repo
+    return store.capped_text(phrase, cap)
 
 
-def describe_sender(record):
+def describe_sender(record, cap):
     """Who posted it, in one short phrase.
 
     `name` is free text in the schema and `cwd` is a filesystem path, so both can hold anything a
-    path can hold, which on Linux is everything except `/` and NUL. Neither is the typist's own.
+    path can hold, which on Linux is everything except `/` and NUL. Neither is the typist's own,
+    and neither has a length limit in the schema, which is what `cap` is for.
     """
-    return store.printable(record["from"].get("name") or record["from"]["cwd"])
+    return store.capped_text(
+        store.printable(record["from"].get("name") or record["from"]["cwd"]), cap
+    )
 
 
-def preview(body):
-    """The first line of a body, safe to print.
+def preview(body, cap):
+    """The first line of a body, safe to print and bounded in width.
 
     `splitlines()[0]` cannot `IndexError` here: `body` has `minLength: 1`, and a string that is only
     a line terminator splits to `['']` rather than `[]`. Checked rather than assumed, because the
     empty-list case would be a crash on a record a sender fully controls.
+
+    One line was the only bound this had, and a line has no length: the body is prose from another
+    session with `minLength` and no `maxLength`, so a single-line 23 KB body rendered whole. Same
+    row, same size, same defect as the ledger this plugin replaced.
     """
-    return store.printable(body.splitlines()[0])
+    return store.capped_text(store.printable(body.splitlines()[0]), cap)

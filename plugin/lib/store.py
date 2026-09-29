@@ -129,6 +129,23 @@ def printable(value):
     return "".join(ch for ch in value if ch.isprintable())
 
 
+def capped_text(value, cap):
+    """`value` bounded to `cap` characters, with whatever was cut off counted rather than dropped.
+
+    The text half of what `cli._capped` does for a list, and the same argument: a line that stops at
+    the cap silently reads as the whole of what the sender wrote, so nobody goes looking for the
+    rest. `[:cap]` was what the one capped render in this plugin did, and the row that went into
+    every session at 23 KB is why any of these caps exist at all.
+
+    Applied after `printable` by every caller here, for the reason `claims.describe_focus` gives:
+    characters that render as nothing still spend the budget, so capping first gives a line shorter
+    than the cap by an amount the reader cannot see and the writer chose.
+    """
+    if len(value) <= cap:
+        return value
+    return f"{value[:cap]} +{len(value) - cap} more chars"
+
+
 def scope_fault(flag, value):
     """Why `value` cannot be a root-relative scope path, or None.
 
@@ -378,6 +395,17 @@ def litter(root):
     return problems
 
 
+def marker_path(root):
+    """Where the marker for `root` lives, which is also where its config lives.
+
+    One function rather than the same three path components in `init`, in `doctor` and in `config`,
+    for the reason `TMP_PREFIX` is a constant: a copy that drifted would not fail. `init` would
+    write a marker `config` does not read, and every cap would silently stay at its default while a
+    file sitting in the repo said otherwise.
+    """
+    return pathlib.Path(root) / ".claude" / "exchange.json"
+
+
 def config(root):
     """The marker's contents with defaults filled in, plus any problem reading it.
 
@@ -389,7 +417,7 @@ def config(root):
     defaults = {
         key: spec["default"] for key, spec in schema["properties"].items() if "default" in spec
     }
-    obj, problem = read_json(pathlib.Path(root) / ".claude" / "exchange.json", schema)
+    obj, problem = read_json(marker_path(root), schema)
     if obj is None:
         return dict(defaults, name=pathlib.Path(root).name), problem
     return dict(defaults, **obj), None

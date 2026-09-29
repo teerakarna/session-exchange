@@ -97,7 +97,7 @@ def cmd_init(args):
             )
         return 1
 
-    marker = target / ".claude" / "exchange.json"
+    marker = store.marker_path(target)
     if marker.is_file():
         config, problem = store.config(target)
         print(f"Already marked: {marker}")
@@ -287,7 +287,7 @@ def _steps(root):
             any("imported" in record for record, _ in stored) if stored else False,
             None,
         ),
-        (5, "this root marked", (pathlib.Path(root) / ".claude" / "exchange.json").is_file(), None),
+        (5, "this root marked", store.marker_path(root).is_file(), None),
         (
             6,
             "every other root marked",
@@ -445,7 +445,13 @@ def cmd_handoff_post(args):
     if problem:
         print(f"problem: {problem}")
         return 1
-    print(f"posted {record['id']} to {handoffs.describe(record['to'])}")
+    # The width the readers will render this scope at, not a second number invented here. This one
+    # line is the exception `DECLINED` describes - the scope is what the typist just typed, and they
+    # are reading the reply - but it is the same call the list makes, so it takes the same cap.
+    config, config_problem = store.config(resolution.root)
+    print(f"posted {record['id']} to {handoffs.describe(record['to'], config['max_focus_chars'])}")
+    if config_problem:
+        print(f"problem   {config_problem}")
     if "session_id" in record["to"]:
         # #45. A note here rather than a refusal in `handoffs`, and rather than a guard in
         # `set_status`: addressing is a hint to a reader, not access control, so the only thing
@@ -470,7 +476,9 @@ def cmd_handoff_post(args):
             "  note: the registry has no entry for this process, so it is recorded as coming from "
             f"{args.cwd} with no session or name."
         )
-    return 0
+    # The handoff is written either way - an unreadable marker is not a reason to refuse a post -
+    # but the exit code says so, as it does everywhere else a problem line is printed.
+    return 1 if config_problem else 0
 
 
 def _transition(args, status):
@@ -526,16 +534,33 @@ def cmd_handoff_list(args):
     resolution = _resolved(args)
     if resolution is None:
         return 1
-    stored, problems = handoffs.load_all(resolution.root)
-    shown = [pair for pair in stored if args.all or pair[1] != handoffs.CLOSED]
+    root = resolution.root
+    config, config_problem = store.config(root)
+    stored, problems = handoffs.load_all(root)
+    if config_problem:
+        problems = [config_problem, *problems]
+    matching = [pair for pair in stored if args.all or pair[1] != handoffs.CLOSED]
+    # #61: `max_handoffs_listed` was in the schema, had a default, was asserted to have one, and no
+    # code read it. A setting nothing reads is worse than no setting, because somebody raises it and
+    # believes they have seen the rest.
+    cap = config["max_handoffs_listed"]
+    shown = matching[:cap]
+    width = config["max_focus_chars"]
     print(f"handoffs  {len(stored)} stored, {len(shown)} shown")
     for record, status in shown:
         print(f"  {record['id']}  {status}")
         print(
-            f"    to {handoffs.describe(record['to'])}, "
-            f"from {handoffs.describe_sender(record)}, {record['created']}"
+            f"    to {handoffs.describe(record['to'], width)}, "
+            f"from {handoffs.describe_sender(record, width)}, {record['created']}"
         )
-        print(f"    {handoffs.preview(record['body'])}")
+        print(f"    {handoffs.preview(record['body'], width)}")
+    if len(matching) > len(shown):
+        # Counted, and naming the lever and the file it is in. A list that stops at eight reads
+        # exactly like a root with eight handoffs under it, which is the whole of #61.
+        print(
+            f"  +{len(matching) - len(shown)} more not shown: raise max_handoffs_listed in "
+            f"{store.marker_path(root)}"
+        )
     for problem in problems:
         print(f"problem   {problem}")
     return 1 if problems else 0

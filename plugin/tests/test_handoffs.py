@@ -26,6 +26,10 @@ import store
 
 failures = []
 
+# Wider than anything the stripping checks render, so those checks say what they say about stripping
+# and nothing about width. The cap itself is asserted separately, on its own text.
+WIDE = 10_000
+
 
 def check(name, got, want):
     if got == want:
@@ -91,10 +95,10 @@ check(
 )
 check(
     "describe names a narrowed scope",
-    handoffs.describe({"repo": "r", "paths": ["a", "b"]}),
+    handoffs.describe({"repo": "r", "paths": ["a", "b"]}, WIDE),
     "r: a, b",
 )
-check("and a session scope reads as one", handoffs.describe({"session_id": "s"}), "session s")
+check("and a session scope reads as one", handoffs.describe({"session_id": "s"}, WIDE), "session s")
 
 check(
     "an absolute repo is refused, naming the flag and the shape",
@@ -161,28 +165,56 @@ print("another session's text, on its way to a terminal")
 
 check(
     "describe strips an escape out of a repo, which the schema still allows through",
-    handoffs.describe({"repo": "r\033[2K", "paths": ["p\rq"]}),
+    handoffs.describe({"repo": "r\033[2K", "paths": ["p\rq"]}, WIDE),
     "r[2K: pq",
 )
 check(
     "a sender's name is not the typist's, so it is stripped as well",
-    handoffs.describe_sender({"from": {"name": "peer\033[1;31m", "cwd": "/tmp"}}),
+    handoffs.describe_sender({"from": {"name": "peer\033[1;31m", "cwd": "/tmp"}}, WIDE),
     "peer[1;31m",
 )
 check(
     "and the cwd it falls back to, which is a path and can hold anything a path can",
-    handoffs.describe_sender({"from": {"cwd": "/tmp/w\007d"}}),
+    handoffs.describe_sender({"from": {"cwd": "/tmp/w\007d"}}, WIDE),
     "/tmp/wd",
 )
 check(
     "a body preview is one line, stripped",
-    handoffs.preview("first\033[2K line\nsecond line"),
+    handoffs.preview("first\033[2K line\nsecond line", WIDE),
     "first[2K line",
 )
 # Checked rather than assumed, because the empty-list case would be a crash on a record whose
 # content the sender chooses. `minLength: 1` makes "" unreachable from disk; a lone terminator is
 # not unreachable, and it is the one that splits to [''] rather than [].
-check("a body that is only a newline previews as empty, not as a crash", handoffs.preview("\n"), "")
+check(
+    "a body that is only a newline previews as empty, not as a crash",
+    handoffs.preview("\n", WIDE),
+    "",
+)
+
+# #61. One line was the only bound these had, and a line has no length: `body` has `minLength` and
+# no `maxLength`, so a single-line 23 KB body rendered whole into whoever's terminal listed it. Each
+# of the three renderers separately, because a cap applied to two of them reads as done.
+check(
+    "a long body preview is cut at the cap, with the rest counted",
+    handoffs.preview("b" * 300, 240),
+    "b" * 240 + " +60 more chars",
+)
+check(
+    "a scope with more paths than fit is bounded too, being joined before it is capped",
+    handoffs.describe({"repo": "r", "paths": ["p" * 40] * 10}, 60),
+    f"r: {'p' * 40}, {'p' * 15} +361 more chars",
+)
+check(
+    "a session scope as well, that being the branch which returns before the other one",
+    handoffs.describe({"session_id": "s" * 40}, 12),
+    "session ssss +36 more chars",
+)
+check(
+    "and a sender, whose name and cwd both have a length nothing constrains",
+    handoffs.describe_sender({"from": {"cwd": "/tmp/" + "d" * 300}}, 20),
+    "/tmp/ddddddddddddddd +285 more chars",
+)
 
 print("posting never overwrites")
 

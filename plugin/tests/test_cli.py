@@ -864,6 +864,44 @@ with tempfile.TemporaryDirectory() as tmp:
         (0, False, True),
     )
 
+print("the caps in the marker are caps the list actually applies")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #61. `max_handoffs_listed` was in the schema, had a default, and was asserted to have one by a
+    # check on the schema. No code read it. A setting nothing reads is worse than no setting: it is
+    # raised, believed, and the rest of the list is still missing.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    marker = area / ".claude" / "exchange.json"
+    marker.write_text(json.dumps({"name": "area", "max_handoffs_listed": 2}))
+    for n in range(4):
+        run(home, repo, "handoff", "post", "--repo", "repo", "--body", f"body {n}")
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "the list stops where the marker says, not where the default does",
+        (code, "4 stored, 2 shown" in out),
+        (0, True),
+    )
+    check(
+        "and what it left out is counted, naming the lever and the file it is in",
+        ("+2 more not shown" in out, "max_handoffs_listed" in out, str(marker) in out),
+        (True, True, True),
+    )
+
+    # The width half, which is the same question asked about one row rather than about the list:
+    # what does the reader see when something was left out. A body has `minLength` and no
+    # `maxLength`, and one line is no bound at all - the row that went into every session at 23 KB
+    # was a single line.
+    marker.write_text(json.dumps({"name": "area", "max_focus_chars": 20}))
+    run(home, repo, "handoff", "post", "--repo", "repo", "--body", "x" * 400)
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "a body wider than the cap is cut, with the rest counted rather than dropped",
+        (code, "x" * 20 + " +380 more chars" in out, "x" * 21 in out),
+        (0, True, False),
+    )
+
 print("what is not built yet says so, and does not look like a failure")
 
 with tempfile.TemporaryDirectory() as tmp:

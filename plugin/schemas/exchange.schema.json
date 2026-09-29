@@ -22,7 +22,7 @@
       "type": "integer",
       "minimum": 1,
       "default": 240,
-      "description": "Truncation cap for a claim's focus line. The ledger this replaces had single rows of 23 KB injected into every session."
+      "description": "Width cap for a one-line render of text another session wrote: a claim's focus, and a handoff's scope, sender and body preview. Anything past it is counted, never silently cut. The ledger this replaces had single rows of 23 KB injected into every session. The key keeps its original name, which says focus, because renaming it would break every marker already written."
     },
     "max_hot_paths": {
       "type": "integer",

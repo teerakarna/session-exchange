@@ -179,8 +179,11 @@ MUTATIONS = [
     Mutation(
         module="claims",
         rule="a focus another session wrote goes through the stripper",
-        old='    return store.printable(claim.get("focus") or "(no focus stated)")[:cap]',
-        new='    return (claim.get("focus") or "(no focus stated)")[:cap]',
+        old=(
+            "    return store.capped_text("
+            'store.printable(claim.get("focus") or "(no focus stated)"), cap)'
+        ),
+        new=('    return store.capped_text((claim.get("focus") or "(no focus stated)"), cap)'),
         caught_by="test_store_claims.py",
     ),
     # Stripping after capping is the subtle half, and it is a separate entry because a check that
@@ -189,8 +192,27 @@ MUTATIONS = [
     Mutation(
         module="claims",
         rule="and is stripped before it is capped, so the cap counts what the reader sees",
-        old='    return store.printable(claim.get("focus") or "(no focus stated)")[:cap]',
-        new='    return store.printable((claim.get("focus") or "(no focus stated)")[:cap])',
+        old=(
+            "    return store.capped_text("
+            'store.printable(claim.get("focus") or "(no focus stated)"), cap)'
+        ),
+        new=(
+            "    return store.printable("
+            'store.capped_text(claim.get("focus") or "(no focus stated)", cap))'
+        ),
+        caught_by="test_store_claims.py",
+    ),
+    # And that it is capped at all. The two above both cap, so either of them passing says nothing
+    # about the bound existing - which is how the one render with no bound at all went unnoticed
+    # until #61 was filed about a different field.
+    Mutation(
+        module="claims",
+        rule="and it is capped, a focus being free text with no length limit in the schema",
+        old=(
+            "    return store.capped_text("
+            'store.printable(claim.get("focus") or "(no focus stated)"), cap)'
+        ),
+        new='    return store.printable(claim.get("focus") or "(no focus stated)")',
         caught_by="test_store_claims.py",
     ),
     Mutation(
