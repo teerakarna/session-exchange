@@ -27,32 +27,83 @@ jobs:
   # on. Until this existed, "156 checks green" meant one machine, one interpreter, once, at whatever
   # moment someone remembered to type it.
   #
-  # Spelt as `include` rather than a matrix with an `exclude` because the four legs are not a product
-  # with a hole in it, they are four deliberate choices:
+  # Three interpreters in one job rather than three legs of a matrix, and the reason is the one the
+  # `checks` comment below gives for its own shape: a job bills a whole minute however little it runs.
+  # These three took 17, 16 and 27 seconds, so three jobs billed three minutes to do one minute of
+  # work. Run in sequence here they come to around forty seconds and bill one. Nothing about what is
+  # checked changed - same three interpreters, same suite - and the step conditions keep them
+  # reporting independently of each other, which is the whole of what `fail-fast: false` was doing
+  # when they were legs. #73 has the measurement this came off.
+  #
+  # The versions are three deliberate choices, not a range:
   #
   # - 3.9 is the floor. The hooks invoke whatever `python3` is on PATH, and on a stock macOS that is
   #   the system 3.9. Ubuntu only, because setup-python has no arm64 build that far back.
   # - 3.11 and 3.13 cover the interpreter-level behaviour, which is where the version sensitivity is.
-  # - One macOS leg, on 3.13. The platform-sensitive parts are `os.kill` and `ps`, and those do not
-  #   vary by interpreter version, so a second macOS leg asserted nothing the first one did not - and
-  #   macOS minutes bill at 10x, so it was two thirds of this workflow's entire cost. The other
-  #   direction (drop macOS from PRs, run the full matrix only on push to main) was rejected: it makes
-  #   the PR gate weaker than the main gate, and a gate that is not the thing it is protecting is the
-  #   failure mode this repo exists about.
+  #
+  # macOS is its own job below rather than a fourth leg here. It is a different runner on a different
+  # multiplier, and the one recurring argument about what this workflow costs is about that job alone,
+  # which is easier to have when it is not sharing a matrix with three jobs whose cost is a rounding
+  # error.
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python: "3.9"
-          - os: ubuntu-latest
-            python: "3.11"
-          - os: ubuntu-latest
-            python: "3.13"
-          - os: macos-latest
-            python: "3.13"
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        with:
+          persist-credentials: false
+
+      # Every step from here carries `if: *leg`, the same pattern and the same reasoning as `&gate` in
+      # `checks` below. Three versions in one job have to fail independently of each other or the
+      # collapse costs coverage: without this, 3.9 going red means nothing is ever learned about 3.13
+      # on that run, which is strictly less than the matrix said. A failed checkout still takes all of
+      # them out at once, which is the one case where one clean failure beats three confusing ones.
+      #
+      # No install step anywhere below, and that is the point: see the stdlib step in `checks`.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: &leg ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        with:
+          python-version: "3.9"
+
+      - name: Test on 3.9
+        if: *leg
+        run: python plugin/tests/run.py
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: *leg
+        with:
+          python-version: "3.11"
+
+      - name: Test on 3.11
+        if: *leg
+        run: python plugin/tests/run.py
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: *leg
+        with:
+          python-version: "3.13"
+
+      - name: Test on 3.13
+        if: *leg
+        run: python plugin/tests/run.py
+
+  # One macOS run, on 3.13. The platform-sensitive parts are `os.kill` and `ps`, and those do not vary
+  # by interpreter version, so a second macOS version asserted nothing the first one did not.
+  #
+  # And it is the most expensive thing in this repo by a distance: fifteen seconds of work billed as
+  # ten minutes, because macOS bills at 10x and every job rounds up to a whole minute. Over the twenty
+  # runs before this change it was 200 billed minutes of 743, second only to the sweep - and with #43
+  # having taken the sweep down to about five minutes, it is now most of what a push costs. #73 has
+  # the breakdown.
+  #
+  # Dropping it from PRs to run only on push to `main` has been rejected twice and still is: it makes
+  # the PR gate weaker than the main gate, and a gate that is not the thing it is protecting is the
+  # failure mode this repo exists about. The 10x was known both times. What is new is only that it is
+  # now the majority of the bill rather than a third of it, which argues for a cheaper shape that
+  # keeps the gate where it is, not for reversing the decision. #73 is where that is being worked out.
+  test-macos:
+    runs-on: macos-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,9 +112,8 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.13"
 
-      # No install step, and that is the point: see the stdlib step in `checks`.
       - name: Test
         run: python plugin/tests/run.py
 
@@ -373,10 +423,31 @@ jobs:
       # If that ref is ever unreachable - a force push to `main`, which the ruleset forbids -
       # `mutate.py` refuses with exit 2 rather than reporting an empty diff as nothing to sweep. The
       # recovery is a manual run of the `Sweep` workflow, not a change here.
+      # And on a push to `main` it sweeps nothing, which is the one place this job deliberately stops
+      # asserting. After a squash merge `event.before` is one commit back, so `--since` gives exactly
+      # the diff the PR just swept: same modules, same tables, same answer, at the cost of a second
+      # full run per merge. That was a quarter of the fortnight's bill measured in #73, spent
+      # re-proving what the gate had already proved.
+      #
+      # What it gives up is the case where `main` moved under the PR, so the merged tree is not the
+      # tree that was swept. That case is `sweep.yml`'s, in its own words: "two changes that are each
+      # fine and together are not" is the first thing the weekly full sweep is there to catch, and it
+      # catches it across every table rather than the narrowed set a squash diff would select.
+      #
+      # The job still runs on `main` rather than being skipped, because `ci` reads a skipped need as a
+      # failure and a conditional job here would mean changing the gate. A minute to keep the gate as
+      # it is, against ten for the sweep it would have run.
       - name: Sweep what this change could have broken
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: python plugin/tests/mutate.py --since "$BASE"
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "not sweeping a push to main: this diff was swept on the PR that produced it, and"
+            echo "the weekly Sweep workflow covers main against a base that has moved since"
+            exit 0
+          fi
+          python plugin/tests/mutate.py --since "$BASE"
 
   secrets:
     runs-on: ubuntu-latest
@@ -407,7 +478,7 @@ jobs:
   # `always()` so it runs even when something upstream failed, and the explicit result check because
   # a skipped `needs` job does not fail a dependant on its own.
   ci:
-    needs: [test, checks, mutate, secrets]
+    needs: [test, test-macos, checks, mutate, secrets]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
