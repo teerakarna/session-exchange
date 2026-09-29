@@ -325,13 +325,25 @@ with tempfile.TemporaryDirectory() as tmp:
         ("\033" in out, "claimed as peer[2Kx" in out),
         (False, True),
     )
-    # A list field, and not only its first element.
+    # A list field, and not only its first element. Re-read before editing: the `claim` above wrote
+    # a ticket and a fresh timestamp, and putting back the dict that was read before it would drop
+    # both, leaving a check further down asserting against a record this file had already replaced.
+    stored = json.loads(peer.read_text())
     stored["paths"] = ["ok", "two\033[2K"]
     peer.write_text(json.dumps(stored))
     code, out = run(home, repo, "show")
     check(
         "and so does every element of a list field",
         ("\033" in out, "ok, two[2K" in out),
+        (False, True),
+    )
+    # And that same field through the echo, which is where the guard on the way in stops being the
+    # answer: `--path` is held by `store.scope_fault`, but this `paths` was written into the file
+    # directly, the way an older record, the `migrate` importer or a hand edit writes one.
+    code, out = run(home, repo, "claim", "--session", "peer-1")
+    check(
+        "a scope the guard never saw is still inert when the echo reads it back",
+        ("\033" in out, "paths: ok, two[2K" in out),
         (False, True),
     )
 

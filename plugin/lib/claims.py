@@ -184,11 +184,13 @@ def describe_settings(claim):
 
     A second render of a claim, and the one the first cut of the three above missed: `exchange
     claim` echoes what it wrote, and with `--session` the record it echoes belongs to a different
-    session, so `focus`, `name` and `tickets` in these lines are that session's text. `--repo` and
-    `--path` are held by `store.scope_fault` on the way in and cannot reach here with an escape in
-    them; the other three have no such guard, and the field this command exists to set is exactly
-    the free-text one. Missing this while fixing `show` is the same narrower-than-the-problem shape
-    one command over, twice in one branch.
+    session, so `focus`, `name` and `tickets` in these lines are that session's text. `repos` and
+    `paths` go through `describe_list` too, and not as belt-and-braces: `store.scope_fault` holds
+    `--repo`, `--path` and `--set-path` on the way in, but what this echoes is the whole record read
+    back off disk, so a scope written before that guard existed, imported by `migrate`, or edited
+    into the file by hand arrives here having passed through nothing. `test_cli.py` writes exactly
+    such a record. Missing all of this while fixing `show` is the same narrower-than-the-problem
+    shape one command over, twice in one branch.
 
     Uncapped, unlike `describe_focus`. The cap bounds one row of a block that lists every session,
     and this is a session reading back its own write: a confirmation that silently truncated would

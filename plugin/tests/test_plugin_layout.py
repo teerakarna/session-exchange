@@ -128,6 +128,35 @@ for name in subcommands:
     # A command the doc does not mention is a command nobody will run.
     check(f"the doc mentions {name}", f"`{name}" in command_doc, True)
 
+print("and no file in the tree carries a character a reviewer cannot see")
+
+# Three commits on this branch shipped a literal invisible character into source: a ZWJ, a U+3000,
+# and a ZWSP with an NBSP beside it. The last two sat inside the checks asserting that those very
+# codepoints get stripped, where a literal proves nothing about the code while reading as though it
+# does. Nobody catches this class by eye, in review or otherwise, which is the whole argument for
+# asserting it instead. Escapes, always.
+TEXT_SUFFIXES = (".py", ".md", ".json", ".sh", ".yml", ".yaml", ".toml")
+illegible = []
+for path in sorted(REPO.rglob("*")):
+    if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
+        continue
+    if {".git", "__pycache__"} & set(path.parts):
+        continue
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        illegible.append(f"{path.relative_to(REPO)}: not readable as utf-8, {exc}")
+        continue
+    # One predicate, the same one `store.printable` is built on: `isprintable` is false for the
+    # Other and Separator categories, so control characters, the zero-width formatting ones and
+    # NBSP-style spaces are all covered without a list of codepoints here to go out of date.
+    # Newline is the only one a file is meant to hold, and a stray carriage return is worth
+    # hearing about too.
+    found = sorted({f"U+{ord(ch):04X}" for ch in text if ch != "\n" and not ch.isprintable()})
+    if found:
+        illegible.append(f"{path.relative_to(REPO)}: {', '.join(found)}")
+check("every file reads the way it looks", illegible, [])
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
