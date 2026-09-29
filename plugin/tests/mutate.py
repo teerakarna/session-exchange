@@ -384,8 +384,12 @@ def run_suite(mutation=None, only=None):
         prepare(scratch, mutation, mutated)
         try:
             done = subprocess.run(
+                # `is not None` rather than a truth test: `only=""` is a caller that meant to ask
+                # for one file and asked for nothing, and a falsy selection quietly meaning the
+                # whole suite is the same silent-fallback shape as an empty run scoring as a pass.
+                # Passed through, `run.py` refuses it by name and the caller hears about it.
                 [sys.executable, str(scratch / "plugin" / "tests" / "run.py")]
-                + ([only] if only else []),
+                + ([only] if only is not None else []),
                 capture_output=True,
                 text=True,
                 # The suite is two seconds and the longest wait inside it is `test_hook.py`'s own
@@ -404,7 +408,7 @@ def run_suite(mutation=None, only=None):
     return done.returncode, done.stdout + done.stderr
 
 
-def baseline():
+def baseline(only=None):
     """The unmutated copy has to pass, or nothing the sweep reports means anything.
 
     This is not defensive tidiness, it is the whole sweep. If the scratch copy fails for its own
@@ -418,8 +422,17 @@ def baseline():
     not apply was scored as a pass; here, a suite that could not pass was scored as a catch. Both
     are a gate that cannot fail, which is the thing this repo exists to stop shipping, and the
     harness has now produced it twice. Assert the ground you are standing on.
+
+    `only` is the same ground for the narrowed run (#43). A clean run of the whole suite says the
+    fourteen files pass *together*, which is a different claim from any one of them passing *alone*,
+    and the fast path scores most of the table off a run of one file. A file that only passes
+    alongside another - a fixture something else creates, an ordering nothing declares - would exit
+    non-zero on its own for its own reason, `verdict` would find its name in the `FAILED:` line and
+    `failed_a_check` would find its `FAIL`, and every mutation naming it would come back caught
+    whatever it did. Which is this function's own paragraph above, one run shape further in, so the
+    caller baselines each file the tables name before trusting it.
     """
-    code, out = run_suite()
+    code, out = run_suite(only=only)
     return baseline_verdict(code, out)
 
 
@@ -561,8 +574,8 @@ def sweep_one(mutation):
     Two runs, and the first is only the file the mutation names (#43). `verdict` says caught when
     that file is among the failures and asks nothing of any other file, so a first run in which it
     fails a check is the same verdict the whole suite would have reached, by the same rule. It is
-    the overwhelmingly common outcome - 244 of 244 on the last full sweep - and it used to cost
-    fourteen files to reach.
+    the overwhelmingly common outcome - 230 of 244 on the last full sweep, the other fourteen being
+    the crash flags, which cannot take it by construction - and it used to cost fourteen files.
 
     Everything else falls through to the whole suite and is scored exactly as it was, because
     everything else is a question about the files that were not run. A survivor has to be told from
@@ -580,6 +593,14 @@ def sweep_one(mutation):
     ok, detail = verdict(returncode, out, mutation)
     if ok and failed_a_check(out, mutation.caught_by):
         return True, detail, False
+
+    # A run that did not happen at all is the one non-catch that is not a question about the other
+    # files, so it does not fall through. A mutation that does not apply fails to apply identically
+    # on a second call, and a named file that hangs hangs again inside the whole suite, which
+    # contains it - so the second run would spend another 120 seconds to print the same sentence,
+    # and the arithmetic in `run_suite`'s timeout comment is written for one cap per mutation.
+    if returncode is None:
+        return ok, detail, False
 
     returncode, out = run_suite(mutation)
     ok, detail = verdict(returncode, out, mutation)
@@ -652,6 +673,20 @@ def main(argv):
         return 2
     print("  ok    the unmutated copy passes, so a failure below is the mutation's")
 
+    # And once per file the tables name, alone, because that is how the fast path runs them. See
+    # `baseline`: passing with the suite and passing by itself are two claims, and the second is the
+    # one every narrowed verdict below rests on. Nine runs of one file against 244 of one file, so
+    # it is the cheap end of the sweep, and only the files the selected modules actually name.
+    alone = sorted({mutation.caught_by for module in wanted for mutation in TABLES[module]})
+    for name in alone:
+        problem = baseline(only=name)
+        if problem:
+            print(f"  STOP  {problem}")
+            print(f"        run alone rather than with the suite, which is how {name} is asked")
+            print("        every mutation naming it would come back caught whatever it did")
+            return 2
+    print(f"  ok    and each of the {len(alone)} file(s) they name passes alone, as they are run")
+
     survivors = []
     crashes = []
     # Counted as the loop goes, not from `sum(len(TABLES[name]) for name in wanted)`, which is what
@@ -670,7 +705,10 @@ def main(argv):
             print(f"  {'crash' if crashed else 'ok   ' if ok else 'ALIVE'} {mutation.rule}")
             # On a pass as well as on a survivor. `verdict` returns the files that objected and
             # nothing read the value, so it could have returned "" with the suite green - and it is
-            # worth reading: a mutation caught by three files is a coupling nobody chose.
+            # worth reading: a survivor names the file that should have objected, a crash says what
+            # died, and a mis-attribution names both halves. On an ordinary catch it is now the one
+            # file the fast path ran (#43), where it used to be every file that failed; the coupling
+            # that reading three names showed is the thing traded for the sweep fitting in a review.
             print(f"        {detail}")
             if not ok:
                 survivors.append((mutation, detail))

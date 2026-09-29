@@ -25,7 +25,10 @@ if sys.argv[1:]:
     unknown = [name for name in sys.argv[1:] if name not in known]
     if unknown:
         raise SystemExit(f"no test file called {', '.join(unknown)} in {HERE}")
-    scripts = [known[name] for name in sys.argv[1:]]
+    # `dict.fromkeys` keeps the order given and drops a repeat, which is not tidiness: a name twice
+    # runs the file twice and lands in the `FAILED:` line twice, and `catchers` hands the sweep a
+    # list with a duplicate in it.
+    scripts = [known[name] for name in dict.fromkeys(sys.argv[1:])]
 
 failed = []
 

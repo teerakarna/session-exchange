@@ -529,6 +529,20 @@ for outcome, what in (
         through.handed,
         [(once, "test_hook.py"), (once, None)],
     )
+# And the one non-catch that does not, because there is nothing in the other files to find: a hang
+# hangs again in a suite that contains the file, and a mutation that does not apply fails to apply
+# identically. Both would spend a second 120-second cap to print the sentence they already printed,
+# which is the arithmetic `run_suite`'s timeout comment is written against.
+for outcome, what in (
+    ((None, "the suite hung, which names nothing and blocks the sweep"), "a hang"),
+    ((None, "mutation did not apply: no match"), "a mutation that does not apply"),
+):
+    result = through(outcome, lambda: mutate.sweep_one(once))
+    check(
+        f"{what} is not asked twice, the second cap buying the same sentence",
+        (through.handed, result),
+        ([(once, "test_hook.py")], (False, outcome[1], False)),
+    )
 
 print("and what run_suite hands it is what the scoring needs")
 
@@ -631,6 +645,11 @@ check("the one file asked for is the one the runner is told to run", ran.args[2:
 # them.
 ran(Finished(0, "everything passed\n", ""), mutate.TABLES["store"][0])
 check("and no selection names no file, which run.py reads as all of them", ran.args[2:], [])
+# `only=""` is a caller that meant to name a file and named nothing, and it has to reach `run.py` to
+# be refused there. A truth test instead of `is not None` sends it down the whole-suite path, where
+# it costs the fourteen files the caller was trying to avoid and reports a clean result.
+ran(Finished(0, "everything passed\n", ""), mutate.TABLES["store"][0], only="")
+check("and an empty selection is passed on rather than read as all of them", ran.args[2:], [""])
 
 
 # The refusal that is the harness's original defect, one function in from the `apply` checks above:
@@ -695,17 +714,40 @@ ONE = mutate.Mutation(
 )
 
 
-def run_main(argv, *, tables, caught, crashed=False, baseline_problem=None, changed=None):
+def run_main(
+    argv,
+    *,
+    tables,
+    caught,
+    crashed=False,
+    baseline_problem=None,
+    alone_problem=None,
+    changed=None,
+):
     """`main`'s exit code and what it printed, with the two slow calls stubbed.
 
     `changed` stubs `changed_since` for the `--since` checks, as `(paths, problem)`. Stubbed rather
     than driven off this repository's real history: the answer would then depend on what the branch
     happens to contain, so the check that says "a change to a doc sweeps nothing" would pass or fail
     by accident. The git call has its own checks further down.
+
+    `alone_problem` is `{file: problem}` for the per-file baselines (#43), and it has to be a
+    separate lever from `baseline_problem`: the case worth asserting is a file that passes with the
+    suite and fails by itself, so one baseline has to be able to disagree with the other. There is
+    no way to produce one on purpose without shipping it, which is what a stub is for.
+
+    `run_main.baselined` is every `only` the stub was handed, in order, because the whole of the new
+    behaviour is which runs happen and nothing in the exit code can show that.
     """
     real = (mutate.TABLES, mutate.baseline, mutate.sweep_one, mutate.changed_since)
     mutate.TABLES = tables
-    mutate.baseline = lambda: baseline_problem
+    run_main.baselined = []
+
+    def stub_baseline(only=None):
+        run_main.baselined.append(only)
+        return baseline_problem if only is None else (alone_problem or {}).get(only)
+
+    mutate.baseline = stub_baseline
     mutate.sweep_one = lambda mutation: (caught, "stubbed", crashed)
     if changed is not None:
         mutate.changed_since = lambda base: changed
@@ -789,6 +831,60 @@ check("and the mutation itself was marked alive, not ok", "ALIVE stub" in printe
 code, printed = run_main([], tables=TWO, caught=True, baseline_problem="the copy already fails")
 check("a baseline that cannot be trusted stops the run rather than passing it", code, 2)
 check("and says what was wrong with it", "the copy already fails" in printed, True)
+
+# The narrowed baseline, #43's other half and the one the review found. The run above proves the
+# fourteen files pass together; the fast path then scores 230 of 244 mutations off a run of one file
+# on its own, which is a claim nothing had made. A file that only passes alongside another exits
+# non-zero for its own reason, `verdict` finds its name in the `FAILED:` line, `failed_a_check`
+# finds its `FAIL`, and every mutation naming it comes back caught whatever it did - full coverage
+# reported, nothing asserted, which is the shape `baseline` exists for one run shape further out.
+#
+# Three distinct catchers across two modules, deliberately not `TWO`, whose entries all name one
+# file: with a single catcher a loop over the set and a loop over the mutations are the same run,
+# and so are baselining the first file and baselining all of them.
+NAMED = {
+    "hookio": [ONE, ONE._replace(caught_by="test_hookio.py")],
+    "store": [ONE._replace(module="store", caught_by="test_store_claims.py")],
+}
+
+code, printed = run_main([], tables=NAMED, caught=True)
+check(
+    "the suite is baselined whole, then each file the tables name, alone and once each",
+    (code, run_main.baselined),
+    (0, [None, "test_hook.py", "test_hookio.py", "test_store_claims.py"]),
+)
+code, printed = run_main(["store"], tables=NAMED, caught=True)
+check(
+    "and a narrowed sweep pays only for the files it is going to run",
+    run_main.baselined,
+    [None, "test_store_claims.py"],
+)
+code, printed = run_main(
+    [], tables=NAMED, caught=True, alone_problem={"test_hookio.py": "it fails on its own"}
+)
+check("a file that does not pass by itself stops the sweep", code, 2)
+check("and says what the file did", "it fails on its own" in printed, True)
+check(
+    "and that the run was the file alone, since it passes with the suite",
+    "run alone" in printed,
+    True,
+)
+check(
+    "and what the consequence would have been, which is the reason to stop",
+    "caught whatever it did" in printed,
+    True,
+)
+# Before the mutations rather than after, or the sweep spends the whole table to report a verdict it
+# has already been told not to trust - which is the difference between a gate and a postmortem.
+check("and it stops before a single mutation is scored", "=== hookio.py" in printed, False)
+# Which file, and not merely that one failed. `test_hook.py` sorts first and passes here, so a
+# message built from the first name in the loop rather than from the failing one satisfies every
+# check above and sends the reader to a file with nothing wrong with it.
+check(
+    "and names the file that failed rather than the first one it tried",
+    ("test_hookio.py" in printed, "test_hook.py" in printed),
+    (True, False),
+)
 
 # The crash tally, #42's other half. A crash is still a catch, so the run passes: the mutation was
 # noticed, and what the flag says is that the file noticing it stopped early, so every rule it
@@ -1332,6 +1428,15 @@ check(
     "and a name it does not have is a refusal naming it, not a crash that mentions it",
     (code, "test_typo.py" in out, "Traceback" in out, "everything passed" in out),
     (1, True, False, False),
+)
+# A name twice is one file, not two runs of it. Only reachable by hand - the sweep passes one name -
+# and cheap to get right: a repeat lands in the `FAILED:` line twice and `catchers` hands the
+# scoring a list with a duplicate in it.
+code, out = runner(PASSES, select=["test_fine.py", "test_fine.py"])
+check(
+    "and a name given twice runs once",
+    (code, out.count("=== test_fine.py")),
+    (0, 1),
 )
 
 print("and a sweep refuses to start inside a sweep")
