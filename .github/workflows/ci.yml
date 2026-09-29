@@ -338,9 +338,22 @@ jobs:
   # every table added pays for every table already there. Raising the cap buys the time to do that
   # and makes every harness-touching PR a wide sweep at this length until it lands, which is #58.
   # Both numbers come back down off a measured full sweep once one of them is cheap enough to trust.
+  #
+  # #43 landed, and this is that edit. A mutation now runs the file its table names and falls back to
+  # the whole suite only when that file cannot answer, so the two wide sweeps on #70 - both the whole
+  # 244 - came in at 5m13s and 4m55s, against 48m57s three days earlier. 20 minutes, which is not the
+  # measurement plus a margin but roughly four times it: the spread on this job has been nearly half,
+  # the tables still owed all land here, and a cap sized to the figure it just produced is the
+  # 15-minute mistake for the second time. What the slack does not have to cover any more is a table
+  # making every other mutation slower, since a mutation now pays for the file it names.
+  #
+  # And the internal cap stays 120s per run, which is the number that actually catches a hang: the
+  # harness kills the run, prints which mutation and carries on, so this limit is the backstop for
+  # something going wrong outside a single run rather than the mechanism. A job killed here prints
+  # nothing at all, the buffer dying with it, which is how #67 came back unreadable.
   mutate:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

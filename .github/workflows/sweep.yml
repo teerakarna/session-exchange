@@ -43,7 +43,13 @@ jobs:
     # Still a cap, for the reason every job here has one - the default is 360 minutes and a hang
     # bills every one of them. And it still grows on purpose: every table `UNSWEPT` owes lands here
     # at one suite run per mutation, until #43 makes that not the unit.
-    timeout-minutes: 90
+    #
+    # #43 landed, so one suite run per mutation is no longer the unit: a mutation runs the file its
+    # table names first, and 230 of the 244 never need the other thirteen. The two wide sweeps on #70
+    # measured 5m13s and 4m55s for the whole table, and 20 is roughly four times that. What still
+    # grows is the tables owed, but what each one now adds is a file's worth of runtime rather than
+    # the suite's, so there is more room inside this number than there was inside 90.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
