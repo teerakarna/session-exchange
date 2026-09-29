@@ -417,18 +417,23 @@ print("and each of those verdicts is what the sweep actually asks for")
 def through(result, call):
     """Run `call` with `run_suite` stubbed, since these two functions are only wiring.
 
-    `through.handed` is what the stub was given, and it is recorded because a stub with a defaulted
-    parameter answers `run_suite()` and `run_suite(mutation)` alike, so the return value alone says
-    nothing about which call the wiring makes. Dropping the argument in `sweep_one` sweeps an
-    unpatched copy for every entry, which the baseline has just proved passes, so every one of them
-    comes back as "the suite passed, so nothing asserts this rule". Red, but naming the whole table
-    as unasserted when the defect is one argument.
+    `through.handed` is every call the stub took, as `(mutation, only)`, and it is recorded because
+    a stub with defaulted parameters answers `run_suite()` and `run_suite(mutation)` alike, so the
+    return value alone says nothing about which call the wiring makes. Dropping the argument in
+    `sweep_one` sweeps an unpatched copy for every entry, which the baseline has just proved passes,
+    so every one of them comes back as "the suite passed, so nothing asserts this rule". Red, but
+    naming the whole table as unasserted when the defect is one argument.
+
+    A list rather than the last call, since #43 made `sweep_one` run the suite either once or twice
+    and which of those it did is the whole of that change. The last call alone cannot tell a catch
+    that stopped after one narrow run from one that went on to run everything: both end on a call
+    that reaches the same verdict, and the second costs the fourteen files the issue was about.
     """
     real = mutate.run_suite
-    through.handed = "it was not called at all"
+    through.handed = []
 
-    def stub(mutation=None):
-        through.handed = mutation
+    def stub(mutation=None, only=None):
+        through.handed.append((mutation, only))
         return result
 
     mutate.run_suite = stub
@@ -448,13 +453,19 @@ check(
     through((0, "everything passed\n"), mutate.baseline),
     None,
 )
-check("having asked for no mutation, which is the whole point of it", through.handed, None)
+check(
+    "having asked for no mutation, which is the whole point of it", through.handed, [(None, None)]
+)
 check(
     "sweep_one asks verdict, and reports the mutation it was given",
     through((1, "FAILED: test_store_claims.py\n"), lambda: mutate.sweep_one(once)),
     (False, "caught by test_store_claims.py rather than test_hook.py", False),
 )
-check("and asked for that mutation rather than for a clean run", through.handed, once)
+check(
+    "and asked for that mutation rather than for a clean run",
+    [mutation for mutation, _ in through.handed],
+    [once, once],
+)
 # The third value, which is #42. Both of these are `verdict` saying caught, and the difference
 # between them is entirely inside the named file's own output: one printed a failing check and the
 # other printed a traceback. Scored the same until this branch existed, so a file that dies a third
@@ -494,6 +505,31 @@ check(
     (False, "the suite passed, so nothing asserts this rule", False),
 )
 
+print("and it pays for the whole suite only when one file cannot answer")
+
+# #43, and two failure modes that every other check in this file is green for. Dropping `only` is
+# correct and slow: the verdicts are unchanged, so nothing reports anything, and the sweep goes back
+# to fourteen files per mutation - 2913 seconds for 244 of them, against a suite of nine. Dropping
+# the second run is fast and wrong, because a survivor, a crash and a mis-attribution are all
+# questions about the files the first run left out.
+through((1, CAUGHT), lambda: mutate.sweep_one(once))
+check(
+    "a file that objects is asked on its own, and nothing else is run at all",
+    through.handed,
+    [(once, "test_hook.py")],
+)
+for outcome, what in (
+    ((0, "everything passed\n"), "a survivor"),
+    ((1, CRASHED), "a file that only died"),
+    ((1, "FAILED: test_store_claims.py\n"), "a catch some other file made"),
+):
+    through(outcome, lambda: mutate.sweep_one(once))
+    check(
+        f"{what} goes on to the whole suite, the answer being in the files it skipped",
+        through.handed,
+        [(once, "test_hook.py"), (once, None)],
+    )
+
 print("and what run_suite hands it is what the scoring needs")
 
 # The other side of that seam, which `through` stubs out everywhere above and so nothing asserted at
@@ -513,7 +549,7 @@ class Finished:
         self.stderr = stderr
 
 
-def ran(outcome, mutation=None):
+def ran(outcome, mutation=None, only=None):
     """`run_suite` with the subprocess stubbed. Costs a repo copy rather than a suite run.
 
     A timeout that escapes is turned into a value rather than left to propagate, for the same reason
@@ -528,9 +564,12 @@ def ran(outcome, mutation=None):
     ran.patched = "the suite was never launched"
     # What `run_suite` passed the subprocess, which is where the sweep marker gets into the child.
     ran.kwargs = {}
+    # And the command line, which is where the one-file selection gets there.
+    ran.args = []
 
     def stub(args, **kwargs):
         ran.kwargs = dict(kwargs)
+        ran.args = list(args)
         scratch = pathlib.Path(args[1]).parents[2]
         ran.patched = sorted(
             path.name
@@ -544,7 +583,7 @@ def ran(outcome, mutation=None):
 
     mutate.subprocess.run = stub
     try:
-        return mutate.run_suite(mutation)
+        return mutate.run_suite(mutation, only=only)
     except subprocess.TimeoutExpired:
         return "it propagated", "the timeout escaped run_suite rather than being reported"
     finally:
@@ -580,6 +619,18 @@ check("and says that is what happened, since it named no file", "hung" in hung[1
 # the other side of the seam, in `through` above.
 ran(Finished(0, "everything passed\n", ""), mutate.TABLES["store"][0])
 check("a mutation is read out of the module it names", ran.patched, ["store.py"])
+
+# The selection, which every check above defaults away and which `sweep_one`'s first run is entirely
+# about. `run.py` takes file names positionally, so handing it one and handing it none are one list
+# element apart, and a `run_suite` that accepts `only` and never puts it on the command line runs
+# the whole suite twice per mutation while reporting exactly what it reports now.
+ran(Finished(0, "everything passed\n", ""), mutate.TABLES["store"][0], only="test_cli.py")
+check("the one file asked for is the one the runner is told to run", ran.args[2:], ["test_cli.py"])
+# And the other direction, because a command line that always names something cannot run the suite:
+# `sweep_one`'s second run, `baseline` and the manual invocation all pass nothing and mean all of
+# them.
+ran(Finished(0, "everything passed\n", ""), mutate.TABLES["store"][0])
+check("and no selection names no file, which run.py reads as all of them", ran.args[2:], [])
 
 
 # The refusal that is the harness's original defect, one function in from the `apply` checks above:
@@ -1163,8 +1214,20 @@ print("and the runner underneath both gates can report a failure at all")
 # costs two seconds a call and because "everything passed" needs a file that passes by construction.
 
 
-def runner(*files):
-    """`run.py` over the given `(name, source)` files alone. Returns `(returncode, stdout)`."""
+def runner(*files, select=()):
+    """`run.py` over the given `(name, source)` files alone. Returns `(returncode, output)`.
+
+    `select` is what the sweep passes for one mutation (#43), and it goes on the command line here
+    for the same reason the rest of this fixture exists: a selection has to be probed against a
+    directory the check controls. Pointed at the real suite it cannot be - a `run.py` that ignores
+    its arguments then runs `test_mutations.py`, which reaches this line again, and the recursion is
+    the one recorded two sections below at 4913 scratch repos in a minute. Here the copy holds two
+    synthetic files and nothing that can call back into anything.
+
+    Output is stdout and stderr together, which is new and which the refusal needs: `SystemExit`
+    with a string writes to stderr, so a check reading stdout alone cannot tell a refusal from a
+    silent empty run. Every other caller here is unaffected, both fixtures being quiet on stderr.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         here = pathlib.Path(tmp)
         (here / "run.py").write_text(
@@ -1173,9 +1236,12 @@ def runner(*files):
         for name, source in files:
             (here / name).write_text(source, encoding="utf-8")
         done = subprocess.run(
-            [sys.executable, str(here / "run.py")], capture_output=True, text=True, timeout=60
+            [sys.executable, str(here / "run.py"), *select],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
-        return done.returncode, done.stdout
+        return done.returncode, done.stdout + done.stderr
 
 
 def before(out, first, second):
@@ -1238,6 +1304,34 @@ check(
     "and announced before it runs, rather than labelling the file above it",
     before(out, "=== test_fine.py", PASSING_SAYS),
     True,
+)
+
+print("and it runs the one file the sweep asked for, or says why it cannot")
+
+# The runner's half of #43. `sweep_one` passing `only` is asserted through its own seam above, and
+# this is the other end of it: a `run.py` that takes the name and then runs everything anyway leaves
+# every verdict in the sweep exactly as it is while costing what it cost before, which is a change
+# that reports its own success and delivers nothing.
+code, out = runner(PASSES, FAILS, select=["test_fine.py"])
+check(
+    "a name it has runs that file, and the failing one beside it never runs",
+    (code, sorted(line for line in out.splitlines() if line.startswith("=== "))),
+    (0, ["=== test_fine.py"]),
+)
+# And the refusal, which is the one place here where an empty result is worse than an error: a run
+# of no files exits 0 and prints "everything passed", which `verdict` reads as "the suite passed, so
+# nothing asserts this rule". One typo in a `caught_by` field would report every mutation in that
+# table as unasserted and read exactly like a finding.
+#
+# Three parts, and the traceback one is the reason it is not two. Deleting the refusal leaves the
+# lookup on the next line to raise `KeyError`, which is also non-zero and also prints the name, so
+# "non-zero, and the name appears" was green with the refusal gone - a check satisfied by a crash,
+# which is the class this file exists to find.
+code, out = runner(PASSES, select=["test_typo.py"])
+check(
+    "and a name it does not have is a refusal naming it, not a crash that mentions it",
+    (code, "test_typo.py" in out, "Traceback" in out, "everything passed" in out),
+    (1, True, False, False),
 )
 
 print("and a sweep refuses to start inside a sweep")

@@ -360,13 +360,17 @@ def prepare(scratch, mutation=None, mutated=None):
         (scratch / path).unlink()
 
 
-def run_suite(mutation=None):
+def run_suite(mutation=None, only=None):
     """Run the suite in a fresh copy of the repo, optionally with one module patched.
 
     Returns `(returncode, output)`, or `(None, reason)` if it could not be run at all. Output is
     stdout and stderr together: the scoring below reads a `FAILED:` line off stdout, and a suite
     that died rather than failed says why on stderr, which is the one case where the reason is the
     answer.
+
+    `only` is one test file name, and it is how `sweep_one` stops paying for thirteen files to learn
+    about one (#43). `run.py` prints the same headers and the same `FAILED:` line for a selection as
+    for the whole suite, so every function that scores this output is unaffected by which was run.
     """
     mutated = None
     if mutation is not None:
@@ -380,7 +384,8 @@ def run_suite(mutation=None):
         prepare(scratch, mutation, mutated)
         try:
             done = subprocess.run(
-                [sys.executable, str(scratch / "plugin" / "tests" / "run.py")],
+                [sys.executable, str(scratch / "plugin" / "tests" / "run.py")]
+                + ([only] if only else []),
                 capture_output=True,
                 text=True,
                 # The suite is two seconds and the longest wait inside it is `test_hook.py`'s own
@@ -552,7 +557,30 @@ def sweep_one(mutation):
     Computed here rather than inside `verdict` because it needs the output and the mutation
     together, and `verdict` is fed synthetic output by the cheap gate on the strength of being
     exactly the scoring and nothing else. `run_suite` is the seam this side is asserted through.
+
+    Two runs, and the first is only the file the mutation names (#43). `verdict` says caught when
+    that file is among the failures and asks nothing of any other file, so a first run in which it
+    fails a check is the same verdict the whole suite would have reached, by the same rule. It is
+    the overwhelmingly common outcome - 244 of 244 on the last full sweep - and it used to cost
+    fourteen files to reach.
+
+    Everything else falls through to the whole suite and is scored exactly as it was, because
+    everything else is a question about the files that were not run. A survivor has to be told from
+    a mutation some other file caught, which is the `caught by X rather than Y` report and needs X.
+    A crash needs the rest of the output to say what died. Both are rare and both are the cases
+    worth paying for.
+
+    What it costs: the detail on a catch now names the file that had to object rather than every
+    file that did. A mutation caught by its own file and by `test_cli.py` used to print both.
+    That was informative and it was not load-bearing - `caught_by` is one file by design, and the
+    argument for that is in `tables/shape.py` - so it is the right thing to trade for the sweep
+    fitting inside a review loop.
     """
+    returncode, out = run_suite(mutation, only=mutation.caught_by)
+    ok, detail = verdict(returncode, out, mutation)
+    if ok and failed_a_check(out, mutation.caught_by):
+        return True, detail, False
+
     returncode, out = run_suite(mutation)
     ok, detail = verdict(returncode, out, mutation)
     if ok and not failed_a_check(out, mutation.caught_by):
