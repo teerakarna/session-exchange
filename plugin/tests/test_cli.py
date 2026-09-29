@@ -612,6 +612,121 @@ with tempfile.TemporaryDirectory() as tmp:
         (1, True, True),
     )
 
+print("doctor, on the files under the store rather than the records in it")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The negative half first, because every check below this one passes just as well against a
+    # doctor that reports unconditionally, and this is the only one that would notice.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    run(home, repo, "handoff", "post", "--repo", "repo", "--body", "nothing wrong with this")
+    code, out = run(home, repo, "doctor")
+    check(
+        "a store with nothing wrong in it says so, and is not a fault",
+        (code, "store     0 fault(s)" in out),
+        (0, True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #51. The same pre-#44 record as above, seen by `doctor` rather than by `list`. `list` says
+    # which file and which key, which is all a reader needs to delete a handoff and nothing they
+    # need to keep one.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "posted long ago")
+    handoff_id = posted_id(out)
+    path = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json"
+    legacy_record = json.loads(path.read_text())
+    legacy_record["status"] = "closed"
+    legacy_record["history"] = [{"at": legacy_record["created"], "status": "closed"}]
+    path.write_text(json.dumps(legacy_record))
+
+    code, out = run(home, repo, "doctor")
+    check(
+        "a record from before #44 is a fault, named by the file it is in",
+        (code, f"{handoff_id}.json" in out),
+        (1, True),
+    )
+    # The pair is the point: the generic refusal is what every other reader shows, and the second
+    # line is the only place that says the record can be kept.
+    check(
+        "reported as that rather than only as an invalid file",
+        ("written before #44" in out, "unexpected key 'status'" in out),
+        (True, True),
+    )
+    check("naming both of the keys that date it", "status, history" in out, True)
+    check(
+        "and the conversion, including where the moves it describes go",
+        (f"{handoff_id}.d/" in out, '"after"' in out),
+        (True, True),
+    )
+    # Nothing was rewritten. A diagnostic that fixed it would be option 3 in #51, which was refused:
+    # `post` is the only thing here that writes a record, and it writes it once.
+    check("and the record is left exactly as it was", json.loads(path.read_text()), legacy_record)
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #53. A moves directory whose record has gone. `rm handoffs/<id>.json` is the route in, there
+    # being no `handoff delete`, and nothing that walks records can see what is left.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "soon orphaned")
+    handoff_id = posted_id(out)
+    run(home, repo, "handoff", "close", handoff_id)
+    (area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json").unlink()
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "the readers that walk records see nothing at all, which is the fault",
+        (code, handoff_id in out),
+        (0, False),
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "doctor names the directory and counts what is sitting in it",
+        (code, f"{handoff_id}.d" in out, "1 move(s)" in out),
+        (1, True, True),
+    )
+    check(
+        "and says the id is spent, which is what it costs",
+        "posted under that id again" in out,
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #53's other half. A writer killed between `_staged`'s write and the link leaves one of these
+    # behind, and `read_each` filters the name, so the move is lost rather than miscounted - right,
+    # and the reason nothing has ever said the file is there. Both directories, because `claims`
+    # goes through `_staged` too and a sweep of the handoffs alone would be a fix narrower than the
+    # fault.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "fine")
+    handoff_id = posted_id(out)
+    run(home, repo, "handoff", "accept", handoff_id)
+    exchange = area / ".claude" / "exchange"
+    (exchange / "handoffs" / f"{handoff_id}.d" / ".tmp-999-0001-abcdef.json").write_text("{")
+    (exchange / "sessions" / ".tmp-999-real-one.json").write_text("{")
+
+    code, out = run(home, repo, "handoff", "list")
+    check(
+        "neither file is read, so the handoff reads as accepted and nothing is said",
+        (code, "accepted" in out, ".tmp-" in out),
+        (0, True, False),
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "doctor names both, under the handoff moves and under the claims",
+        (code, ".tmp-999-0001-abcdef.json" in out, ".tmp-999-real-one.json" in out),
+        (1, True, True),
+    )
+    check("and says it is safe to delete them", "Safe to delete" in out, True)
+    check(
+        "the orphan count is not confused by one, there being no orphan here",
+        "move(s) with no" in out,
+        False,
+    )
+
+
 print("a handoff addressed to a session nobody is running says so while it can")
 
 with tempfile.TemporaryDirectory() as tmp:

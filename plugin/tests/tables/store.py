@@ -141,4 +141,31 @@ MUTATIONS = [
         new='            f"U+{ord(ch):04X}" for ch in value if printable(ch) != ch',
         caught_by="test_store_claims.py",
     ),
+    # #53. A `.tmp-` file is inert because `read_each` filters the name, and that is also why
+    # nothing has ever mentioned one. Inert and invisible at once is one property too many: the
+    # filter is load-bearing for correctness now - a counted temp file would be a move at a
+    # position nobody wrote - so the day it goes is the day the litter starts being read.
+    Mutation(
+        module="store",
+        rule="a half-written file left behind by a killed writer is reported",
+        old="        for path in found:",
+        new="        for path in []:",
+        caught_by="test_cli.py",
+    ),
+    # Both writers, not the one the issue happened to be about. `claims` goes through `_staged` too.
+    Mutation(
+        module="store",
+        rule="in every directory this store writes into, not only the handoffs",
+        old="    directories = [sessions_dir(root), handoffs_dir(root)]",
+        new="    directories = [handoffs_dir(root)]",
+        caught_by="test_cli.py",
+    ),
+    # And one directory further down again, which is where a move's temp file lands.
+    Mutation(
+        module="store",
+        rule="including the moves directories under the records",
+        old="    directories += [path for path in moves if path.is_dir()]",
+        new="    directories += []",
+        caught_by="test_cli.py",
+    ),
 ]

@@ -443,4 +443,39 @@ MUTATIONS = [
         new="    return body.splitlines()[0]",
         caught_by="test_handoffs.py",
     ),
+    # #51. `load_all` already refuses a pre-#44 record and names the file and the key, which is all
+    # a reader needs to delete a handoff and nothing they need to keep one. The conversion exists;
+    # until this, nothing said so.
+    Mutation(
+        module="handoffs",
+        rule="a record written before #44 is reported as convertible, not only as invalid",
+        old="        present = [key for key in PRE_44_KEYS if key in record]",
+        new="        present = []",
+        caught_by="test_cli.py",
+    ),
+    # Both fields #44 removed, rather than whichever one a record happens to carry. A record with
+    # `history` and no `status` is the same record and the same conversion.
+    Mutation(
+        module="handoffs",
+        rule="and dated by either of the two fields it removed",
+        old='PRE_44_KEYS = ("status", "history")',
+        new='PRE_44_KEYS = ("status",)',
+        caught_by="test_cli.py",
+    ),
+    # #53. Both directions, because a diagnostic that reports every moves directory as an orphan and
+    # one that reports none of them are both silent about the real one - the first by drowning it.
+    Mutation(
+        module="handoffs",
+        rule="a moves directory with no record beside it is reported",
+        old="        if record.exists():\n            continue",
+        new="        if True:\n            continue",
+        caught_by="test_cli.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and one with its record still there is not",
+        old="        if record.exists():",
+        new="        if False:",
+        caught_by="test_cli.py",
+    ),
 ]

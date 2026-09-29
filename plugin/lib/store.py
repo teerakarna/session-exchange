@@ -38,6 +38,12 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 STORE = "exchange"
 
+# What `_staged` names a file it has not linked into place yet. One constant rather than the
+# literal in each of the four places that care, because two of them are filters whose job is to
+# keep these files from being read and a third is the diagnostic that reports one: a copy that
+# drifted would not fail, it would quietly start reading half-written records.
+TMP_PREFIX = ".tmp-"
+
 
 def now():
     """UTC, seconds, always Z. The one timestamp format anything here writes."""
@@ -210,7 +216,7 @@ def _staged(path, obj, schema):
         if problems:
             return None, f"refusing to write {path}: " + "; ".join(problems)
 
-    tmp = path.with_name(f".tmp-{os.getpid()}-{path.name}")
+    tmp = path.with_name(f"{TMP_PREFIX}{os.getpid()}-{path.name}")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -303,7 +309,7 @@ def read_each(directory, schema=None):
     directory = pathlib.Path(directory)
     found, problems = [], []
     try:
-        paths = sorted(p for p in directory.glob("*.json") if not p.name.startswith(".tmp-"))
+        paths = sorted(p for p in directory.glob("*.json") if not p.name.startswith(TMP_PREFIX))
     except OSError as exc:
         return found, [f"could not list {directory}: {exc}"]
     for path in paths:
@@ -319,6 +325,57 @@ def read_all(directory, schema=None):
     """Every `*.json` in a directory, sorted. Returns `(objects, problems)`."""
     found, problems = read_each(directory, schema)
     return [obj for _, obj in found], problems
+
+
+def names(directory, pattern):
+    """Paths matching `pattern` in `directory`, sorted. Returns `(paths, problems)`.
+
+    For the diagnostics that look at filenames rather than at contents, which `read_each` cannot
+    answer: it globs `*.json` and drops the names that are not records, and those names are exactly
+    what a reader of this is asking about. A missing directory is not a fault here - an exchange
+    with no handoffs yet has no handoffs directory - so it comes back as nothing found rather than
+    as a problem.
+
+    The `OSError` half is the same unfalsifiable branch `read_each` carries, and it is stated
+    rather than left to be discovered: `glob` on a missing directory returns nothing, so reaching
+    it takes a directory that exists and cannot be listed. It is here so that a broken store is one
+    line in `doctor`'s output instead of a traceback over the top of the rest of the report.
+    """
+    directory = pathlib.Path(directory)
+    try:
+        return sorted(directory.glob(pattern)), []
+    except OSError as exc:
+        return [], [f"could not list {directory}: {exc}"]
+
+
+def litter(root):
+    """Half-written files left behind under this root, as problems.
+
+    #53. `_staged` writes a `.tmp-` beside its target and both writers above remove it, so one still
+    on disk is a writer killed in between. `read_each` filters the name, which makes the effect of
+    that "the write did not happen" - the right outcome, and also the reason nothing has ever
+    mentioned the file. That filter is load-bearing for correctness rather than for tidiness now: a
+    reader that counted a temp file would count a move into the position `set_status` computes from
+    what it read. A file that is both inert and invisible is one property too many, because the day
+    the filter goes is the day the litter starts being read.
+
+    Every directory this store writes into, not just the handoffs. `claims` goes through `_staged`
+    too, and the moves live one directory further down again; a sweep that covered the record
+    directory alone would be this repo's recurring defect, a fix narrower than the thing it fixes.
+    """
+    directories = [sessions_dir(root), handoffs_dir(root)]
+    moves, problems = names(handoffs_dir(root), "*.d")
+    directories += [path for path in moves if path.is_dir()]
+    for directory in directories:
+        found, faults = names(directory, f"{TMP_PREFIX}*")
+        problems += faults
+        for path in found:
+            problems.append(
+                f"{directory.name}/{path.name} is a half-written file left behind by a writer that "
+                "was killed; readers skip it, so whatever it was going to say did not get said. "
+                "Safe to delete."
+            )
+    return problems
 
 
 def config(root):

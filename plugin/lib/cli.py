@@ -353,6 +353,30 @@ def cmd_doctor(args):
             "root's rendering twice, but another root's rendering at all."
         )
 
+    # The store itself, which `doctor` read and said nothing about: `_steps` calls `load_all` for
+    # the step 4 evidence and dropped its problems on the floor, so the one command whose job is to
+    # report what is wrong was the one place an unreadable record did not show up. Both record
+    # types, for the reason the hook gives.
+    #
+    # The three below it are about files and directories rather than about records, so nothing that
+    # walks records has ever had a reason to look at them. See #51 and #53. A pre-#44 record draws
+    # two lines, the generic refusal and then the conversion, and that pair is deliberate: the
+    # first is what every other reader shows, and the second is the only place that says there is a
+    # way out.
+    _, claim_problems = claims.load_all(root)
+    _, record_problems = handoffs.load_all(root)
+    store_problems = [
+        *claim_problems,
+        *record_problems,
+        *handoffs.unconverted(root),
+        *handoffs.orphan_moves(root),
+        *store.litter(root),
+    ]
+    print(f"store     {len(store_problems)} fault(s) in the records and the files under them")
+    for problem in store_problems:
+        faults += 1
+        print(f"problem   {problem}")
+
     print("steps")
     first_incomplete = None
     for number, what, done, why_unknown in _steps(root):

@@ -335,6 +335,78 @@ def load_all(root):
     return pairs, problems
 
 
+# The two fields #44 removed. `additionalProperties` is false, so the current shape cannot hold
+# either one, which makes their presence a positive test for the old shape rather than a guess at
+# why a record was refused.
+PRE_44_KEYS = ("status", "history")
+
+
+def unconverted(root):
+    """Records written before #44, as problems that say which fix applies. See #51.
+
+    `load_all` already refuses these and names the file and the key, and that refusal is the right
+    direction for the breakage to travel: reading the record and ignoring the two fields would
+    silently reopen every handoff that was closed under the old shape. What it does not say is that
+    there is a conversion at all, so the line reads as a corrupt file and the only action it
+    suggests is deleting one - which for a handoff is the loss this plugin exists to stop.
+
+    Keyed on the fields rather than on the validator's message. The message is prose, a schema
+    change rewrites it, and a diagnostic that matches on it goes quiet at exactly the moment the
+    shape changes again.
+    """
+    problems = []
+    # No schema, deliberately: the whole point is to read a record the current schema refuses.
+    found, _ = store.read_each(store.handoffs_dir(root))
+    for file, record in found:
+        if not isinstance(record, dict):
+            continue
+        present = [key for key in PRE_44_KEYS if key in record]
+        if not present:
+            continue
+        moves = store.transitions_dir(root, file.stem).name
+        problems.append(
+            f"{file.name} was written before #44 and still carries {', '.join(present)}, so it is "
+            "refused rather than read. To convert it: drop those keys from the record, then write "
+            f"one file per old history entry into {moves}/, named 0000-<hex>.json upwards, each "
+            '{"at": the entry\'s at, "status": its status, "after": its position counting from 0}.'
+        )
+    return problems
+
+
+def orphan_moves(root):
+    """Moves directories with no record beside them, as problems. See #53.
+
+    Nothing iterates directories - `load_all` walks records and asks each one for its moves - so a
+    `<id>.d` whose `<id>.json` has gone is read by nothing at all. `rm handoffs/<id>.json` is the
+    route in, there being no `handoff delete`, and the dangerous half of it is already closed: #50
+    made `post` refuse an id that has moves under it, so a new handoff cannot inherit a stranger's
+    status. What is left is that the directory is invisible. It costs that id forever, and the only
+    symptom is a refusal message the next time anyone picks the same id, which for a timestamped id
+    is never.
+    """
+    directory = store.handoffs_dir(root)
+    found, problems = store.names(directory, "*.d")
+    for moves in found:
+        if not moves.is_dir():
+            continue
+        # `<id>.d` back to `<id>` by removing the suffix this layout adds, rather than by `stem`,
+        # which would also take a dot inside the id: `note.json.d` is the moves of `note.json`.
+        record = directory / f"{moves.name[: -len('.d')]}.json"
+        if record.exists():
+            continue
+        entries, _ = store.names(moves, "*.json")
+        # What a reader would have counted, so the same `.tmp-` names `read_each` drops. A count
+        # that included one would say the orphan holds a move that nothing was ever going to read,
+        # and `litter` reports those on their own line anyway.
+        kept = [path for path in entries if not path.name.startswith(store.TMP_PREFIX)]
+        problems.append(
+            f"{moves.name} holds {len(kept)} move(s) with no {record.name} beside it, so nothing "
+            "reads it and no handoff can ever be posted under that id again. Either write the "
+            "record back or delete the directory."
+        )
+    return problems
+
+
 def describe(to):
     """The addressing, in one short phrase, for a human reading a list.
 
