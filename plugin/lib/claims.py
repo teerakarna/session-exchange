@@ -128,7 +128,7 @@ def load_all(root):
     return store.read_all(store.sessions_dir(root), SCHEMA)
 
 
-# The three below are the claim half of #47, and they are here for the same reason the handoff half
+# The four below are the claim half of #47, and they are here for the same reason the handoff half
 # is in `handoffs`: `cli` is in `DECLINED` on the argument that its output is wrong in front of the
 # person who typed the command, and that argument is unavailable for a field some other session
 # wrote. A claim is exactly that field. `exchange show` renders another session's `focus`, `name`,
@@ -137,6 +137,8 @@ def load_all(root):
 # existed. The handoff half landed one commit earlier with the same reasoning and did not reach
 # these, which is the narrower-fix-than-problem shape this repo keeps catching: the commit subject
 # said "a record one session writes is data to every other one" and a claim is the other record.
+# `describe_settings` is the same shape a third time, one commit later again: the first cut of these
+# three fixed `show` and left `claim`'s own echo, which renders the same fields off the same record.
 #
 # Today this reaches a human's terminal only. `hook.py` says presence and handoff rendering land
 # next and it renders no claim content yet, so the model's context is not on this path - which is
@@ -175,3 +177,27 @@ def describe_list(values):
     `values[0]` looks right in every case anyone tries by hand.
     """
     return [store.printable(v) for v in values]
+
+
+def describe_settings(claim):
+    """The lines confirming what a claim now holds, for the session that just changed it.
+
+    A second render of a claim, and the one the first cut of the three above missed: `exchange
+    claim` echoes what it wrote, and with `--session` the record it echoes belongs to a different
+    session, so `focus`, `name` and `tickets` in these lines are that session's text. `--repo` and
+    `--path` are held by `store.scope_fault` on the way in and cannot reach here with an escape in
+    them; the other three have no such guard, and the field this command exists to set is exactly
+    the free-text one. Missing this while fixing `show` is the same narrower-than-the-problem shape
+    one command over, twice in one branch.
+
+    Uncapped, unlike `describe_focus`. The cap bounds one row of a block that lists every session,
+    and this is a session reading back its own write: a confirmation that silently truncated would
+    read as a record that had been truncated, which is a worse lie than a long line.
+    """
+    lines = [f"claimed as {describe_name(claim)}"]
+    if claim.get("focus"):
+        lines.append(f"  focus: {store.printable(claim['focus'])}")
+    for field in LIST_FIELDS:
+        if claim.get(field):
+            lines.append(f"  {field}: {', '.join(describe_list(claim[field]))}")
+    return lines

@@ -346,15 +346,22 @@ def describe(to):
     notice. A rule whose failure is invisible to the only witness belongs where the sweep can reach
     it. See #47.
 
-    The `session_id` call is a no-op today and is not a guard. `store.SAFE_ID` holds that field on
-    the way to disk and again on the way back out, so no value reaching here can contain anything
-    the call would remove, and the mutation table claims no coverage for it because there is none to
-    claim: replacing it with a bare interpolation leaves every check in the suite green. It is here
-    so that the rule is "everything in this block goes through the stripper" rather than a per-field
-    judgement that has to be re-made correctly each time a schema changes. That is a real choice
-    with a real cost - CONTRIBUTING's line about an untestable rule reading as protection applies to
-    it - so the next reader should know that the pattern is what holds this field, and relaxing the
-    pattern is not made safe by this call.
+    The `session_id` call is a no-op today and is not a guard. What holds that field is the
+    `pattern` on `to.oneOf[1].session_id` in the schema, which `store.write_json` applies on the way
+    in and `store.read_json` applies again on the way back out, so no value reaching here can
+    contain anything the call would remove. Not `store.safe_id`: nothing on this path calls it,
+    `to_scope` returning the id unchecked, and the first draft of this paragraph said otherwise -
+    which sent a reader to a guard that is not the one doing the work, in the commit about exactly
+    that. The pattern is the same text as `store.SAFE_ID` and a separate copy of it, JSON not being
+    able to import a Python constant, and nothing asserts the two agree. See #63.
+
+    The mutation table claims no coverage for the call because there is none to claim: replacing it
+    with a bare interpolation leaves every check in the suite green. It is here so that the rule is
+    "everything in this block goes through the stripper" rather than a per-field judgement that has
+    to be re-made correctly each time a schema changes. That is a real choice with a real cost -
+    CONTRIBUTING's line about an untestable rule reading as protection applies to it - so the next
+    reader should know that the pattern is what holds this field, and relaxing the pattern is not
+    made safe by this call.
     """
     if "session_id" in to:
         return f"session {store.printable(to['session_id'])}"

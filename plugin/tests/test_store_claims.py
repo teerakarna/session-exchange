@@ -363,7 +363,7 @@ check("and a single emoji", store.printable("shipped 🚀"), "shipped 🚀")
 # emoji family together; both are swept up by "would a terminal show this" and both are a real loss.
 check(
     "an ideographic space goes, which is a cost of the rule and not a win",
-    store.printable("日本　語"),
+    store.printable("日本\u3000語"),
     "日本語",
 )
 check(
@@ -392,21 +392,51 @@ check(
 )
 # The shape the other two made necessary: a tab is a legal filename character, so the guard passed
 # it and every renderer then displayed `/etc`, which is the string the first check above refuses.
-# The refusal carries the stripped form, so the line that refuses an escape does not contain one.
+# The refusal names the codepoint rather than only the stripped form, and the reason is this exact
+# value: `/etc` on its own is a string the typist can see nothing wrong with, so the message read as
+# arbitrary and left nothing to act on.
 check(
     "a tab in front of an absolute path is refused rather than passed and then stripped",
     store.scope_fault("--repo", "\t/etc"),
-    "--repo cannot hold characters a terminal acts on rather than shows: /etc",
+    "--repo cannot hold characters a terminal does not show: U+0009. "
+    "Without them it reads as '/etc'",
 )
 check(
     "and the message it comes back with carries no escape of its own",
     "\033" in store.scope_fault("--repo", "x\033[2Ky"),
     False,
 )
+# A value that is invisible end to end. The stripped form is empty, so the codepoint is the whole of
+# what the message has to say - which is what the earlier message could not do at all.
+check(
+    "a value with nothing visible in it still says what is in it",
+    store.scope_fault("--path", "\t\u200b"),
+    "--path cannot hold characters a terminal does not show: U+0009, U+200B. "
+    "Without them it reads as ''",
+)
+# Two of the same character is one entry, not two: the message lists what to remove, and repeating a
+# codepoint per occurrence makes a long paste unreadable without adding anything.
+check(
+    "a codepoint is named once however many times it occurs",
+    store.scope_fault("--path", "a\tb\tc"),
+    "--path cannot hold characters a terminal does not show: U+0009. "
+    "Without them it reads as 'abc'",
+)
 check(
     "a trailing newline is the same shape and the same refusal",
     store.scope_fault("--repo", "..\n"),
-    "--repo cannot hold characters a terminal acts on rather than shows: ..",
+    "--repo cannot hold characters a terminal does not show: U+000A. Without them it reads as '..'",
+)
+# The refusal is wider than "characters a terminal acts on" and that is deliberate for this field.
+# U+00A0 renders as a space, so a scope holding one and a scope holding U+0020 are two strings
+# nobody can tell apart and the store would hold both. #62 is that problem; this is the half of
+# it that can be refused. Written as an escape rather than as the character, because a literal one
+# in this file would be a comment nobody could read correctly and a paste nobody could repeat.
+check(
+    "a space that is not a space is refused too, two scopes nobody can distinguish being the point",
+    store.scope_fault("--path", "docs\u00a0shared"),
+    "--path cannot hold characters a terminal does not show: U+00A0. "
+    "Without them it reads as 'docsshared'",
 )
 check(
     "an ordinary root-relative repo is fine",

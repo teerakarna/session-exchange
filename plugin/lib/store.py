@@ -158,12 +158,36 @@ def scope_fault(flag, value):
 
     Order between the three changes which message comes back and nothing else, all three being
     refusals. It is first because an invisible character is the one a reader cannot diagnose from
-    the other two messages. The message carries the stripped form, because printing the raw one
-    would put the escape back into the line that refuses it.
+    the other two messages.
+
+    That message names codepoints, and it has to. It cannot carry the value: printing the raw one
+    puts the escape back into the line that refuses it. It cannot carry the stripped one alone
+    either, which is what it did first - `--path` holding a tab refused with "rather than shows:
+    /etc", and `/etc` is a string the typist can see nothing wrong with, so the refusal read as
+    arbitrary and there was nothing to act on. For a value that is invisible end to end the stripped
+    form is empty and the message said nothing at all. `U+0009` is actionable; the shape it renders
+    as stays in the message after it, because that is the half that says why anyone cares.
+
+    The predicate is `printable` applied to one character rather than a second copy of
+    `isprintable`, for the reason `_staged` gives about one refusal in one place: two copies of it
+    drift and only one is the one under test.
+
+    Wider than "characters a terminal acts on": U+00A0 and U+3000 are refused too, and `printable`'s
+    docstring is explicit that it drops them. For prose that is a cost. For a scope it is the point.
+    A path component differing from another only by a non-breaking space is the collision case this
+    guard exists for, it is what #62 is about, and a store holding both spellings cannot tell anyone
+    which one they meant. So the refusal stays wide and the message names the codepoint, rather than
+    the refusal narrowing to `Cc` and `Cf` and letting the two spellings in.
     """
     shown = printable(value)
     if shown != value:
-        return f"{flag} cannot hold characters a terminal acts on rather than shows: {shown}"
+        dropped = ", ".join(
+            f"U+{ord(ch):04X}" for ch in dict.fromkeys(value) if printable(ch) != ch
+        )
+        return (
+            f"{flag} cannot hold characters a terminal does not show: {dropped}. "
+            f"Without them it reads as {shown!r}"
+        )
     if value.startswith("/"):
         return f"{flag} is relative to the root, so it cannot start with /: {value}"
     if ".." in value.split("/"):

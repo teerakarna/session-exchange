@@ -185,6 +185,16 @@ uvx ruff@0.16.9 format --check .
 shellcheck plugin/hooks-handlers/*.sh
 ```
 
+`ruff format` will not fix E501 in a comment or a docstring, because it does not rewrap prose, and
+there is a lot of prose here. Rewrapping it by hand left a stub line ("pid," alone) in three
+consecutive commits on #56 and the same stub survived into #59, so a script is the better idea - but
+only if it can tell prose from code. One written for this reflowed a `check(...)` call as though the
+arguments were a paragraph, which put a line break inside a string literal in two files and left them
+unparseable. Whatever does the reflowing has to key on the run of lines sharing a `#` or being inside
+a docstring, never on "this line is too long", and `python3 -c 'import ast; ast.parse(...)'` on every
+file it touched is the cheap check that it did. A long string is split with implicit concatenation
+instead, which `ruff format` then leaves alone.
+
 ## What runs when, and how to run it yourself
 
 Every gate here has a local command, because Actions goes down, the free minutes run out, and a gate

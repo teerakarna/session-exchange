@@ -139,12 +139,14 @@ check(
 check(
     "a repo that merely renders as an absolute path is refused as well",
     handoffs.to_scope(repo="\t/etc")[1],
-    "--repo cannot hold characters a terminal acts on rather than shows: /etc",
+    "--repo cannot hold characters a terminal does not show: U+0009. "
+    "Without them it reads as '/etc'",
 )
 check(
     "and so is a path, the two fields being constrained identically",
     handoffs.to_scope(repo="ok", paths=["fine", "p\033[2Kq"])[1],
-    "--path cannot hold characters a terminal acts on rather than shows: p[2Kq",
+    "--path cannot hold characters a terminal does not show: U+001B. "
+    "Without them it reads as 'p[2Kq'",
 )
 # `..` as a component, not as a substring. These are ordinary names and refusing them would be the
 # guard being wrong in the direction nobody reports, because the handoff just never posts.

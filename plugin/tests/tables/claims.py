@@ -207,4 +207,29 @@ MUTATIONS = [
         new="    return [store.printable(values[0])] + list(values[1:])",
         caught_by="test_store_claims.py",
     ),
+    # The echo, which is the second render of a claim and the one the four above missed. `exchange
+    # claim --session` reads back a record belonging to another session, so these are the same three
+    # fields one command over. Caught in `test_cli.py` because the echo only exists as a command's
+    # output: there is no other caller to assert against.
+    Mutation(
+        module="claims",
+        rule="the echo confirming a claim strips the focus it reads back",
+        old="        lines.append(f\"  focus: {store.printable(claim['focus'])}\")",
+        new="        lines.append(f\"  focus: {claim['focus']}\")",
+        caught_by="test_cli.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="and the name it leads with",
+        old='    lines = [f"claimed as {describe_name(claim)}"]',
+        new="    lines = [f\"claimed as {claim.get('name') or claim['session_id']}\"]",
+        caught_by="test_cli.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="and every list field in it",
+        old="            lines.append(f\"  {field}: {', '.join(describe_list(claim[field]))}\")",
+        new="            lines.append(f\"  {field}: {', '.join(claim[field])}\")",
+        caught_by="test_cli.py",
+    ),
 ]

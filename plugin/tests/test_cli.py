@@ -260,9 +260,12 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "claim", "--repo", "\t/etc")
     check(
         "and so is one that only renders as an absolute path",
-        (code, "cannot hold characters a terminal acts on" in out),
+        (code, "cannot hold characters a terminal does not show" in out),
         (1, True),
     )
+    # The codepoint, not only the shape it renders as. `/etc` on its own is a string the typist can
+    # see nothing wrong with, so a refusal carrying that alone is one they cannot act on.
+    check("and the refusal names what to remove", "U+0009" in out, True)
     written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
     check("and none of them reached the record", written["repos"], ["one"])
     code, out = run(home, repo, "claim", "--repo", "two/../two")
@@ -282,11 +285,22 @@ with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
     nasty = "HARMLESS\033[2K\033[1;31mURGENT\007"
-    run(home, repo, "claim", "--session", "peer-1", "--focus", nasty, "--ticket", "T\0071")
+    code, out = run(
+        home, repo, "claim", "--session", "peer-1", "--focus", nasty, "--ticket", "T\0071"
+    )
     peer = area / ".claude" / "exchange" / "sessions" / "peer-1.json"
     stored = json.loads(peer.read_text())
     # Stored verbatim, like a handoff body: the store is not the place to edit someone's prose.
     check("the claim keeps the focus exactly as it was written", stored["focus"], nasty)
+    # The echo is a render too, and it was the one the first cut of this block missed while it fixed
+    # `show`. With `--session` the record being read back belongs to another session, so these lines
+    # carry that session's text, and `--focus` is the flag whose whole job is free text.
+    check(
+        "and the echo confirming it is inert as well",
+        ("\033" in out, "\007" in out, "focus: HARMLESS[2K[1;31mURGENT" in out),
+        (False, False, True),
+    )
+    check("including a list field in that echo", ("T1" in out, "\007" in out), (True, False))
 
     code, out = run(home, repo, "show")
     check(
@@ -301,6 +315,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "a display name another session chose renders inert too",
         ("\033" in out, "peer[2Kx" in out),
+        (False, True),
+    )
+    # And in the echo, which is the other render of the same field. The claim already holds the name
+    # by now, so `claim` echoes it back without the registry being involved a second time.
+    code, out = run(home, repo, "claim", "--session", "peer-1", "--ticket", "T2")
+    check(
+        "and in the line the echo leads with",
+        ("\033" in out, "claimed as peer[2Kx" in out),
         (False, True),
     )
     # A list field, and not only its first element.
@@ -645,9 +667,10 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "handoff", "post", "--repo", "r\033[2Kp", "--body", "scope")
     check(
         "a repo with an escape in it is refused rather than posted",
-        (code, "\033" in out, "cannot hold characters a terminal acts on" in out),
+        (code, "\033" in out, "cannot hold characters a terminal does not show" in out),
         (1, False, True),
     )
+    check("and that refusal names the codepoint rather than only the shape", "U+001B" in out, True)
 
     # And the rendering still strips, which is the half that refusal does not cover. Written
     # straight to disk here, because that is the case that remains: a record an importer wrote, or

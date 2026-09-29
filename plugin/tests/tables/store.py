@@ -119,4 +119,26 @@ MUTATIONS = [
         new="    if False:",
         caught_by="test_store_claims.py",
     ),
+    # And the message that refusal comes back with, which is a separate rule because the refusal
+    # itself passes without it. Carrying only the stripped form refused `\t/etc` with "it reads as
+    # /etc", and `/etc` is a string the typist can see nothing wrong with, so the refusal read as
+    # arbitrary and there was nothing in it to act on. For a value that is invisible end to end the
+    # stripped form is empty and the message said nothing whatsoever.
+    Mutation(
+        module="store",
+        rule="and the refusal names the codepoints, a stripped form alone not being actionable",
+        old='            f"{flag} cannot hold characters a terminal does not show: {dropped}. "',
+        new='            f"{flag} cannot hold characters a terminal does not show. "',
+        caught_by="test_store_claims.py",
+    ),
+    # `dict.fromkeys` and not the value itself, which is the shape a later reader removes as noise.
+    # A paste with forty non-breaking spaces in it lists U+00A0 forty times otherwise, and the list
+    # is there to be read.
+    Mutation(
+        module="store",
+        rule="and names each one once however many times it occurs",
+        old='            f"U+{ord(ch):04X}" for ch in dict.fromkeys(value) if printable(ch) != ch',
+        new='            f"U+{ord(ch):04X}" for ch in value if printable(ch) != ch',
+        caught_by="test_store_claims.py",
+    ),
 ]

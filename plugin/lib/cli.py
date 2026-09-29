@@ -250,12 +250,8 @@ def cmd_claim(args):
     if problem:
         print(f"problem: {problem}")
         return 1
-    print(f"claimed as {claim.get('name') or claim['session_id']}")
-    if claim.get("focus"):
-        print(f"  focus: {claim['focus']}")
-    for field in claims.LIST_FIELDS:
-        if claim.get(field):
-            print(f"  {field}: {', '.join(claim[field])}")
+    for line in claims.describe_settings(claim):
+        print(line)
     return 0
 
 
