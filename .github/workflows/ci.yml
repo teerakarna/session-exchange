@@ -317,9 +317,23 @@ jobs:
   #
   # So: the two numbers are the same by construction. If the full sweep outgrows 45 minutes, both
   # move together, and the one to raise first is this one.
+  #
+  # Which is this edit, on the terms that paragraph set. #67 tripped the wide path on `test_cli.py`
+  # and was canceled at the cap having printed nothing for the last fourteen minutes, so how far it
+  # got is not knowable from the log - stdout is block-buffered and the buffer died with the job. The
+  # count is 244 mutations against a 9.3s suite, where the three runner readings above were 191
+  # against a shorter one, and the growth is the worse-than-linear kind the top of this comment
+  # describes rather than 53 more mutations. 90 for both files, which is the cap doing what a cap is
+  # for - a hang still gets killed - rather than a figure anything measured, because the measurement
+  # this wanted is the one the cancel destroyed.
+  #
+  # Not the fix. #43 is: a mutation runs the whole suite to learn whether one named file objected, so
+  # every table added pays for every table already there. Raising the cap buys the time to do that
+  # and makes every harness-touching PR a wide sweep at this length until it lands, which is #58.
+  # Both numbers come back down off a measured full sweep once one of them is cheap enough to trust.
   mutate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

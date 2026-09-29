@@ -213,6 +213,45 @@ check(
     True,
 )
 
+print("the two jobs that run the mutation sweep allow it the same time")
+
+
+def job_timeout(path, job):
+    """`timeout-minutes` for one job, or a sentence saying why there is none.
+
+    Text rather than a YAML parse because the suite is standard-library only and the shape here is
+    fixed: two files this repo writes, two-space job keys, four-space job settings.
+    """
+    block = re.search(rf"\n  {job}:\n(.*?)(?=\n  \w|\Z)", (REPO / path).read_text(), re.S)
+    if block is None:
+        return f"{path} has no job called {job}"
+    found = re.search(r"^    timeout-minutes: (\d+)$", block.group(1), re.M)
+    return int(found.group(1)) if found else f"{path}:{job} sets no timeout"
+
+
+# One number in two files. `ci.yml`'s `mutate` job runs the full sweep whenever a change is wide
+# enough - the harness, what a table entry is, which tables exist, `test_cli.py` - so a cap it
+# cannot finish under makes a harness change unmergeable while the weekly run stays green, and
+# the red then points at a rule that is not broken. `sweep.yml` said "generous next to `ci`'s 15"
+# for a fortnight after `ci` went to 45, and nothing objected, which is what a number restated in
+# a second file does.
+narrowed = job_timeout(".github/workflows/ci.yml", "mutate")
+full = job_timeout(".github/workflows/sweep.yml", "sweep")
+# First, because the comparison below passes on two identical sentences. The default is 360 minutes
+# and a hang bills every one of them, so a job here having no cap is its own finding.
+check(
+    "both of them set one at all, the default being six hours of billed hang",
+    [cap for cap in (narrowed, full) if not isinstance(cap, int)],
+    [],
+)
+# Held against each other rather than against a literal, which would be the same number written a
+# third time and would have to be edited whenever either moves.
+check(
+    "and the narrowed sweep allows itself exactly what the full one does",
+    (narrowed, full),
+    (full, full),
+)
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")

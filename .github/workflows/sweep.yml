@@ -33,10 +33,17 @@ permissions:
 jobs:
   sweep:
     runs-on: ubuntu-latest
-    # Generous next to `ci`'s 15, because this one grows on purpose: every table `UNSWEPT` owes lands
-    # here at one suite run per mutation. Still a cap, for the reason every job here has one - the
-    # default is 360 minutes and a hang bills every one of them.
-    timeout-minutes: 45
+    # The same number as `ci`'s `mutate`, by construction rather than by coincidence: that job runs
+    # this sweep several times a quarter, so a limit it cannot finish under makes a harness change
+    # unmergeable. `ci` carries the reasoning and the readings; both move together and this one
+    # follows. It was "generous next to `ci`'s 15" when written, which stopped being true the day
+    # `ci` went to 45 and nothing here noticed - a number restated in a second file is a number that
+    # drifts, and the sentence was wrong for a fortnight.
+    #
+    # Still a cap, for the reason every job here has one - the default is 360 minutes and a hang
+    # bills every one of them. And it still grows on purpose: every table `UNSWEPT` owes lands here
+    # at one suite run per mutation, until #43 makes that not the unit.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
