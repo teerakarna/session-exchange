@@ -365,9 +365,18 @@ open, and nothing anywhere reported it - the merge succeeded and the PR said wha
 failure is invisible unless you go and look at the issues, which is the same shape as everything else
 in this file.
 
-That last part is enforced rather than trusted: a ruleset on `main` requires a pull request and a green
-`ci`, blocks force pushes and branch deletion, and has no bypass actors, so a direct push is rejected
-for the owner too. Zero approvals are required, because an approval only the author could give is one
+And keep those keywords out of prose that is only mentioning an issue. The squash message for #59
+ended `Found and filed rather than fixed: #60, #61, #62, #63, #64` and closed #60: `fixed: #60` is
+exactly the form GitHub looks for, and the four after it survived only because a comma is not a
+keyword. That is the rule above paying off in the one direction nobody wanted. A list of issues a PR
+is *not* fixing has to be phrased away from the words - `still open after this: #60, #61` - and the
+same goes for `closed` and `resolved` in a sentence about something else. Both halves of this fail
+silently, one by closing nothing and one by closing what is still broken, and the merge looks
+identical either way.
+
+Branch and PR for everything is enforced rather than trusted: a ruleset on `main` requires a pull
+request and a green `ci`, blocks force pushes and branch deletion, and has no bypass actors, so a
+direct push is rejected for the owner too. Zero approvals are required, because an approval only the author could give is one
 that gets bypassed, and a gate routinely bypassed teaches that gates are optional.
 
 `mutate` is the one job kept out of `checks` without a permissions reason for it, against the
