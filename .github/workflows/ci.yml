@@ -3,6 +3,13 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # The default three, spelled out because the fourth is load-bearing and adding one means listing
+    # all of them. `ready_for_review` is not a default, and without it `test-macos` skipping on drafts
+    # would be a hole rather than a saving: the draft's run is the last one, its `ci` is green with
+    # macOS skipped, nothing fires when the PR comes out of draft, and the merge button goes green on
+    # a gate that never ran. With it, leaving draft is a fresh full run - which is the one extra run
+    # per PR this whole arrangement pays for.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -102,7 +109,20 @@ jobs:
   # failure mode this repo exists about. The 10x was known both times. What is new is only that it is
   # now the majority of the bill rather than a third of it, which argues for a cheaper shape that
   # keeps the gate where it is, not for reversing the decision. #73 is where that is being worked out.
+  #
+  # This is that shape, and the distinction it turns on is that a draft pull request cannot be merged.
+  # So: every push to `main`, and on a PR only once it is out of draft. Nothing reaches `main` without
+  # having been through here, which is the whole of what the rejection above was protecting - the gate
+  # at the moment of merge is exactly as strong as it was. What stops is paying ten minutes six times
+  # while a branch is still being written, which is where the money was going. `gh pr create --draft`
+  # then `gh pr ready` is the flow, and the cost of forgetting is that it runs as it always did.
+  #
+  # `event_name != 'pull_request'` first so the condition is true on a push, where `draft` does not
+  # exist: an expression reading a field off an absent object yields empty rather than an error, so
+  # comparing it to `false` on a push would be false and this would never run on `main` at all. The
+  # skip is only legible to `ci` because `MAY_SKIP` there names this job. The two move together.
   test-macos:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
@@ -504,6 +524,21 @@ jobs:
       # `skipped` as failure on every run where the condition is false. If that is ever wanted, the
       # loop and this step have to change together, which is a design decision rather than a list
       # edit, and this is what will make somebody notice it is one.
+      #
+      # It was wanted, so this is that change: `MAY_SKIP` below is the one exemption, and `test-macos`
+      # is in it because the macOS runner bills ten minutes to do seventeen seconds of work and was
+      # two thirds of what a push cost (#73). The mechanism is deliberately awkward in one specific
+      # way - the allowlist is written down here *and* derived from which jobs carry an `if:`, and the
+      # two have to agree. Either alone would be worse. Derived alone, adding an `if:` to a job would
+      # silently buy it permission to skip. Written alone, the name stays after the `if:` goes and the
+      # gate quietly tolerates a skip that now only happens when something is broken.
+      #
+      # The exemption is narrow in a way worth stating, because it is what makes it safe: a `skipped`
+      # is only ever accepted for a job whose condition can be false on a *passing* run. `test-macos`
+      # skips when a PR is a draft, and a draft cannot be merged, so nothing reaches `main` without
+      # having been through it. That is the same "the PR gate is not weaker than the main gate" rule
+      # the `test` comment records, kept rather than traded - what changed is when the gate runs, not
+      # whether it does.
       # Same independent-reporting pattern as `checks`, and the same reasoning, but written out rather
       # than sharing that job's anchor: the aggregate step below must report whatever else in here
       # went wrong, or a failed checkout would skip it and leave `ci` green having checked nothing.
@@ -518,13 +553,18 @@ jobs:
           python-version: "3.13"
 
       - name: Assert every job is in ci's needs
+        id: needs
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: |
           python -m pip install -r .github/requirements-ci.txt
           python - <<'EOF'
+          import os
           import sys
 
           import yaml
+
+          # The one exemption. Every other job must report `success`; these may report `skipped`.
+          MAY_SKIP = {"test-macos"}
 
           # A real parser, because the workflow uses a YAML anchor for the step conditions in
           # `checks` and anything regex-shaped would have to guess at the file Actions actually reads.
@@ -538,25 +578,68 @@ jobs:
                   print(f"::error::job '{name}' is not in ci's needs, so it gates nothing")
               sys.exit(1)
           print(f"ci needs all {len(needs)} other job(s): {', '.join(sorted(needs))}")
+
+          # A job that can skip is exactly a job with an `if:`, so the two descriptions of the same
+          # fact are held against each other. `ci` is excluded because its own `always()` is what
+          # makes it report at all.
+          conditional = {name for name, job in jobs.items() if name != "ci" and "if" in job}
+          for name in sorted(conditional - MAY_SKIP):
+              print(
+                  f"::error::job '{name}' runs conditionally but is not in MAY_SKIP, so every run "
+                  "where its condition is false fails ci and blocks main on a rule nothing broke"
+              )
+          for name in sorted(MAY_SKIP - conditional):
+              print(
+                  f"::error::job '{name}' is in MAY_SKIP but runs unconditionally, so the only way it "
+                  "can skip now is something upstream breaking, and this gate would call that a pass"
+              )
+          if conditional != MAY_SKIP:
+              sys.exit(1)
+          print(f"and may skip: {', '.join(sorted(MAY_SKIP)) or 'nothing'}")
+
+          # Handed to the next step rather than written there too. If this step never got far enough
+          # to set it, that step reads an empty allowlist and treats every skip as a failure, which is
+          # the direction that blocks a merge rather than waving one through.
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"may_skip={' '.join(sorted(MAY_SKIP))}\n")
           EOF
 
+      # `toJSON(needs)` rather than `join(needs.*.result, ' ')`, which was a list of results with the
+      # names thrown away - so an exemption could not be expressed at all, and the error it printed
+      # was "a required job did not succeed" without saying which one. The names were always the more
+      # useful half.
+      #
+      # `python3`, not `python`: this step runs when the checkout failed and `setup-python` never did,
+      # and the runner's own interpreter is what is left. The version does not matter here.
       - name: Fail unless every job succeeded
         if: ${{ !cancelled() }}
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          MAY_SKIP: ${{ steps.needs.outputs.may_skip }}
         run: |
-          # Single quotes inside the expression, double outside: a GitHub expression only accepts
-          # single-quoted strings, and `" "` there is not a syntax error YAML can see. It parses
-          # fine and Actions rejects the whole file, so every job vanishes rather than one failing.
-          results="${{ join(needs.*.result, ' ') }}"
-          echo "upstream: $results"
-          # An empty list would pass the loop below without checking anything, which is the exact
-          # shape of gate this repo exists to stop shipping. It should be unreachable.
-          if [ -z "$results" ]; then
-            echo "::error::no upstream results to check, so this gate proved nothing"
-            exit 1
-          fi
-          for result in $results; do
-            if [ "$result" != "success" ]; then
-              echo "::error::a required job did not succeed"
-              exit 1
-            fi
-          done
+          python3 - <<'EOF'
+          import json
+          import os
+          import sys
+
+          results = json.loads(os.environ["NEEDS"])
+          allowed = set(os.environ.get("MAY_SKIP", "").split())
+          # An empty set would pass the loop below without checking anything, which is the exact shape
+          # of gate this repo exists to stop shipping. It should be unreachable.
+          if not results:
+              print("::error::no upstream results to check, so this gate proved nothing")
+              sys.exit(1)
+          bad = []
+          for name, upstream in sorted(results.items()):
+              result = upstream["result"]
+              if result == "success" or (result == "skipped" and name in allowed):
+                  print(f"  {name}: {result}")
+              else:
+                  print(f"  {name}: {result}  <- not acceptable")
+                  bad.append((name, result))
+          for name, result in bad:
+              print(f"::error::{name} reported {result}, so this change is not gated")
+          if bad:
+              sys.exit(1)
+          print(f"all {len(results)} upstream job(s) acceptable")
+          EOF
