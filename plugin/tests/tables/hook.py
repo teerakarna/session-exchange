@@ -151,4 +151,13 @@ MUTATIONS = [
         new='    problem = claims.clear(root, data.get("session_id"))\n    if False:',
         caught_by="test_hook.py",
     ),
+    Mutation(
+        module="hook",
+        # #31. Without it the root gets two claims for one session, both carrying the same registry
+        # name, and SessionEnd clears only the one that ended.
+        rule="a background job seeds no claim of its own",
+        old="    if not registry.is_peer(known):\n        return",
+        new="    if False:\n        return",
+        caught_by="test_hook.py",
+    ),
 ]

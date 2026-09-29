@@ -118,8 +118,8 @@ MUTATIONS = [
         # A SessionEnd hook is the caller that needs this: by the time it runs, the session it is
         # naming may already be gone, and filtering on liveness would lose exactly that row.
         rule="a session that has just died still resolves by id",
-        old="    for row in entries(sessions_dir, live_only=False):",
-        new="    for row in entries(sessions_dir):",
+        old="    for row in entries(sessions_dir, live_only=False, peers_only=False):",
+        new="    for row in entries(sessions_dir, peers_only=False):",
         caught_by="test_registry.py",
     ),
     Mutation(
@@ -217,6 +217,49 @@ MUTATIONS = [
         rule="no match is no session, rather than whichever row was first",
         old="            return rows[pid]\n    return None",
         new="            return rows[pid]\n    return next(iter(rows.values()), None)",
+        caught_by="test_registry.py",
+    ),
+    # #31. A row that is not a peer, and the four lines that decide which callers see one.
+    Mutation(
+        module="registry",
+        rule="a background job is not rendered as somebody to coordinate with",
+        old="        if peers_only and not is_peer(row):\n            continue",
+        new="        if False:\n            continue",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="and a caller that says peerhood is not the question still gets it",
+        old="        if peers_only and not is_peer(row):",
+        new="        if not is_peer(row):",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        # The direction of the predicate, which is the whole of #31's judgement call: a blocklist
+        # renders one row too many when Claude Code invents a kind, an allowlist renders nobody.
+        rule="a row with no kind, or a kind nothing here knows, is a peer",
+        old='    return row.get("kind") not in NOT_PEERS',
+        new='    return row.get("kind") == "interactive"',
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        # An identity lookup that filtered would answer None for a background job, which is the
+        # same answer it gives for an id the registry never had - and the hook branches on the
+        # difference.
+        rule="resolving an id by name sees every kind of row",
+        old="    for row in entries(sessions_dir, live_only=False, peers_only=False):",
+        new="    for row in entries(sessions_dir, live_only=False):",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        # Inside a background job the chain holds two registry pids, and nearest-first picks the
+        # job. Everything downstream then writes under an id no presence render shows.
+        rule="own_entry skips a background row for the session that spawned it",
+        old="        for r in entries(sessions_dir, live_only=False)",
+        new="        for r in entries(sessions_dir, live_only=False, peers_only=False)",
         caught_by="test_registry.py",
     ),
     # The three a review of this table found, each a line no mutation here offered and no check

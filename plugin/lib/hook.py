@@ -36,6 +36,20 @@ def session_start(data, root, lines):
     # payload does carry, rather than by walking the process tree, which is the same answer for the
     # price of one directory read.
     known = registry.by_session_id(session_id) or {}
+    # A background job fires SessionStart with its own id, so without this the root gets two claims
+    # for what the user thinks is one session, each with the same `name` copied out of the
+    # registry, and `SessionEnd` clears only the one that ended. Nothing then renders that leftover
+    # as anything but a peer. `registry.is_peer` rather than a comparison here, so the absent-kind
+    # default lives in one place - and it is that default which handles the empty row: an id the
+    # registry has never heard of reads as a peer and still seeds, because "no row yet" is a timing
+    # question and refusing it would be a session with no presence at all. An `if known and ...` in
+    # front of this was the first cut and was dead, `is_peer({})` being true already.
+    #
+    # Returning rather than seeding-and-saying-nothing-else: the legacy warnings below go into the
+    # same conversation the interactive half already got them in, so emitting them here is the
+    # duplicate rendering this plugin exists to stop, one layer down. See #31.
+    if not registry.is_peer(known):
+        return
     _, problem = claims.seed(
         root, session_id, data.get("cwd") or os.getcwd(), name=known.get("name")
     )

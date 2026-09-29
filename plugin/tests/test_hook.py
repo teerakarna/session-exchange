@@ -361,6 +361,51 @@ with tempfile.TemporaryDirectory() as tmp:
         "macgyver-2",
     )
 
+# A background job fires SessionStart with an id of its own, and it is not a second session.
+# Seeding for it gives the root two claims for what the user sees as one, both carrying the same
+# registry `name`, and `SessionEnd` clears only the one that ended - so the leftover renders as a
+# peer with a duplicate name and nothing says which is which. Live on this machine when #31 was
+# measured: two rows for one session, same name, different ids. Both halves are asserted: no claim
+# written, and nothing injected either, with the legacy wiring in place so "nothing injected" is a
+# real answer rather than the answer this fixture gives anyway.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=True)
+    (home / ".claude" / "sessions" / "bg.json").write_text(
+        json.dumps(
+            {"sessionId": "sess-bg", "name": "shared-name", "pid": os.getpid(), "kind": "bg"}
+        )
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-bg", "cwd": str(repo)},
+        home,
+    )
+    check(
+        "a background job seeds no claim of its own",
+        (root / ".claude" / "exchange" / "sessions" / "sess-bg.json").is_file(),
+        False,
+    )
+    check("and injects nothing into a context it shares with its session", out, None)
+    check("and the session still starts", code, 0)
+
+    # The same fixture with the kind removed, which is the version of Claude Code that predates the
+    # field. It has to seed: treating an unknown kind as not-a-peer renders nobody present at all,
+    # which is worse than rendering one row too many. Without this check the guard above passes just
+    # as well when it drops every session on that version.
+    (home / ".claude" / "sessions" / "bg.json").write_text(
+        json.dumps({"sessionId": "sess-nokind", "name": "shared-name", "pid": os.getpid()})
+    )
+    code, out = run(
+        "SessionStart",
+        {"hook_event_name": "SessionStart", "session_id": "sess-nokind", "cwd": str(repo)},
+        home,
+    )
+    check(
+        "a row with no kind at all is still a session",
+        (root / ".claude" / "exchange" / "sessions" / "sess-nokind.json").is_file(),
+        True,
+    )
+
 # A marker that exists and does not parse is still a root, because `resolve` only asks whether the
 # file is there. So the run continues on defaults, and this line is the only thing between that and
 # a correctly configured exchange - a cap read as its default is not visibly a cap not read at all.
