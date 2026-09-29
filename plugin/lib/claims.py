@@ -187,10 +187,13 @@ def describe_settings(claim):
     session, so `focus`, `name` and `tickets` in these lines are that session's text. `repos` and
     `paths` go through `describe_list` too, and not as belt-and-braces: `store.scope_fault` holds
     `--repo`, `--path` and `--set-path` on the way in, but what this echoes is the whole record read
-    back off disk, so a scope written before that guard existed, imported by `migrate`, or edited
-    into the file by hand arrives here having passed through nothing. `test_cli.py` writes exactly
-    such a record. Missing all of this while fixing `show` is the same narrower-than-the-problem
-    shape one command over, twice in one branch.
+    back off disk, so a scope written before that guard existed, or edited into the file by hand,
+    arrives here having passed through nothing. `test_cli.py` writes exactly such a record. The
+    importer that arrives with migration step 4 will be a third route, reading scopes out of the
+    legacy markdown rather than off a flag - and it is named here as a route that does not exist yet
+    rather than one that does, this docstring having already overclaimed once. Missing all of it
+    while fixing `show` is the same narrower-than-the-problem shape one command over, twice in one
+    branch.
 
     Uncapped, unlike `describe_focus`. The cap bounds one row of a block that lists every session,
     and this is a session reading back its own write: a confirmation that silently truncated would

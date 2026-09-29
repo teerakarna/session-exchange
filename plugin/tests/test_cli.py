@@ -339,7 +339,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     # And that same field through the echo, which is where the guard on the way in stops being the
     # answer: `--path` is held by `store.scope_fault`, but this `paths` was written into the file
-    # directly, the way an older record, the `migrate` importer or a hand edit writes one.
+    # directly, the way an older record or a hand edit does, and the way step 4's importer will.
     code, out = run(home, repo, "claim", "--session", "peer-1")
     check(
         "a scope the guard never saw is still inert when the echo reads it back",

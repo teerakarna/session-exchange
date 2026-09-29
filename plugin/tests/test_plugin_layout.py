@@ -10,7 +10,6 @@ nothing ever said so.
 import json
 import pathlib
 import re
-import subprocess
 import sys
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
@@ -129,7 +128,7 @@ for name in subcommands:
     # A command the doc does not mention is a command nobody will run.
     check(f"the doc mentions {name}", f"`{name}" in command_doc, True)
 
-print("and no file the repo carries holds a character a reviewer cannot see")
+print("and no file in the tree holds a character a reviewer cannot see")
 
 # Three commits on this branch shipped a literal invisible character into source: a ZWJ, a U+3000,
 # and a ZWSP with an NBSP beside it. The last two sat inside the checks asserting that those very
@@ -137,33 +136,64 @@ print("and no file the repo carries holds a character a reviewer cannot see")
 # does. Nobody catches this class by eye, in review or otherwise, which is the whole argument for
 # asserting it instead. Escapes, always.
 #
-# Every tracked file, asked of git rather than walked: a suffix allowlist skipped `.gitignore`,
-# `LICENSE`, `NOTICE` and `requirements-ci.txt`, and an invisible in the first of those is a pattern
-# that silently never matches. Tracked rather than the whole tree because the tree also holds
-# `.ruff_cache` and anything else the working copy happens to be carrying, which is not the repo's
-# to answer for. No git means this dies rather than quietly checking nothing.
-listed = subprocess.run(
-    ["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, text=True, check=True
-)
+# Every file, with no suffix allowlist. The first cut had one, covering seven extensions, and so
+# said nothing about `.gitignore`, `LICENSE`, `NOTICE` or `requirements-ci.txt` - and an invisible
+# character in the first of those is a pattern that silently never matches anything, which is worse
+# than a comment that reads oddly. The allowlist was the same narrower-than-the-problem shape as
+# the bug it was written to stop repeating.
+#
+# `git ls-files` would be the precise universe and was the second cut. It cannot be: `mutate.py`
+# copies the tree without `.git` and runs the whole suite inside that copy, so asking git there
+# fails and the baseline dies, which is how CI found it. A walk works in both places, and whether
+# a file decodes does the work the allowlist was doing badly.
+#
+# The three skipped names are `mutate.IGNORE` again, for the same reason it has them, arrived at
+# separately rather than shared - importing the sweep harness from a test it sweeps is a worse
+# coupling than a repeated list of caches.
 illegible = []
-for name in sorted(n for n in listed.stdout.split("\0") if n):
-    path = REPO / name
-    if not path.is_file():
+scanned = []
+for path in sorted(REPO.rglob("*")):
+    if not path.is_file() or {".git", "__pycache__", ".ruff_cache"} & set(path.parts):
+        continue
+    name = str(path.relative_to(REPO))
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        illegible.append(f"{name}: not readable, {exc}")
+        continue
+    # Binary by git's own test, a NUL in the first 8000 bytes, and skipped: a `.DS_Store` appears in
+    # any directory Finder has opened, and there is no prose in one for anything to hide in. Not
+    # decoding is the test for *everything else*, because a file that fails to decode is where this
+    # class hides best: a doc saved from Word or a browser in cp1252 carries NBSP as the bare byte
+    # 0xA0, which is not valid utf-8, so skipping undecodable files quietly would let exactly the
+    # character this check exists for through while printing ok.
+    if b"\0" in raw[:8000]:
         continue
     try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        # Not text, so not prose anybody reads, and there is nothing here to be invisible in.
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        illegible.append(f"{name}: not utf-8, {exc}")
         continue
+    scanned.append(name)
     # One predicate, the same one `store.printable` is built on: `isprintable` is false for the
     # Other and Separator categories, so control characters, the zero-width formatting ones and
     # NBSP-style spaces are all covered without a list of codepoints here to go out of date.
     # Newline is the only one a file is meant to hold, and a stray carriage return is worth
-    # hearing about too.
+    # hearing about too. Tab is in deliberately - it is as invisible as the rest and no file here
+    # needs one - so the day something arrives that does, a Makefile or a `<<-` heredoc, the
+    # exception goes here rather than the check being dropped.
     found = sorted({f"U+{ord(ch):04X}" for ch in text if ch != "\n" and not ch.isprintable()})
     if found:
         illegible.append(f"{name}: {', '.join(found)}")
 check("every file reads the way it looks", illegible, [])
+# A scan that read nothing reports no problems, which is indistinguishable from a clean tree. It is
+# reachable: a walk that resolves nothing, a `REPO` pointing somewhere unexpected. This file is the
+# sentinel rather than a floor on the count, being the one file the check is certain exists.
+check(
+    "and it read the tree rather than nothing",
+    str(pathlib.Path(__file__).resolve().relative_to(REPO)) in scanned,
+    True,
+)
 
 print()
 if failures:
