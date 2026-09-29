@@ -10,6 +10,7 @@ nothing ever said so.
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
@@ -128,24 +129,31 @@ for name in subcommands:
     # A command the doc does not mention is a command nobody will run.
     check(f"the doc mentions {name}", f"`{name}" in command_doc, True)
 
-print("and no file in the tree carries a character a reviewer cannot see")
+print("and no file the repo carries holds a character a reviewer cannot see")
 
 # Three commits on this branch shipped a literal invisible character into source: a ZWJ, a U+3000,
 # and a ZWSP with an NBSP beside it. The last two sat inside the checks asserting that those very
 # codepoints get stripped, where a literal proves nothing about the code while reading as though it
 # does. Nobody catches this class by eye, in review or otherwise, which is the whole argument for
 # asserting it instead. Escapes, always.
-TEXT_SUFFIXES = (".py", ".md", ".json", ".sh", ".yml", ".yaml", ".toml")
+#
+# Every tracked file, asked of git rather than walked: a suffix allowlist skipped `.gitignore`,
+# `LICENSE`, `NOTICE` and `requirements-ci.txt`, and an invisible in the first of those is a pattern
+# that silently never matches. Tracked rather than the whole tree because the tree also holds
+# `.ruff_cache` and anything else the working copy happens to be carrying, which is not the repo's
+# to answer for. No git means this dies rather than quietly checking nothing.
+listed = subprocess.run(
+    ["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, text=True, check=True
+)
 illegible = []
-for path in sorted(REPO.rglob("*")):
-    if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
-        continue
-    if {".git", "__pycache__"} & set(path.parts):
+for name in sorted(n for n in listed.stdout.split("\0") if n):
+    path = REPO / name
+    if not path.is_file():
         continue
     try:
         text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        illegible.append(f"{path.relative_to(REPO)}: not readable as utf-8, {exc}")
+    except UnicodeDecodeError:
+        # Not text, so not prose anybody reads, and there is nothing here to be invisible in.
         continue
     # One predicate, the same one `store.printable` is built on: `isprintable` is false for the
     # Other and Separator categories, so control characters, the zero-width formatting ones and
@@ -154,7 +162,7 @@ for path in sorted(REPO.rglob("*")):
     # hearing about too.
     found = sorted({f"U+{ord(ch):04X}" for ch in text if ch != "\n" and not ch.isprintable()})
     if found:
-        illegible.append(f"{path.relative_to(REPO)}: {', '.join(found)}")
+        illegible.append(f"{name}: {', '.join(found)}")
 check("every file reads the way it looks", illegible, [])
 
 print()
