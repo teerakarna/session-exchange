@@ -327,6 +327,13 @@ jobs:
   # for - a hang still gets killed - rather than a figure anything measured, because the measurement
   # this wanted is the one the cancel destroyed.
   #
+  # The re-run under the raised cap supplied it: `244 mutation(s) in 2913s, 11.9s each`, all caught,
+  # 48m33s of a 48m57s job. So 45 was four minutes short of a sweep that passes, and the 11.9s is
+  # double the 5.4s and 6.5s readings above at 191 - the suite roughly doubled in that stretch, and
+  # every mutation pays the whole of it, which is the shape of #43 in one number rather than an
+  # argument about it. 90 stays: the spread on this job has been nearly half, and a cap sized to the
+  # figure it just produced is the 15-minute mistake again.
+  #
   # Not the fix. #43 is: a mutation runs the whole suite to learn whether one named file objected, so
   # every table added pays for every table already there. Raising the cap buys the time to do that
   # and makes every harness-touching PR a wide sweep at this length until it lands, which is #58.
