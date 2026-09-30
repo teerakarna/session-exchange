@@ -489,6 +489,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # The PR title becomes the commit message on squash-merge, which is what release-please.yml reads
+  # to pick a version bump and write a changelog entry - a title outside Conventional Commits is
+  # silently miscategorized there rather than caught. Skips on `push`: that event on `main` only
+  # happens as the result of a merge the ruleset already required a PR for, so by the time it fires
+  # there is no title left to check, the same "the PR gate is not weaker than the main gate"
+  # reasoning `test-macos` above rests on.
+  pr-title:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write # posts a comment on the PR explaining a failing title
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # The single check branch protection requires, and the only reason this job exists. Requiring the
   # other jobs by name means every matrix leg is named in a repo setting: rename one, or drop a
   # Python version, and `main` is blocked forever waiting on a check that will never report again.
@@ -498,7 +516,7 @@ jobs:
   # `always()` so it runs even when something upstream failed, and the explicit result check because
   # a skipped `needs` job does not fail a dependant on its own.
   ci:
-    needs: [test, test-macos, checks, mutate, secrets]
+    needs: [test, test-macos, checks, mutate, secrets, pr-title]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -563,8 +581,8 @@ jobs:
 
           import yaml
 
-          # The one exemption. Every other job must report `success`; these may report `skipped`.
-          MAY_SKIP = {"test-macos"}
+          # The jobs allowed to report `skipped` instead of `success` - everything else must succeed.
+          MAY_SKIP = {"test-macos", "pr-title"}
 
           # A real parser, because the workflow uses a YAML anchor for the step conditions in
           # `checks` and anything regex-shaped would have to guess at the file Actions actually reads.

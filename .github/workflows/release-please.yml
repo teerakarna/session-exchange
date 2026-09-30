@@ -1,0 +1,26 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      # Maintains a standing PR that computes the next semver bump and changelog entry from
+      # Conventional Commits since the last release - it does not read CHANGELOG.md's existing
+      # hand-written "Unreleased" section, it derives its own from commit history. Merging that PR
+      # is a deliberate decision, not automated the way dependabot-adjacent merges might be:
+      # cutting the first release this project has ever had is exactly the kind of thing that
+      # should not happen just because commits accumulated.
+      #
+      # No existing publish pipeline to defer to (unlike candor's goreleaser), so this creates the
+      # GitHub Release itself, not just the tag.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0

@@ -374,6 +374,16 @@ implement it and the meta-test will tell you when you have not.
 Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`). Branch and PR for everything; nothing lands
 on `main` directly. No `Co-Authored-By` trailers.
 
+The PR title is what actually gets checked (`ci.yml`'s `pr-title` job): squash-merge makes it the
+commit message on `main`, and that message is what `release-please.yml` reads to pick a version
+bump and write a changelog entry. A title outside Conventional Commits is not caught anywhere else -
+release-please just miscategorizes or drops it silently.
+
+Versioning itself is `release-please.yml`, not a person deciding a number: it maintains a standing
+PR computing the next semver bump and changelog from commits since the last release, and merging
+that PR is the release. This project has never cut one yet, so the first merge of that PR is also
+the first tag.
+
 Repeat the keyword for every issue a PR closes: `Closes #36, closes #27, closes #42`. GitHub parses only
 the issue immediately after the keyword, so `Closes #36, #27, #42` closes one and silently ignores the
 rest. #56 shipped with that shape in both the PR body and the squash message, closed #36, left three
