@@ -67,8 +67,8 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="a registry with nothing on this session is no name, not an AttributeError",
-        old="    known = registry.by_session_id(session_id) or {}",
-        new="    known = registry.by_session_id(session_id)",
+        old="    known = registry.by_session_id(session_id, rows=rows) or {}",
+        new="    known = registry.by_session_id(session_id, rows=rows)",
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -92,10 +92,13 @@ MUTATIONS = [
             "    if problem:\n"
             "        lines.append(hookio.problem(problem))\n"
             "\n"
-            "    _, config_problem"
+            "    config, config_problem"
         ),
         new=(
-            "    if False:\n        lines.append(hookio.problem(problem))\n\n    _, config_problem"
+            "    if False:\n"
+            "        lines.append(hookio.problem(problem))\n"
+            "\n"
+            "    config, config_problem"
         ),
         caught_by="test_hook.py",
     ),
@@ -175,8 +178,8 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="both record types are enumerated, not just the one the issue reported",
-        old="    for load in (claims.load_all, handoffs.load_all):",
-        new="    for load in (claims.load_all,):",
+        old="    _, found = handoffs.load_all(root)\n    problems += found",
+        new="    _, found = handoffs.load_all(root)",
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -191,6 +194,111 @@ MUTATIONS = [
         rule="and what it leaves out is counted rather than dropped",
         old="    if len(problems) > MAX_PROBLEMS:",
         new="    if False:",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="presence is rendered at session start, not only by `exchange show`",
+        old="    lines += presence(root, held, session_id, config, rows)",
+        new="    lines += presence(root, [], session_id, config, rows)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a session is not shown its own claim as another session",
+        old='    others = [claim for claim in held if claim["session_id"] != session_id]',
+        new="    others = list(held)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a claim whose session is gone is not rendered as current",
+        old='    live = {row.get("sessionId") for row in rows if registry.alive(row.get("pid"))}',
+        new='    live = {row.get("sessionId") for row in rows}',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="and it is counted rather than dropped",
+        old="    if stale:",
+        new="    if False:",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="nobody else here means no presence block at all",
+        old="    if current:\n        out.append(",
+        new="    if True:\n        out.append(",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="the root's name is stripped before it reaches the context",
+        old="            f\"{store.printable(config['name'])}:\"",
+        new="            f\"{config['name']}:\"",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a live background job's claim is not rendered as a peer",
+        old='    peers = {row.get("sessionId") for row in rows if registry.is_peer(row)} & live',
+        new='    peers = {row.get("sessionId") for row in rows} & live',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="and it is not counted as a session that has stopped either",
+        old='    stale = [claim for claim in others if claim["session_id"] not in live]',
+        new='    stale = [claim for claim in others if claim["session_id"] not in peers]',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="the registry is read with every kind of row, so a background job is recognised",
+        old="    rows = registry.entries(live_only=False, peers_only=False)",
+        new="    rows = registry.entries(live_only=False)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a peer's focus is stripped before it reaches the context",
+        old='            focus = claims.describe_focus(claim, config["max_focus_chars"])',
+        new='            focus = claim.get("focus")',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="and capped at the marker's width, not the schema default",
+        old='            focus = claims.describe_focus(claim, config["max_focus_chars"])',
+        new="            focus = claims.describe_focus(claim, 240)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a peer's name is stripped before it reaches the context",
+        old='            out.append(f"- {claims.describe_name(claim)}: {focus}")',
+        new="            out.append(f\"- {claim.get('name')}: {focus}\")",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a peer's scope is rendered with it, capped at the marker's count",
+        old='claims.describe_scope(claim, config["max_hot_paths"])',
+        new="claims.describe_scope(claim, 6)",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="and not only its focus",
+        old="            for field, shown in claims.describe_scope(",
+        new="            for field, shown in [] and claims.describe_scope(",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="the stale count says where the files are, since nothing removes them",
+        old='            f"{store.sessions_dir(root)}"',
+        new='            f""',
         caught_by="test_hook.py",
     ),
 ]

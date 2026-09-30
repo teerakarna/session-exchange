@@ -92,7 +92,7 @@ def entries(sessions_dir=SESSIONS_DIR, live_only=True, peers_only=True):
     return sorted(rows, key=lambda r: str(r.get("name") or r.get("sessionId")))
 
 
-def by_session_id(session_id, sessions_dir=SESSIONS_DIR):
+def by_session_id(session_id, sessions_dir=SESSIONS_DIR, rows=None):
     """The registry row for a known session id, or None.
 
     What a hook uses, because the payload already carries the id and an exact lookup costs one
@@ -102,10 +102,14 @@ def by_session_id(session_id, sessions_dir=SESSIONS_DIR):
     is the one deciding whether the id it was handed is a peer at all - a filter here would answer
     None for a background job and be indistinguishable from an id the registry has never heard of,
     which are two different situations with two different right responses.
+
+    `rows` is every row already read, for a caller that needs them for something else as well.
     """
     if not session_id:
         return None
-    for row in entries(sessions_dir, live_only=False, peers_only=False):
+    if rows is None:
+        rows = entries(sessions_dir, live_only=False, peers_only=False)
+    for row in rows:
         if row.get("sessionId") == session_id:
             return row
     return None

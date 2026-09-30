@@ -280,8 +280,8 @@ print("another session's claim does not get to drive the reader's terminal")
 with tempfile.TemporaryDirectory() as tmp:
     # The claim half of #47. `show` renders five fields off someone else's claim and none of them
     # carries a pattern in the schema - `focus` is described as "in its own words". It rendered all
-    # five raw. A human's terminal is the whole of the reach today: `hook.py` renders no claim
-    # content and says presence rendering lands next, so nothing here reaches a model's context yet.
+    # five raw. The hook's presence block reads the same fields through the same functions (#79),
+    # so what this protects is a model's context as well as a human's terminal.
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
     nasty = "HARMLESS\033[2K\033[1;31mURGENT\007"
@@ -967,6 +967,22 @@ with tempfile.TemporaryDirectory() as tmp:
         "handoff with no verb is a usage error naming the verbs",
         (code, "post" in out, "not built yet" in out),
         (2, True, False),
+    )
+
+print("the marker's name does not get to drive the reader's terminal either")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # #64. The name is hand-typed into a file outside the plugin, and `show` and `init` printed it
+    # raw while the hook's presence heading stripped the same value.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    (area / ".claude" / "exchange.json").write_text(json.dumps({"name": "are\033[2K\007a"}))
+    _, shown = run(home, repo, "show")
+    _, again = run(home, repo, "init")
+    check(
+        "show and init both print it with the escape and the bell gone",
+        ("name      are[2Ka" in shown, "  name: are[2Ka" in again, "\033" in shown + again),
+        (True, True, False),
     )
 
 print()

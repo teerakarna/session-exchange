@@ -104,7 +104,7 @@ def cmd_init(args):
         if problem:
             print(f"problem: {problem}")
             return 1
-        print(f"  name: {config['name']}")
+        print(f"  name: {store.printable(config['name'])}")
         return 0
 
     problem = store.write_json(
@@ -123,20 +123,6 @@ def cmd_init(args):
     return 0
 
 
-def _capped(values, cap):
-    """The first `cap` values, with anything beyond it counted rather than dropped.
-
-    A silent truncation is the failure this repo keeps finding in other shapes: the output looks
-    complete, so nobody goes looking for the rest. The caps themselves stay, because the row that
-    went into every session at 23 KB is why they exist.
-    """
-    shown = ", ".join(values[:cap])
-    extra = len(values) - cap
-    if extra <= 0:
-        return shown
-    return f"{shown}, +{extra} more" if shown else f"+{extra} more"
-
-
 def cmd_show(args):
     resolution = _resolved(args)
     if resolution is None:
@@ -144,7 +130,7 @@ def cmd_show(args):
     root = resolution.root
     config, problem = store.config(root)
     print(f"root      {root}  (by {resolution.rule})")
-    print(f"name      {config['name']}")
+    print(f"name      {store.printable(config['name'])}")
     if problem:
         print(f"problem   {problem}")
 
@@ -163,10 +149,8 @@ def cmd_show(args):
         # accepted, validated and written, and then no reader rendered them: a write that succeeds
         # and cannot be read back is indistinguishable from one that was dropped, and handoffs are
         # addressed to repo-and-path scope, so half the scope was invisible to the people it is for.
-        for field in claims.LIST_FIELDS:
-            if claim.get(field):
-                shown_list = claims.describe_list(claim[field])
-                print(f"     {field}: {_capped(shown_list, config['max_hot_paths'])}")
+        for field, shown_list in claims.describe_scope(claim, config["max_hot_paths"]):
+            print(f"     {field}: {shown_list}")
     if any(claim["session_id"] not in live for claim in held):
         print("  ! marks a claim whose session is no longer in the registry: stale, not current.")
     for problem in problems:

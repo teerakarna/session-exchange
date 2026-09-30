@@ -213,4 +213,11 @@ MUTATIONS = [
         new='    return pathlib.Path(root) / "exchange.json"',
         caught_by="test_cli.py",
     ),
+    Mutation(
+        module="store",
+        rule="a list past its cap says how many it left out",
+        old="    if extra <= 0:\n        return shown\n    return f",
+        new="    if True:\n        return shown\n    return f",
+        caught_by="test_hook.py",
+    ),
 ]
