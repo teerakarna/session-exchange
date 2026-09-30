@@ -100,15 +100,14 @@ refusing to show presence over a bad cap would be the wrong trade, and doing it 
 
 ## Install
 
-The repo is private, by decision rather than oversight, and the Apache-2.0 licence is not a statement
-that it is published (see [NOTICE](NOTICE)). Installing from GitHub therefore needs read access:
+From GitHub:
 
 ```
 /plugin marketplace add teerakarna/session-exchange
 /plugin install session-exchange@session-exchange
 ```
 
-From a clone, which needs neither access nor auth, and takes the clone wherever you keep it:
+Or from a clone, wherever you keep it:
 
 ```
 /plugin marketplace add /path/to/your/session-exchange

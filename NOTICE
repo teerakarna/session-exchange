@@ -3,8 +3,7 @@ Copyright 2026 Albert Asawaroengchai
 
 Licensed under the Apache License, Version 2.0. See LICENSE.
 
-The repository is private; the licence is not a statement that it is published. It is here because
-the licensing decision is cheapest to make now, before there is contributed history to relicense,
-and because this is the most genuinely generic of these tools: the portability constraint that makes
-it work at all means nothing in it names a path, a lane, a repo or a person. Whether it ever goes
-public is a separate decision, and the argument for it has to be made on its own.
+The repository went public on 2026-09-30. The licence was chosen before that, while the repo
+was still private, because the licensing decision is cheapest to make before there is contributed
+history to relicense, and because this is the most genuinely generic of these tools: the portability
+constraint that makes it work at all means nothing in it names a path, a lane, a repo or a person.
