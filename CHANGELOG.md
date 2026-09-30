@@ -93,6 +93,11 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 - A store filename is stripped before it reaches a problem line, in `show`, `handoff list` and the
   session start. Every name this plugin writes is safe already, so this is for a file an importer, a
   hand edit or another tool put there (#60).
+- A release now reaches the installed copy. The host caches an install by the version in
+  `plugin.json`, which had been `0.0.1` since the skeleton, so `plugin update` advanced the clone and
+  left the hooks running a copy from before `handoffs.py` existed while reporting it as the latest.
+  release-please now moves that version with every release, and `doctor` opens with the running
+  version and the directory it runs from, which says in one line whether it is the cache (#49).
 
 - `claim` from inside a background job is refused instead of overwriting the focus of the session
   that started it. `--session` still claims as that session on purpose (#68).

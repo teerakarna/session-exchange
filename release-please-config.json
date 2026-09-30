@@ -10,6 +10,10 @@
     { "type": "test", "section": "Tests", "hidden": true }
   ],
   "packages": {
-    ".": {}
+    ".": {
+      "extra-files": [
+        { "type": "json", "path": "plugin/.claude-plugin/plugin.json", "jsonpath": "$.version" }
+      ]
+    }
   }
 }
