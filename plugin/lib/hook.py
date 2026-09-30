@@ -169,7 +169,7 @@ def presence(root, held, session_id, config, rows):
         out.append(
             f"[{hookio.PREFIX}] {len(stale)} claim(s) left by sessions no longer running. "
             f"`exchange show` lists them; once sure they are gone, delete their files under "
-            f"{store.sessions_dir(root)}"
+            f"{store.printable(str(store.sessions_dir(root)))}"
         )
     return out
 

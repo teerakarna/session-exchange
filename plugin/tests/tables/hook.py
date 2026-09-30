@@ -297,8 +297,15 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="the stale count says where the files are, since nothing removes them",
-        old='            f"{store.sessions_dir(root)}"',
+        old='            f"{store.printable(str(store.sessions_dir(root)))}"',
         new='            f""',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="and the path is stripped, since a directory name can carry an escape",
+        old="store.printable(str(store.sessions_dir(root)))",
+        new="store.sessions_dir(root)",
         caught_by="test_hook.py",
     ),
 ]

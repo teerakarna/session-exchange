@@ -138,7 +138,10 @@ def cmd_show(args):
     if own:
         print(f"this      {own.get('name')}  {own.get('sessionId')}")
 
-    live = {row.get("sessionId") for row in registry.entries()}
+    # Every kind of row, not just peers: a background job that is running has not stopped, and the
+    # hook's stale line sends people here to decide what to delete. Same live set `hook.presence`
+    # counts against.
+    live = {row.get("sessionId") for row in registry.entries(peers_only=False)}
     held, problems = claims.load_all(root)
     print(f"claims    {len(held)}")
     for claim in held:
@@ -152,7 +155,7 @@ def cmd_show(args):
         for field, shown_list in claims.describe_scope(claim, config["max_hot_paths"]):
             print(f"     {field}: {shown_list}")
     if any(claim["session_id"] not in live for claim in held):
-        print("  ! marks a claim whose session is no longer in the registry: stale, not current.")
+        print("  ! marks a claim whose session is no longer running: stale, not current.")
     for problem in problems:
         print(f"problem   {problem}")
 

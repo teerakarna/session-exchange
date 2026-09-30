@@ -235,9 +235,21 @@ with tempfile.TemporaryDirectory() as tmp:
         ("the hooks manifest" in out, "other work" in out),
         (True, True),
     )
-    check(
-        "and marks the one with no live session as stale", "no longer in the registry" in out, True
-    )
+    check("and marks the one with no live session as stale", "no longer running" in out, True)
+
+    # A running background job holding that claim is not a stopped session. The hook's stale line
+    # sends the reader here before deleting files, so marking the job's claim `!` would get a live
+    # claim deleted on this command's word.
+    job = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    bg_row = pathlib.Path(home) / ".claude" / "sessions" / "bg.json"
+    bg_row.write_text(json.dumps({"sessionId": "someone-else", "pid": job.pid, "kind": "bg"}))
+    try:
+        code, out = run(home, repo, "show")
+    finally:
+        job.kill()
+        job.wait()
+        bg_row.unlink()
+    check("a live background job's claim is not marked stale", "no longer running" in out, False)
 
     # #46 on the other side of the comparison it was filed about. The guard was on `handoff post`
     # alone for one commit, which contains nothing: the matcher compares `to.repo` against a claim's

@@ -1208,6 +1208,21 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
 
+print("presence, under a root whose path a terminal would act on")
+with tempfile.TemporaryDirectory() as tmp:
+    # The path comes off the filesystem rather than out of anything this plugin wrote, and a
+    # directory name can carry an escape or a newline as easily as a marker can.
+    odd = pathlib.Path(tmp) / "we\x1bird"
+    odd.mkdir()
+    home, root, repo = presence_fixture(odd)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
+    stale = [r for r in context_rows(out) if "left by sessions no longer running" in r]
+    check(
+        "the stale line's path is stripped too",
+        (len(stale), "\x1b" in "".join(stale), "weird" in "".join(stale)),
+        (1, False, True),
+    )
+
 print("presence comes before the migration guard that refers to it")
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = presence_fixture(tmp, wire_legacy=True)
