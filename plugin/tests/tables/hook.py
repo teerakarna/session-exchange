@@ -332,15 +332,15 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="a repo outside the root has no name under it",
-        old="    if enclosing is not None and (enclosing == root or root in enclosing.parents):",
-        new="    if enclosing is not None:",
+        old="        if enclosing == root or root in enclosing.parents:",
+        new="        if True:",
         caught_by="test_hook.py",
     ),
     Mutation(
         module="hook",
         rule="a root that is itself a repo is one",
-        old="(enclosing == root or root in enclosing.parents)",
-        new="(root in enclosing.parents)",
+        old="        if enclosing == root or root in enclosing.parents:",
+        new="        if root in enclosing.parents:",
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -416,8 +416,8 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="a cwd in no repo is not handed to checkout",
-        old="    if enclosing is not None:\n        enclosing = checkout(enclosing)",
-        new="    if True:\n        enclosing = checkout(enclosing)",
+        old="(checkout(found), found) if found is not None else ()",
+        new="(checkout(found), found)",
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -460,6 +460,13 @@ MUTATIONS = [
         rule="a tie on time is broken by id, so the order is the same every run",
         old='    mine.sort(key=lambda pair: (pair[0]["created"], pair[0]["id"]), reverse=True)',
         new='    mine.sort(key=lambda pair: pair[0]["created"], reverse=True)',
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a worktree whose main repo is outside the root keeps its own name",
+        old="(checkout(found), found) if found",
+        new="(checkout(found),) if found",
         caught_by="test_hook.py",
     ),
 ]

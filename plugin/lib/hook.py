@@ -217,13 +217,16 @@ def where(root, claim, cwd):
     was for, and a cwd path would narrow exactly those sessions. A cwd is where a session was
     started, not what it is working on. It would also narrow every other repo the claim holds,
     since a claim's paths are not tied to a repo.
+
+    A worktree whose main repo is outside the root keeps its own name, which is the only one under
+    the root anything could have addressed it by.
     """
     repos, paths = list(claim.get("repos", ())), list(claim.get("paths", ()))
-    enclosing = exchange_root.git_root(cwd)
-    if enclosing is not None:
-        enclosing = checkout(enclosing)
-    if enclosing is not None and (enclosing == root or root in enclosing.parents):
-        repos.append(str(enclosing.relative_to(root)))
+    found = exchange_root.git_root(cwd)
+    for enclosing in (checkout(found), found) if found is not None else ():
+        if enclosing == root or root in enclosing.parents:
+            repos.append(str(enclosing.relative_to(root)))
+            break
     return repos, paths
 
 

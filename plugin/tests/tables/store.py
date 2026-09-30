@@ -84,14 +84,14 @@ MUTATIONS = [
     # `/` is a habit, a `..` is a misunderstanding, an invisible character is a paste.
     Mutation(
         module="store",
-        rule="a scope path cannot be absolute, because the field is relative to the root",
+        rule="a scope path cannot be absolute, because the field is relative",
         old='    if value.startswith("/"):',
         new="    if False:",
         caught_by="test_store_claims.py",
     ),
     Mutation(
         module="store",
-        rule="and cannot climb out of the root with ..",
+        rule="and cannot climb out with ..",
         old='    if ".." in value.split("/"):',
         new="    if False:",
         caught_by="test_store_claims.py",

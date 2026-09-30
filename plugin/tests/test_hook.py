@@ -1391,6 +1391,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (["h-named"], False),
     )
 
+# Not as root, where a read-only directory is writable anyway and the seed cannot be made to fail.
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = handoff_fixture(tmp)
     # A claim on disk that the seed then cannot rewrite, because its directory is read-only. The
@@ -1403,14 +1404,15 @@ with tempfile.TemporaryDirectory() as tmp:
     finally:
         sessions.chmod(0o700)
     rows = context_rows(out)
-    check(
-        "a claim that could not be reseeded still places the session",
-        (
-            "h-spelt" in [r.split()[1] for r in rows if r.startswith("- h-")],
-            any("refusing to write" in r or "could not" in r for r in rows),
-        ),
-        (True, True),
-    )
+    if os.geteuid() != 0:
+        check(
+            "a claim that could not be reseeded still places the session",
+            (
+                "h-spelt" in [r.split()[1] for r in rows if r.startswith("- h-")],
+                any("refusing to write" in r or "could not" in r for r in rows),
+            ),
+            (True, True),
+        )
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = handoff_fixture(tmp)
@@ -1432,6 +1434,24 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run("SessionStart", {"session_id": "me", "cwd": str(tree)}, home)
     listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
     check("a worktree is in the repo it belongs to", "h-spelt" in listed, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # A worktree under the root of a main clone that is not, which is what `git worktree add` into
+    # the root from a clone kept elsewhere makes. Its own name is the only one it has here.
+    main = pathlib.Path(tmp).resolve() / "elsewhere" / "foo"
+    (main / ".git" / "worktrees" / "foo").mkdir(parents=True)
+    tree = root / "foo"
+    tree.mkdir()
+    (tree / ".git").write_text(f"gitdir: {main}/.git/worktrees/foo\n")
+    handoffs.post(root, {"repo": "foo"}, "for the worktree", str(root), handoff_id="h-foo")
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(tree)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check(
+        "a worktree whose main clone is outside the root keeps its own name",
+        "h-foo" in listed,
+        True,
+    )
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = handoff_fixture(tmp)

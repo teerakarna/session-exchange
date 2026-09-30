@@ -395,7 +395,7 @@ print()
 print("a scope path, which is the same two fields on a handoff and on a claim")
 
 check(
-    "an absolute repo is refused, the field being relative to the root",
+    "an absolute repo is refused, the field being relative",
     store.scope_fault("--repo", "/etc"),
     "--repo is a relative path, so it cannot start with /: /etc",
 )
