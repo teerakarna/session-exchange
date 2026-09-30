@@ -4,9 +4,8 @@ Presence and handoffs between concurrent Claude Code sessions, as a Claude Code 
 `README.md` for the design and `CONTRIBUTING.md` for how to test, which is the part of this repo most
 likely to be got wrong. This file holds only what a change or a review cannot work out from the code.
 
-The design, the seven migration steps and the evidence for each live with the plan, not here:
-`plans/2026-09-25_portable-session-exchange*` in the `dotfiles` repo. `exchange doctor` prints the same
-seven steps derived from live state.
+The seven migration steps are not written out in any doc: `exchange doctor` prints them derived
+from live state, which is the one copy that cannot go stale.
 
 ## Rules that are not obvious from the code
 

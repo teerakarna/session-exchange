@@ -412,7 +412,7 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=False)
     (home / ".claude" / "sessions" / "reg.json").write_text(
-        json.dumps({"sessionId": "sess-named", "name": "macgyver-2", "pid": os.getpid()})
+        json.dumps({"sessionId": "sess-named", "name": "pane-a", "pid": os.getpid()})
     )
     code, out = run(
         "SessionStart",
@@ -423,7 +423,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "the claim carries the name the registry knows this session by",
         json.loads(seeded.read_text()).get("name"),
-        "macgyver-2",
+        "pane-a",
     )
 
 # A background job fires SessionStart with an id of its own, and it is not a second session.
