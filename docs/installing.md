@@ -6,14 +6,14 @@ which sessions can see each other. Installing on its own does nothing observable
 
 ## 1. Install the plugin
 
-From GitHub, which needs read access to the private repo:
+From GitHub:
 
 ```
 /plugin marketplace add teerakarna/session-exchange
 /plugin install session-exchange@session-exchange
 ```
 
-From a clone, which needs neither access nor auth, and is the better option while the repo is moving.
+From a clone, which is the better option while the repo is moving.
 Wherever you keep clones is where this goes; nothing in the plugin cares:
 
 ```
