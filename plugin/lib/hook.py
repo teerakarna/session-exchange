@@ -3,15 +3,16 @@
 What each event is for:
 
 - **SessionStart** - resolve the root, seed this session's claim, and inject whatever the root has
-  to say: problems, then who else is here, then the migration guard. Fires on startup, resume,
+  to say: problems, then who else is here, then what is waiting for this session, then the
+  migration guard. Fires on startup, resume,
   clear and compact, so it has to be safe to run repeatedly against state it may already have
   written.
 - **SessionEnd** - clear the claim. This is what makes "set your row to idle when you are done" stop
   depending on a session remembering to, which it reliably did not.
 
 `Stop` is deliberately not wired yet. Its job in the design is catching handoffs posted mid-session,
-and until handoff matching exists it could only spawn a process per turn to do nothing. It goes in
-with the matcher that gives it something to read.
+and the matcher it would call is now here; it goes in as its own change, since a hook on every turn
+is a cost every session pays and deserves its own review.
 """
 
 from __future__ import annotations
@@ -61,9 +62,8 @@ def session_start(data, root, lines):
     # duplicate rendering this plugin exists to stop, one layer down. See #31.
     if not registry.is_peer(known):
         return
-    _, problem = claims.seed(
-        root, session_id, data.get("cwd") or os.getcwd(), name=known.get("name")
-    )
+    cwd = data.get("cwd") or os.getcwd()
+    claim, problem = claims.seed(root, session_id, cwd, name=known.get("name"))
     if problem:
         lines.append(hookio.problem(problem))
 
@@ -79,9 +79,9 @@ def session_start(data, root, lines):
     # same silence one directory over - the live pre-#44 record on this machine is a handoff, and
     # it is reported by `show`, by `doctor`, and until now by nothing a session sees. The added
     # cost is one directory read plus one per handoff for its moves, which is the read `show`
-    # already does and which the handoff rendering that lands next needs anyway.
+    # already does and which the handoff rendering below needs anyway.
     held, problems = claims.load_all(root)
-    _, found = handoffs.load_all(root)
+    stored, found = handoffs.load_all(root)
     problems += found
     for problem in problems[:MAX_PROBLEMS]:
         lines.append(hookio.problem(problem))
@@ -96,9 +96,11 @@ def session_start(data, root, lines):
         )
 
     lines += presence(root, held, session_id, config, rows)
+    repos, paths = where(root, claim or {}, cwd)
+    lines += waiting(stored, session_id, repos, paths, config)
 
-    # Handoff rendering lands next. The migration guard stays last, after presence, because it is
-    # what tells the reader whether the block above is the only one of its kind in the context: a
+    # The migration guard stays last, after presence and handoffs, because it is what tells the
+    # reader whether the blocks above are the only ones of their kind in the context: a
     # half-migrated machine looks identical to a finished one at the output, and this line is the
     # only thing that distinguishes them.
     state = legacy.report(root)
@@ -170,6 +172,72 @@ def presence(root, held, session_id, config, rows):
             f"[{hookio.PREFIX}] {len(stale)} claim(s) left by sessions no longer running. "
             f"`exchange show` lists them; once sure they are gone, delete their files under "
             f"{store.printable(str(store.sessions_dir(root)))}"
+        )
+    return out
+
+
+def where(root, claim, cwd):
+    """The repos and paths a session is working in: what its claim says, and where its cwd is.
+
+    The cwd half is what makes a scope reach a session that never ran `exchange claim`, which is
+    most of them. Its repo is the enclosing git root, relative to the exchange root, and only when
+    it is under that root: a repo outside it has no name any handoff here could have used. A cwd
+    below the repo's top counts as a path too, since being in a directory is saying where you are.
+    """
+    repos, paths = list(claim.get("repos", ())), list(claim.get("paths", ()))
+    enclosing = exchange_root.git_root(cwd)
+    if enclosing is not None and (enclosing == root or root in enclosing.parents):
+        repos.append(str(enclosing.relative_to(root)))
+        inside = pathlib.Path(cwd).resolve().relative_to(enclosing)
+        if inside.parts:
+            paths.append(str(inside))
+    return repos, paths
+
+
+def waiting(stored, session_id, repos, paths, config):
+    """Handoffs not yet closed that are for this session, as context lines, and a count of the rest.
+
+    Newest first under `max_handoffs_listed`, for the reason `exchange handoff list` gives: the one
+    posted a minute ago is the one nobody has read. What the cap leaves out is counted.
+
+    Accepted as well as open, because accepted is somebody having taken it on, and that somebody is
+    often this session again after a resume. A session is not shown what it posted itself.
+
+    The rest are counted, never listed. A handoff for a scope this session is not in is somebody
+    else's to read, and listing them all here would bury the ones that are this session's; counting
+    them is what keeps a matcher that has gone wrong from reading as a quiet root.
+    """
+    pending = [pair for pair in stored if pair[1] != handoffs.CLOSED]
+    mine = [
+        (record, status)
+        for record, status in pending
+        if record["from"].get("session_id") != session_id
+        and handoffs.addressed_to(record["to"], session_id, repos, paths)
+    ]
+    mine.sort(key=lambda pair: (pair[0]["created"], pair[0]["id"]), reverse=True)
+    shown = mine[: config["max_handoffs_listed"]]
+    width = config["max_focus_chars"]
+    out = []
+    if shown:
+        out.append(
+            f"[{hookio.PREFIX}] {len(mine)} handoff(s) for this session, newest first. "
+            "`exchange handoff accept <id>` takes one on:"
+        )
+        for record, status in shown:
+            out.append(
+                f"- {record['id']} ({status}) from {handoffs.describe_sender(record, width)}, "
+                f"to {handoffs.describe(record['to'], width)}: "
+                f"{handoffs.preview(record['body'], width)}"
+            )
+        if len(mine) > len(shown):
+            out.append(
+                f"  +{len(mine) - len(shown)} older not shown: `exchange handoff list` has them"
+            )
+    elsewhere = len(pending) - len(mine)
+    if elsewhere:
+        out.append(
+            f"[{hookio.PREFIX}] {elsewhere} other handoff(s) not closed under this root, not for "
+            "this session. `exchange handoff list` shows them."
         )
     return out
 

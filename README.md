@@ -10,12 +10,11 @@ registry Claude Code already maintains, and the only files it writes are its own
 deliberately.
 
 **Status: early, installable, not yet load-bearing.** Root resolution, both hooks, and
-`init | show | claim | doctor | handoff` all work. Presence is delivered end to end; handoffs are
-not. Nothing matches a handoff to a recipient yet, so a posted one is only seen by somebody who
-thinks to run `exchange handoff list`, which is the failure this project replaces rather than a use
-of it. Handoff matching and the import out of the existing markdown ledger are both unbuilt, and
-`Stop` stays deliberately unwired until the matcher gives it something to read. Seven migration
-steps, three done; `doctor` prints all seven derived from live state.
+`init | show | claim | doctor | handoff` all work. Presence and handoffs are both delivered at
+session start: a handoff reaches the sessions working in the scope it was addressed to. One posted
+mid-session waits for the recipient's next start, because `Stop` is not wired yet, and the import out
+of the existing markdown ledger is unbuilt. Seven migration steps, three done; `doctor` prints all
+seven derived from live state.
 
 ## Why
 

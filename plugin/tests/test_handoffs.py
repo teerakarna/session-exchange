@@ -788,6 +788,78 @@ with tempfile.TemporaryDirectory() as tmp:
         (2, 1, True),
     )
 
+print("matching a handoff to a session")
+
+# #62, one check per spelling rather than one per branch: every one of these passes `scope_fault`,
+# and a matcher comparing them as strings misses the session claiming the same directory.
+for written in ("plugin/lib", "./plugin/lib", "plugin/lib/", "plugin//lib", "./plugin/./lib/"):
+    check(f"{written!r} is spelt plugin/lib", handoffs.spelling(written), "plugin/lib")
+check("'.' is the whole of what it is relative to", handoffs.spelling("."), "")
+check("case is kept", handoffs.spelling("Plugin/Lib"), "Plugin/Lib")
+check("a leading-dot name is not a '.' component", handoffs.spelling(".github/x"), ".github/x")
+
+to = {"repo": "./repo-one/", "paths": ["plugin//lib"]}
+check(
+    "the repo is compared by spelling on both sides",
+    handoffs.addressed_to({"repo": "repo-one/"}, "s", ["./repo-one"], []),
+    True,
+)
+check(
+    "a different repo is not the same one",
+    handoffs.addressed_to({"repo": "repo-one"}, "s", ["repo-two"], []),
+    False,
+)
+check(
+    "nor is a repo whose name only starts the same",
+    handoffs.addressed_to({"repo": "repo"}, "s", ["repo-one"], []),
+    False,
+)
+check(
+    "a path inside the one addressed is working on it",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["plugin/lib/hook.py"]),
+    True,
+)
+check(
+    "and so is a path that contains it",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["./plugin"]),
+    True,
+)
+check(
+    "a sibling is not, even one sharing a prefix of characters",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["plugin/lib2", "docs"]),
+    False,
+)
+check(
+    "any one overlapping path of several is enough",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["docs", "plugin/lib/x"]),
+    True,
+)
+check(
+    "a session that named no paths is not narrowed out of its repo",
+    handoffs.addressed_to(to, "s", ["repo-one"], []),
+    True,
+)
+check(
+    "nor is anyone by a handoff that named none",
+    handoffs.addressed_to({"repo": "repo-one"}, "s", ["repo-one"], ["docs"]),
+    True,
+)
+check(
+    "paths do not reach a session in another repo",
+    handoffs.addressed_to(to, "s", ["repo-two"], ["plugin/lib"]),
+    False,
+)
+check(
+    "a session-addressed handoff reaches that session",
+    handoffs.addressed_to({"session_id": "s"}, "s", [], []),
+    True,
+)
+check(
+    "and no other, whatever scope it is in",
+    handoffs.addressed_to({"session_id": "s"}, "t", ["repo-one"], ["plugin"]),
+    False,
+)
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")

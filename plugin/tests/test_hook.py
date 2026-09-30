@@ -1061,6 +1061,7 @@ check("and a payload too nested to decode is no payload, not a RecursionError", 
 
 print("a hook may not take a session down with it")
 
+import handoffs  # noqa: E402
 import hook  # noqa: E402
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -1221,6 +1222,152 @@ with tempfile.TemporaryDirectory() as tmp:
         "the stale line's path is stripped too",
         (len(stale), "\x1b" in "".join(stale), "weird" in "".join(stale)),
         (1, False, True),
+    )
+
+
+def handoff_fixture(tmp, **marker):
+    """A root with one handoff per way of being, or not being, for the session `me`.
+
+    `me` sits in `repo/plugin` and has claimed nothing, which is the ordinary session: everything
+    that reaches it has to reach it from its cwd alone.
+    """
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    (root / ".claude" / "exchange.json").write_text(json.dumps({"name": "area", **marker}))
+    (repo / "plugin").mkdir()
+    register(home, "me", os.getpid())
+
+    def post(handoff_id, to, minute, status=None, **sender):
+        _, problem = handoffs.post(
+            root,
+            to,
+            f"body of {handoff_id}",
+            str(root),
+            handoff_id=handoff_id,
+            at=f"2026-09-30T01:{minute:02d}:00Z",
+            **sender,
+        )
+        assert problem is None, problem
+        if status:
+            handoffs.set_status(root, handoff_id, status, by="someone")
+
+    post("h-spelt", {"repo": "./repo/"}, 1)
+    post("h-narrowed-in", {"repo": "repo", "paths": ["plugin//lib"]}, 2)
+    post("h-named", {"session_id": "me"}, 3)
+    post("h-narrowed-out", {"repo": "repo", "paths": ["docs"]}, 4)
+    post("h-other-repo", {"repo": "other"}, 5)
+    post("h-closed", {"repo": "repo"}, 6, status=handoffs.CLOSED)
+    post("h-own", {"repo": "repo"}, 7, session_id="me")
+    post("h-someone", {"session_id": "someone"}, 8)
+    post("h-accepted", {"repo": "repo"}, 9, status=handoffs.ACCEPTED, name="pane-\x1bx")
+    return home, root, repo
+
+
+print("handoffs for this session, matched from where it is")
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo / "plugin")}, home)
+    rows = context_rows(out)
+    listed = [r.split()[1] for r in rows if r.startswith("- h-")]
+    check(
+        "every handoff for this session is listed, newest first, and nothing else is",
+        listed,
+        ["h-accepted", "h-named", "h-narrowed-in", "h-spelt"],
+    )
+    check(
+        "under a heading that counts them and says how to take one on",
+        "[session-exchange] 4 handoff(s) for this session, newest first. "
+        "`exchange handoff accept <id>` takes one on:" in rows,
+        True,
+    )
+    check(
+        "each row gives status, a stripped sender, the scope and the body's first line",
+        "- h-accepted (accepted) from pane-x, to repo: body of h-accepted" in rows,
+        True,
+    )
+    check(
+        "the rest not closed are counted: another repo, narrowed out, its own, another session",
+        "[session-exchange] 4 other handoff(s) not closed under this root, not for this session. "
+        "`exchange handoff list` shows them." in rows,
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp, max_handoffs_listed=2, max_focus_chars=12)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo / "plugin")}, home)
+    rows = context_rows(out)
+    check(
+        "the marker's cap keeps the newest and counts the rest",
+        (
+            [r.split()[1] for r in rows if r.startswith("- h-")],
+            "  +2 older not shown: `exchange handoff list` has them" in rows,
+        ),
+        (["h-accepted", "h-named"], True),
+    )
+    check(
+        "and the marker's width bounds the body",
+        any(r.startswith("- h-named") and r.endswith("body of h-na +3 more chars") for r in rows),
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # At the repo's top, so the cwd says nothing narrower than the repo - and a claimed path, which
+    # is then the only thing that can narrow.
+    put_claim(root, "me", paths=["docs/./"])
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check(
+        "a claimed path narrows in and out the same way a cwd does",
+        ("h-narrowed-out" in listed, "h-narrowed-in" in listed, "h-spelt" in listed),
+        (True, False, True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # Under the root but in no repo, and claiming one by a spelling the handoff did not use.
+    put_claim(root, "me", repos=["repo/"])
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(root)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check(
+        "a claimed repo reaches a session whose cwd is in none",
+        listed,
+        ["h-accepted", "h-narrowed-out", "h-named", "h-narrowed-in", "h-spelt"],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(root)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check("in no repo and claiming none, only what names the session", listed, ["h-named"])
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # A root that is itself a repo, which `.` addresses. The enclosing git root is then the root,
+    # and its name relative to itself is the one a `.` spells to.
+    (root / ".git").mkdir()
+    handoffs.post(root, {"repo": "."}, "the whole thing", str(root), handoff_id="h-root")
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(root)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check("a root that is a repo is reached by '.'", "h-root" in listed, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # Pointed at the root by the override from a repo that is not under it. That repo has no name
+    # relative to the root, so nothing scope-addressed is for it - and asking for one is a
+    # ValueError, which the hook would report as the whole start having failed.
+    outside = pathlib.Path(tmp).resolve() / "outside"
+    (outside / ".git").mkdir(parents=True)
+    code, out = run(
+        "SessionStart",
+        {"session_id": "me", "cwd": str(outside)},
+        home,
+        env={"CC_EXCHANGE_ROOT": str(root)},
+    )
+    rows = context_rows(out)
+    check(
+        "a repo outside the root is no repo, not an exception",
+        ([r.split()[1] for r in rows if r.startswith("- h-")], any("Error" in r for r in rows)),
+        (["h-named"], False),
     )
 
 print("presence comes before the migration guard that refers to it")
