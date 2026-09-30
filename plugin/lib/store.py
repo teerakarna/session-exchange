@@ -310,16 +310,25 @@ def read_json(path, schema=None):
     for ten days.
     """
     path = pathlib.Path(path)
+    # Stripped, because the problem reaches `show`, `handoff list` and the session start, and the
+    # name is whatever is on disk. Every name this plugin writes went through `safe_id`, so one that
+    # carries an escape came from an importer, a hand edit or another tool - text the reader did not
+    # write, which is the #47 boundary. See #60.
+    #
+    # Not `exc`, though #60 asked for it: an `OSError` carries the path again, but as a repr, so an
+    # escape in it arrives as the four characters `\x1b` and never as the byte. Stripping it would
+    # be a rule no input could tell from its absence, and a check in the tests says so instead.
+    name = printable(path.name)
     try:
         obj = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None, None
     except (OSError, ValueError) as exc:
-        return None, f"{path.name} could not be read: {exc}"
+        return None, f"{name} could not be read: {exc}"
     if schema is not None:
-        problems = validate.validate(obj, schema, path.name)
+        problems = validate.validate(obj, schema, name)
         if problems:
-            return None, f"{path.name} is invalid: " + "; ".join(problems)
+            return None, f"{name} is invalid: " + "; ".join(problems)
     return obj, None
 
 
@@ -404,9 +413,9 @@ def litter(root):
         problems += faults
         for path in found:
             problems.append(
-                f"{directory.name}/{path.name} is a half-written file left behind by a writer that "
-                "was killed; readers skip it, so whatever it was going to say did not get said. "
-                "Safe to delete."
+                f"{printable(directory.name)}/{printable(path.name)} is a half-written file left "
+                "behind by a writer that was killed; readers skip it, so whatever it was going to "
+                "say did not get said. Safe to delete."
             )
     return problems
 
