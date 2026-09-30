@@ -90,6 +90,9 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   returns the schema defaults and no problem in that case, which is right for a renderer and was
   being printed as though a file had been read; the line also contradicted step 5 immediately below
   it. Reachable only through `CC_EXCHANGE_ROOT`, since the walk finds a root by finding the marker.
+- A store filename is stripped before it reaches a problem line, in `show`, `handoff list` and the
+  session start. Every name this plugin writes is safe already, so this is for a file an importer, a
+  hand edit or another tool put there (#60).
 
 ### Not built yet
 

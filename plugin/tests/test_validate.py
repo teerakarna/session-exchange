@@ -215,6 +215,16 @@ def keywords(schema, seen):
     return seen
 
 
+# #60. A key under `additionalProperties` came out of the file, not the schema, and its problem is
+# rendered at session start, so it is quoted rather than spliced into the location raw.
+problems = validate.validate({"a\033[2Kb": 1}, {"additionalProperties": {"type": "string"}}, "x")
+check(
+    "a key the file supplied is quoted in the location, not spliced in raw",
+    [("\033" in p, p.startswith("x.'a\\x1b[2Kb': ")) for p in problems],
+    [(False, True)],
+)
+
+
 used = set()
 for name in ("exchange", "claim", "handoff", "transition"):
     keywords(validate.load(name), used)

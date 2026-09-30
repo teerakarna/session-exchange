@@ -520,6 +520,50 @@ check(
 check("an empty list field is not a special case", claims.describe_list([]), [])
 
 print()
+print("a store filename in a problem line, which nothing this plugin wrote (#60)")
+with tempfile.TemporaryDirectory() as tmp:
+    base = pathlib.Path(tmp)
+    unparsed = base / "bad\033[2Kname.json"
+    unparsed.write_text("{not json")
+    _, problem = store.read_json(unparsed)
+    check(
+        "a file that does not parse is named without the escape",
+        ("\033" in problem, problem.startswith("bad[2Kname.json could not be read: ")),
+        (False, True),
+    )
+    unopened = base / "dir\033[2K.json"
+    unopened.mkdir()
+    _, problem = store.read_json(unopened)
+    check(
+        "and one that cannot be opened, whose error carries the path again, but as a repr",
+        ("\033" in problem, "dir\\x1b[2K.json" in problem),
+        (False, True),
+    )
+    invalid = base / "odd\033[2K.json"
+    invalid.write_text("{}")
+    _, problem = store.read_json(invalid, CLAIM_SCHEMA)
+    check(
+        "and one that parses and is invalid, in the prefix and in every problem after it",
+        ("\033" in problem, problem.startswith("odd[2K.json is invalid: odd[2K.json")),
+        (False, True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp)
+    sessions = store.sessions_dir(root)
+    sessions.mkdir(parents=True)
+    (sessions / f"{store.TMP_PREFIX}1-x\033[2K.json").write_text("{")
+    moves = store.handoffs_dir(root) / "y\033[2K.d"
+    moves.mkdir(parents=True)
+    (moves / f"{store.TMP_PREFIX}1-z.json").write_text("{")
+    litter = store.litter(root)
+    check(
+        "a half-written file is named stripped, and so is a moves directory holding one",
+        sorted(("\033" in line, line.split(" ", 1)[0]) for line in litter),
+        [(False, "sessions/.tmp-1-x[2K.json"), (False, "y[2K.d/.tmp-1-z.json")],
+    )
+
+print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
     raise SystemExit(1)

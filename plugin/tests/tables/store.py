@@ -52,7 +52,7 @@ MUTATIONS = [
         rule="a file that exists and does not parse is never reported as absent",
         old=(
             "    except (OSError, ValueError) as exc:\n"
-            '        return None, f"{path.name} could not be read: {exc}"'
+            '        return None, f"{name} could not be read: {exc}"'
         ),
         new="    except (OSError, ValueError):\n        return None, None",
         caught_by="test_store_claims.py",
@@ -219,5 +219,33 @@ MUTATIONS = [
         old="    if extra <= 0:\n        return shown\n    return f",
         new="    if True:\n        return shown\n    return f",
         caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="store",
+        rule="a filename in a read problem is stripped, since this plugin may not have written it",
+        old="    name = printable(path.name)",
+        new="    name = path.name",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="and the name each schema problem is prefixed with",
+        old="        problems = validate.validate(obj, schema, name)",
+        new="        problems = validate.validate(obj, schema, path.name)",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="a half-written file is named stripped",
+        old="{printable(directory.name)}/{printable(path.name)} is a half-written file left ",
+        new="{printable(directory.name)}/{path.name} is a half-written file left ",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="and so is the directory it was found in, which for a moves directory came off disk",
+        old="{printable(directory.name)}/{printable(path.name)} is a half-written",
+        new="{directory.name}/{printable(path.name)} is a half-written",
+        caught_by="test_store_claims.py",
     ),
 ]
