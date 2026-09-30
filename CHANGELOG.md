@@ -98,7 +98,6 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   left the hooks running a copy from before `handoffs.py` existed while reporting it as the latest.
   release-please now moves that version with every release, and `doctor` opens with the running
   version and the directory it runs from, which says in one line whether it is the cache (#49).
-
 - `claim` from inside a background job is refused instead of overwriting the focus of the session
   that started it. `--session` still claims as that session on purpose (#68).
 

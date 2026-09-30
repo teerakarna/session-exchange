@@ -381,18 +381,22 @@ with tempfile.TemporaryDirectory() as tmp:
         f"plugin    {version}, running from {PLUGIN}",
     )
 
-# A manifest missing, unparseable, with no version, or not an object: a broken install rather than a
-# reason to stop, and each one a different exception on the way to saying so.
-for label, manifest in (
-    ("missing", None),
-    ("not JSON", "{"),
-    ("with no version", "{}"),
-    ("not an object", "[]"),
+# A manifest missing, unparseable, too deep to parse, with no version, not an object, or with a
+# version that is not a string: a broken install rather than a reason to stop, each one a different
+# way there, and the whole line asserted so the path it names is checked on this branch too.
+for label, manifest, want in (
+    ("missing", None, "version unreadable (FileNotFoundError)"),
+    ("not JSON", "{", "version unreadable (JSONDecodeError)"),
+    ("nested past the parser", "[" * 200000, "version unreadable (RecursionError)"),
+    ("with no version", "{}", "version unreadable (KeyError)"),
+    ("not an object", "[]", "version unreadable (TypeError)"),
+    ("with a null version", '{"version": null}', "version unreadable (TypeError)"),
+    ("with an escape in the version", '{"version": "0.0.1\\u001b[2K"}', "0.0.1[2K"),
 ):
     with tempfile.TemporaryDirectory() as tmp:
         home, area, repo = fixture(tmp)
         run(home, repo, "init")
-        bare = pathlib.Path(tmp) / "bare"
+        bare = pathlib.Path(tmp).resolve() / "bare"
         for part in ("lib", "schemas"):
             shutil.copytree(PLUGIN / part, bare / part)
         if manifest is not None:
@@ -407,9 +411,9 @@ for label, manifest in (
         )
         first = (done.stdout.splitlines() or [""])[0]
         check(
-            f"a manifest {label} is said, and doctor carries on",
-            (first.startswith("plugin    version unreadable ("), "by marker" in done.stdout),
-            (True, True),
+            f"a manifest {label} is said as such, and doctor carries on",
+            (first, "by marker" in done.stdout),
+            (f"plugin    {want}, running from {bare}", True),
         )
 
 with tempfile.TemporaryDirectory() as tmp:

@@ -320,12 +320,14 @@ def _running():
     """
     plugin = pathlib.Path(__file__).resolve().parents[1]
     try:
-        version = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text("utf-8"))[
-            "version"
-        ]
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+        manifest = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text("utf-8"))
+        version = manifest["version"]
+        # A `null` would print as `None`, which reads like an answer to "which copy is this".
+        if not isinstance(version, str):
+            raise TypeError(type(version).__name__)
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
         return f"plugin    version unreadable ({type(exc).__name__}), running from {plugin}"
-    return f"plugin    {version}, running from {plugin}"
+    return f"plugin    {store.printable(version)}, running from {plugin}"
 
 
 def cmd_doctor(args):
