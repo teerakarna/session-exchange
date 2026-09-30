@@ -11,6 +11,7 @@ own session id and matching on cwd picks the wrong session the moment two of the
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -371,6 +372,37 @@ with tempfile.TemporaryDirectory() as tmp:
     check("prints the checks it cannot answer rather than skipping them", "[?]" in out, True)
     check("says why each one is unanswerable", "not checkable here" in out, True)
     check("no legacy scripts in this synthetic home", "0 script(s) on disk" in out, True)
+    # #49. The host caches an install by this version, so it is the one thing that says which copy
+    # is running, and the path says whether that is the cache or a clone.
+    version = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())["version"]
+    check(
+        "names the running version and where it runs from, first",
+        out.splitlines()[0],
+        f"plugin    {version}, running from {PLUGIN}",
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # A copy with no manifest beside it, which is a broken install rather than a reason to stop.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    bare = pathlib.Path(tmp) / "bare"
+    for part in ("lib", "schemas"):
+        shutil.copytree(PLUGIN / part, bare / part)
+    done = subprocess.run(
+        [sys.executable, str(bare / "lib" / "cli.py"), "--cwd", str(repo), "doctor"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "HOME": str(home), "CC_EXCHANGE_ROOT": ""},
+    )
+    check(
+        "a manifest it cannot read is said, and doctor carries on",
+        (
+            done.stdout.splitlines()[0].startswith("plugin    version unreadable ("),
+            "by marker" in done.stdout,
+        ),
+        (True, True),
+    )
 
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)

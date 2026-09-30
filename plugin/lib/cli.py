@@ -11,6 +11,7 @@ that does not exist must not report success, and it must not look like a fault e
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import sys
@@ -309,7 +310,27 @@ def _steps(root):
     ]
 
 
+def _running():
+    """What the plugin that is running says it is, and where it is running from.
+
+    The host caches an install by the version declared in `plugin.json`, so a version that does not
+    move is an update that never reaches the copy the hooks run, while the host reports it as the
+    latest (#49). The cached copy has no `.git`, so the version and the path are all it can say
+    about itself, and the path is what shows a cache directory rather than the clone.
+    """
+    plugin = pathlib.Path(__file__).resolve().parents[1]
+    try:
+        version = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text("utf-8"))[
+            "version"
+        ]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return f"plugin    version unreadable ({type(exc).__name__}), running from {plugin}"
+    return f"plugin    {store.printable(str(version))}, running from {plugin}"
+
+
 def cmd_doctor(args):
+    # Before the root, because a stale install is worth knowing about whether or not there is one.
+    print(_running())
     resolution = _resolved(args)
     if resolution is None:
         return 1

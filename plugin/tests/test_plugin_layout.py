@@ -43,6 +43,12 @@ check("the plugin manifest parses", problem, None)
 check("the marketplace lists exactly one plugin", len(marketplace["plugins"]), 1)
 listed = marketplace["plugins"][0]
 check("and its name matches the manifest", listed["name"], manifest["name"])
+# #49. The host caches an install by this, and CI compares it as numbers to require that it moved.
+check(
+    "the version is three dot-separated numbers",
+    bool(re.fullmatch(r"\d+\.\d+\.\d+", str(manifest.get("version")))),
+    True,
+)
 source = (REPO / listed["source"]).resolve()
 check("and its source points at the plugin directory", source, PLUGIN)
 
