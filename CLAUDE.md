@@ -54,8 +54,8 @@ from live state, which is the one copy that cannot go stale.
 
 ## Things left undone on purpose, so do not "fix" them
 
-- **`Stop` is unwired.** Its only job is catching handoffs posted mid-session and the matcher is step 4.
-  Wiring it now spawns a process per turn to no-op.
+- **`Stop` is unwired.** Its only job is catching handoffs posted mid-session. The matcher it would call
+  exists, but a hook on every turn is a cost every session pays, so it goes in as its own reviewed change.
 - **`handoff` and `migrate` exit 2** and name the step that builds them. Exit 2 is neither success nor
   fault.
 - **No `pyproject.toml`.** Nothing pip-installs this and there is no distribution to build, so

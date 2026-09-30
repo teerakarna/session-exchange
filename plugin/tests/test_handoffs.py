@@ -103,34 +103,34 @@ check("and a session scope reads as one", handoffs.describe({"session_id": "s"},
 check(
     "an absolute repo is refused, naming the flag and the shape",
     handoffs.to_scope(repo="/etc")[1],
-    "--repo is relative to the root, so it cannot start with /: /etc",
+    "--repo is a relative path, so it cannot start with /: /etc",
 )
 check(
     "so is one that climbs out, and it is a different message because it is a different mistake",
     handoffs.to_scope(repo="../../../../etc")[1],
-    "--repo cannot climb out of the root with ..: ../../../../etc",
+    "--repo cannot use .. to climb out: ../../../../etc",
 )
 check(
     "a .. anywhere in the repo counts, not only at the front",
     handoffs.to_scope(repo="a/../../b")[1],
-    "--repo cannot climb out of the root with ..: a/../../b",
+    "--repo cannot use .. to climb out: a/../../b",
 )
 # The half a guard written for `repo` alone leaves behind. Separate checks per shape and per field,
 # because one check over a loop passes as soon as any element is refused.
 check(
     "a path that climbs out is refused too, with a repo that is fine",
     handoffs.to_scope(repo="ok", paths=["../../etc"])[1],
-    "--path cannot climb out of the root with ..: ../../etc",
+    "--path cannot use .. to climb out: ../../etc",
 )
 check(
     "and an absolute one",
     handoffs.to_scope(repo="ok", paths=["/etc"])[1],
-    "--path is relative to the root, so it cannot start with /: /etc",
+    "--path is a relative path, so it cannot start with /: /etc",
 )
 check(
     "a later path is reached, so the loop does not stop at the first element",
     handoffs.to_scope(repo="ok", paths=["fine", "also/fine", "../out"])[1],
-    "--path cannot climb out of the root with ..: ../out",
+    "--path cannot use .. to climb out: ../out",
 )
 check(
     "a refused scope returns no scope, so a caller ignoring the problem writes nothing",
@@ -842,6 +842,16 @@ check(
 check(
     "nor is anyone by a handoff that named none",
     handoffs.addressed_to({"repo": "repo-one"}, "s", ["repo-one"], ["docs"]),
+    True,
+)
+check(
+    "a session on '.' is working on every path in its repo",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["./"]),
+    True,
+)
+check(
+    "and a handoff for '.' is for every path in it",
+    handoffs.addressed_to({"repo": "repo-one", "paths": ["."]}, "s", ["repo-one"], ["docs"]),
     True,
 )
 check(

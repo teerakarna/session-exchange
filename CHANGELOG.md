@@ -16,10 +16,14 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   claimed scope, capped per the marker. A claim whose session is no longer running is counted, not
   shown as current, and a session alone under its root is injected nothing (#79).
 - `SessionStart` renders the handoffs not yet closed that are for this session, newest first under
-  `max_handoffs_listed`, and counts the rest. A handoff is for a session named by its `session_id`,
-  or working in its repo - claimed, or the repo its cwd is in - with `paths` narrowing that only for
-  a session that has said where it is. Scopes are compared after normalising both sides, so
+  `max_handoffs_listed`, and counts what the cap leaves out. A handoff is for a session named by its
+  `session_id`, or working in its repo - claimed, or the repo its cwd is in, a linked worktree
+  counting as its main repo - with `paths` narrowing that only for a session that claimed a path.
+  Where in the repo the cwd is narrows nothing. Handoffs for other sessions are not mentioned;
+  `exchange handoff list` has them. Scopes are compared after normalising both sides, so
   `./plugin/lib/` and `plugin/lib` are one scope, and records keep what their writer typed (#62).
+- A scope refused for a leading `/` or a `..` no longer says it is relative to the root, which was
+  wrong for `--path`: that is relative to the repo.
 - `SessionEnd` clears the claim, so a stale row is not something anybody has to remember to delete.
 - `exchange init | show | claim | doctor`. `init` refuses a directory whose sibling children are
   themselves workspaces, because marking that would show each of them the others' sessions.

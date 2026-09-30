@@ -656,4 +656,19 @@ MUTATIONS = [
         new="    return all(\n        _overlaps(",
         caught_by="test_handoffs.py",
     ),
+    # `"".split("/")` is `[""]`, one empty component, which overlaps nothing but another empty one.
+    Mutation(
+        module="handoffs",
+        rule="a held path of '.' is the whole repo, not a component named ''",
+        old='other.split("/") if other else []',
+        new='other.split("/")',
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="and so is a wanted one",
+        old='one.split("/") if one else []',
+        new='one.split("/")',
+        caught_by="test_handoffs.py",
+    ),
 ]

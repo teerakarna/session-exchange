@@ -1229,7 +1229,7 @@ def handoff_fixture(tmp, **marker):
     """A root with one handoff per way of being, or not being, for the session `me`.
 
     `me` sits in `repo/plugin` and has claimed nothing, which is the ordinary session: everything
-    that reaches it has to reach it from its cwd alone.
+    that reaches it has to reach it from its cwd alone, and being in `plugin` narrows nothing.
     """
     home, root, repo = fixture(tmp, wire_legacy=False)
     (root / ".claude" / "exchange.json").write_text(json.dumps({"name": "area", **marker}))
@@ -1271,11 +1271,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "every handoff for this session is listed, newest first, and nothing else is",
         listed,
-        ["h-accepted", "h-named", "h-narrowed-in", "h-spelt"],
+        ["h-accepted", "h-narrowed-out", "h-named", "h-narrowed-in", "h-spelt"],
     )
     check(
         "under a heading that counts them and says how to take one on",
-        "[session-exchange] 4 handoff(s) for this session, newest first. "
+        "[session-exchange] 5 handoff(s) for this session, newest first. "
         "`exchange handoff accept <id>` takes one on:" in rows,
         True,
     )
@@ -1285,10 +1285,9 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
     check(
-        "the rest not closed are counted: another repo, narrowed out, its own, another session",
-        "[session-exchange] 4 other handoff(s) not closed under this root, not for this session. "
-        "`exchange handoff list` shows them." in rows,
-        True,
+        "and the ones for somebody else are not mentioned at all",
+        [r for r in rows if "handoff" in r and not r.startswith(("- h-", "[session-exchange] 5"))],
+        [],
     )
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -1299,25 +1298,47 @@ with tempfile.TemporaryDirectory() as tmp:
         "the marker's cap keeps the newest and counts the rest",
         (
             [r.split()[1] for r in rows if r.startswith("- h-")],
-            "  +2 older not shown: `exchange handoff list` has them" in rows,
+            "  +3 older not shown: `exchange handoff list` has them" in rows,
         ),
-        (["h-accepted", "h-named"], True),
+        (["h-accepted", "h-narrowed-out"], True),
     )
     check(
         "and the marker's width bounds the body",
-        any(r.startswith("- h-named") and r.endswith("body of h-na +3 more chars") for r in rows),
+        any(
+            r.startswith("- h-narrowed-out") and r.endswith("body of h-na +10 more chars")
+            for r in rows
+        ),
         True,
     )
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = handoff_fixture(tmp)
-    # At the repo's top, so the cwd says nothing narrower than the repo - and a claimed path, which
-    # is then the only thing that can narrow.
-    put_claim(root, "me", paths=["docs/./"])
+    # Two posted in the same second, which the id orders so the listing is stable across runs.
+    for handoff_id in ("h-tie-a", "h-tie-b"):
+        handoffs.post(
+            root,
+            {"repo": "repo"},
+            "tied",
+            str(root),
+            handoff_id=handoff_id,
+            at="2026-09-30T02:00:00Z",
+        )
     code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
     listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
     check(
-        "a claimed path narrows in and out the same way a cwd does",
+        "a tie on time is broken by id, newest-first the same way",
+        listed[:2],
+        ["h-tie-b", "h-tie-a"],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # Below the repo's top, in `plugin`, which is not what narrows: the claimed path is.
+    put_claim(root, "me", paths=["docs/./"])
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo / "plugin")}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check(
+        "a claimed path narrows, and the cwd does not",
         ("h-narrowed-out" in listed, "h-narrowed-in" in listed, "h-spelt" in listed),
         (True, False, True),
     )
@@ -1366,6 +1387,91 @@ with tempfile.TemporaryDirectory() as tmp:
     rows = context_rows(out)
     check(
         "a repo outside the root is no repo, not an exception",
+        ([r.split()[1] for r in rows if r.startswith("- h-")], any("Error" in r for r in rows)),
+        (["h-named"], False),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # A claim on disk that the seed then cannot rewrite, because its directory is read-only. The
+    # claim still says where the session is working, and the start still says the seed failed.
+    put_claim(root, "me", repos=["repo"])
+    sessions = root / ".claude" / "exchange" / "sessions"
+    sessions.chmod(0o500)
+    try:
+        code, out = run("SessionStart", {"session_id": "me", "cwd": str(root)}, home)
+    finally:
+        sessions.chmod(0o700)
+    rows = context_rows(out)
+    check(
+        "a claim that could not be reseeded still places the session",
+        (
+            "h-spelt" in [r.split()[1] for r in rows if r.startswith("- h-")],
+            any("refusing to write" in r or "could not" in r for r in rows),
+        ),
+        (True, True),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # No session id in the payload, and a handoff whose sender had none either. `None` is not an
+    # identity, so it does not make the handoff this session's own.
+    handoffs.post(root, {"repo": "repo"}, "anonymous", str(root), handoff_id="h-anon")
+    code, out = run("SessionStart", {"cwd": str(repo)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check("a session with no id is not shown nothing for it", "h-anon" in listed, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # A linked worktree beside the repo, its `.git` a file pointing into the repo's own `.git`, by a
+    # relative path - which is how `git worktree add` writes it with `worktree.useRelativePaths`.
+    (repo / ".git" / "worktrees" / "wt").mkdir(parents=True, exist_ok=True)
+    tree = root / "wt"
+    tree.mkdir()
+    (tree / ".git").write_text("gitdir: ../repo/.git/worktrees/wt\n")
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(tree)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check("a worktree is in the repo it belongs to", "h-spelt" in listed, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # A submodule's `.git` is a file too, into `.git/modules`, and it is a repo of its own.
+    (repo / ".git" / "modules" / "sub").mkdir(parents=True, exist_ok=True)
+    sub = repo / "sub"
+    sub.mkdir()
+    (sub / ".git").write_text("gitdir: ../.git/modules/sub\n")
+    handoffs.post(root, {"repo": "repo/sub"}, "for the submodule", str(root), handoff_id="h-sub")
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(sub)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check(
+        "a submodule is its own repo, not its superproject",
+        ("h-sub" in listed, "h-spelt" in listed),
+        (True, False),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # A bare repo's worktree, which points into `bare.git/worktrees`. There is no main tree to be
+    # in, and taking the bare repo's parent for one would make it the root, which `.` addresses.
+    (root / "bare.git" / "worktrees" / "wt").mkdir(parents=True)
+    tree = root / "wt"
+    tree.mkdir()
+    (tree / ".git").write_text("gitdir: ../bare.git/worktrees/wt\n")
+    handoffs.post(root, {"repo": "."}, "the whole thing", str(root), handoff_id="h-root")
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(tree)}, home)
+    listed = [r.split()[1] for r in context_rows(out) if r.startswith("- h-")]
+    check("a bare repo's worktree is not taken for the root", "h-root" in listed, False)
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    # A `.git` file holding a NUL, which `resolve` refuses with a ValueError rather than an OSError.
+    tree = root / "odd"
+    tree.mkdir()
+    (tree / ".git").write_text("gitdir: \x00\n")
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(tree)}, home)
+    rows = context_rows(out)
+    check(
+        "an unreadable .git file is the tree as found, not a failed start",
         ([r.split()[1] for r in rows if r.startswith("- h-")], any("Error" in r for r in rows)),
         (["h-named"], False),
     )

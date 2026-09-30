@@ -397,17 +397,17 @@ print("a scope path, which is the same two fields on a handoff and on a claim")
 check(
     "an absolute repo is refused, the field being relative to the root",
     store.scope_fault("--repo", "/etc"),
-    "--repo is relative to the root, so it cannot start with /: /etc",
+    "--repo is a relative path, so it cannot start with /: /etc",
 )
 check(
     "a repo that climbs out with .. is refused, with the other message",
     store.scope_fault("--repo", "../../etc"),
-    "--repo cannot climb out of the root with ..: ../../etc",
+    "--repo cannot use .. to climb out: ../../etc",
 )
 check(
     "a .. anywhere in the path is refused, not only at the front",
     store.scope_fault("--path", "a/../../b"),
-    "--path cannot climb out of the root with ..: a/../../b",
+    "--path cannot use .. to climb out: a/../../b",
 )
 # The shape the other two made necessary: a tab is a legal filename character, so the guard passed
 # it and every renderer then displayed `/etc`, which is the string the first check above refuses.
