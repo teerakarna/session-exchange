@@ -181,12 +181,21 @@ def cmd_claim(args):
     # the reason #31 gives and which nothing renders. `--session` is there for doing it on purpose.
     nearest = None if args.session else registry.own_entry(peers_only=False)
     if nearest and not registry.is_peer(nearest):
-        spawner = registry.own_entry() or {}
+        spawner = registry.own_entry()
+        if not spawner:
+            print(
+                "problem: this is a background job, and no session above it is in the registry, "
+                "so there is no session to claim for. A claim says what a session is doing, so "
+                "the session makes it."
+            )
+            return 1
+        name = store.printable(str(spawner.get("name") or ""))
+        spawner_id = store.printable(str(spawner.get("sessionId")))
         print(
-            "problem: this is a background job, and a claim from it would overwrite the claim of "
-            f"the session that started it ({store.printable(str(spawner.get('name') or '?'))}). "
-            "A claim says what a session is doing, so the session makes it. "
-            "Pass --session to claim as it on purpose."
+            "problem: this is a background job, and a claim from it would be made as the session "
+            f"that started it ({name or spawner_id}) and replace what that session says it is "
+            "doing. A claim says what a session is doing, so the session makes it. "
+            f"Pass --session {spawner_id} to claim as it on purpose."
         )
         return 1
     session_id = args.session or (nearest or {}).get("sessionId")

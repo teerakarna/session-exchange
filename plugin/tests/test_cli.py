@@ -999,9 +999,9 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     code, out = run(home, repo, "claim", "--focus", "what the job said")
     check(
-        "is refused, naming the session whose claim it would have overwritten, stripped",
-        (code, "overwrite the claim of the session that started it (pane-x)" in out),
-        (1, True),
+        "is refused, naming the session it would have claimed as, stripped, and its id",
+        (code, "the session that started it (pane-x)" in out, "--session real-one" in out),
+        (1, True, True),
     )
     code, out = run(home, repo, "show")
     check(
@@ -1014,6 +1014,22 @@ with tempfile.TemporaryDirectory() as tmp:
         "--session still claims as it, on purpose",
         (code, "on purpose" in run(home, repo, "show")[1]),
         (0, True),
+    )
+    (sessions / f"{os.getppid()}.json").write_text(
+        json.dumps({"pid": os.getppid(), "sessionId": "real-one", "name": ""})
+    )
+    code, out = run(home, repo, "claim", "--focus", "again")
+    check(
+        "a session with no name is named by its id",
+        (code, "the session that started it (real-one)" in out),
+        (1, True),
+    )
+    (sessions / f"{os.getppid()}.json").unlink()
+    code, out = run(home, repo, "claim", "--focus", "again")
+    check(
+        "a job with no session above it says so rather than naming one",
+        (code, "no session above it is in the registry" in out, "started it" in out),
+        (1, True, False),
     )
 
 print("the marker's name does not get to drive the reader's terminal either")
