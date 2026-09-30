@@ -174,7 +174,22 @@ def cmd_claim(args):
     resolution = _resolved(args)
     if resolution is None:
         return 1
-    session_id = args.session or (registry.own_entry() or {}).get("sessionId")
+    # #68. `own_entry` skips a background job's own row and answers with the session that spawned
+    # it, which is right for a handoff and wrong here: `claims.update` replaces `focus`, so a
+    # subagent claiming anything would rewrite what the person said they were doing, under their
+    # own id. Refused rather than written under the job's id, which the hook declines to seed for
+    # the reason #31 gives and which nothing renders. `--session` is there for doing it on purpose.
+    nearest = None if args.session else registry.own_entry(peers_only=False)
+    if nearest and not registry.is_peer(nearest):
+        spawner = registry.own_entry() or {}
+        print(
+            "problem: this is a background job, and a claim from it would overwrite the claim of "
+            f"the session that started it ({store.printable(str(spawner.get('name') or '?'))}). "
+            "A claim says what a session is doing, so the session makes it. "
+            "Pass --session to claim as it on purpose."
+        )
+        return 1
+    session_id = args.session or (nearest or {}).get("sessionId")
     if not session_id:
         print(
             "problem: could not work out which session this is. The registry has no entry for "

@@ -361,6 +361,11 @@ else:
         write(sessions, LIVE, sessionId="the-job", pid=LIVE, name="shared", kind="bg")
         write(sessions, ANCESTOR, sessionId="the-session", pid=ANCESTOR, name="shared")
         check("own entry skips this process's own background row", owner(sessions), "the-session")
+        check(
+            "unless asked for the nearest row of any kind, which is what `claim` needs (#68)",
+            registry.own_entry(sessions, peers_only=False)["sessionId"],
+            "the-job",
+        )
 
 with tempfile.TemporaryDirectory() as tmp:
     sessions = pathlib.Path(tmp) / "sessions"

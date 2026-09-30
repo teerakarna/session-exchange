@@ -60,6 +60,13 @@ def session_start(data, root, lines):
     # Returning rather than seeding-and-saying-nothing-else: the legacy warnings below go into the
     # same conversation the interactive half already got them in, so emitting them here is the
     # duplicate rendering this plugin exists to stop, one layer down. See #31.
+    #
+    # Best effort, and it rests on an ordering nothing here controls: the job's own registry file
+    # has to exist by the time its SessionStart fires. If it is written after, `known` is empty, the
+    # job reads as a peer and seeds a claim anyway. What contains that is not this guard but
+    # SessionEnd clearing the claim and the stale mark on one whose session has gone, so do not lean
+    # on this as though it were sufficient. The payload carries nothing that says a person did not
+    # start the process, so there is no second signal to branch on yet. See #69.
     if not registry.is_peer(known):
         return
     cwd = data.get("cwd") or os.getcwd()

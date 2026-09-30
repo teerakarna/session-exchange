@@ -258,8 +258,8 @@ MUTATIONS = [
         # Inside a background job the chain holds two registry pids, and nearest-first picks the
         # job. Everything downstream then writes under an id no presence render shows.
         rule="own_entry skips a background row for the session that spawned it",
-        old="        for r in entries(sessions_dir, live_only=False)",
-        new="        for r in entries(sessions_dir, live_only=False, peers_only=False)",
+        old="def own_entry(sessions_dir=SESSIONS_DIR, peers_only=True):",
+        new="def own_entry(sessions_dir=SESSIONS_DIR, peers_only=False):",
         caught_by="test_registry.py",
     ),
     # The three a review of this table found, each a line no mutation here offered and no check
@@ -294,6 +294,13 @@ MUTATIONS = [
         rule="an empty id is answered without reading the directory",
         old="    if not session_id:\n        return None",
         new="    if False:\n        return None",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="own_entry can be asked for the nearest row whatever its kind",
+        old="entries(sessions_dir, live_only=False, peers_only=peers_only)",
+        new="entries(sessions_dir, live_only=False)",
         caught_by="test_registry.py",
     ),
 ]
