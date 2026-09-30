@@ -553,11 +553,14 @@ with tempfile.TemporaryDirectory() as tmp:
     sessions = store.sessions_dir(root)
     sessions.mkdir(parents=True)
     (sessions / f"{store.TMP_PREFIX}1-x\033[2K.json").write_text("{")
+    moves = store.handoffs_dir(root) / "y\033[2K.d"
+    moves.mkdir(parents=True)
+    (moves / f"{store.TMP_PREFIX}1-z.json").write_text("{")
     litter = store.litter(root)
     check(
-        "a half-written file is named without the escape too",
-        ["\033" in line for line in litter],
-        [False],
+        "a half-written file is named stripped, and so is a moves directory holding one",
+        sorted(("\033" in line, line.split(" ", 1)[0]) for line in litter),
+        [(False, "sessions/.tmp-1-x[2K.json"), (False, "y[2K.d/.tmp-1-z.json")],
     )
 
 print()

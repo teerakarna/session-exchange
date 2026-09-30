@@ -788,6 +788,43 @@ with tempfile.TemporaryDirectory() as tmp:
         (2, 1, True),
     )
 
+print("a handoff filename in a problem line, which nothing this plugin wrote (#60)")
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp)
+    _, problem = handoffs.post(root, {"repo": "r"}, "b", str(root), handoff_id="h1")
+    assert problem is None, problem
+    folder = store.handoffs_dir(root)
+    (folder / "h1.json").rename(folder / "h1\033[2K.json")
+    _, found = handoffs.load_all(root)
+    misnamed = [p for p in found if "holds the id h1" in p]
+    check(
+        "a record not named after its id is named stripped, where the session start sees it",
+        [("\033" in p, p.startswith("h1[2K.json ")) for p in misnamed],
+        [(False, True)],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp)
+    folder = store.handoffs_dir(root)
+    folder.mkdir(parents=True)
+    (folder / "h2\033[2K.json").write_text(json.dumps({"id": "h2", "status": "open"}))
+    found = handoffs.unconverted(root)
+    check(
+        "a pre-#44 record is named stripped, and so is the directory it is told to write into",
+        [("\033" in p, p.startswith("h2[2K.json "), "into h2[2K.d/" in p) for p in found],
+        [(False, True, True)],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp)
+    (store.handoffs_dir(root) / "o\033[2K.d").mkdir(parents=True)
+    found = handoffs.orphan_moves(root)
+    check(
+        "an orphaned moves directory is named stripped, and so is the record it is missing",
+        [("\033" in p, p.startswith("o[2K.d "), "no o[2K.json beside" in p) for p in found],
+        [(False, True, True)],
+    )
+
 print("matching a handoff to a session")
 
 # #62, one check per spelling rather than one per branch: every one of these passes `scope_fault`,

@@ -390,8 +390,9 @@ def load_all(root):
         # was read.
         if record["id"] != file.stem:
             problems.append(
-                f"{file.name} holds the id {record['id']}, so it is not named after the handoff in "
-                "it; the moves live under the id, and the status below is not to be trusted"
+                f"{store.printable(file.name)} holds the id {record['id']}, so it is not named "
+                "after the handoff in it; the moves live under the id, and the status below is not "
+                "to be trusted"
             )
         status, faults = state_of(root, record["id"])
         problems += faults
@@ -427,10 +428,11 @@ def unconverted(root):
         present = [key for key in PRE_44_KEYS if key in record]
         if not present:
             continue
-        moves = store.transitions_dir(root, file.stem).name
+        moves = store.printable(store.transitions_dir(root, file.stem).name)
         problems.append(
-            f"{file.name} was written before #44 and still carries {', '.join(present)}, so it is "
-            "refused rather than read. To convert it: drop those keys from the record, then write "
+            f"{store.printable(file.name)} was written before #44 and still carries "
+            f"{', '.join(present)}, so it is refused rather than read. To convert it: drop those "
+            "keys from the record, then write "
             f"one file per old history entry into {moves}/, named 0000-<hex>.json upwards, each "
             '{"at": the entry\'s at, "status": its status, "after": its position counting from 0}.'
         )
@@ -490,7 +492,8 @@ def orphan_moves(root):
         # and `litter` reports those on their own line anyway.
         kept = [path for path in entries if not path.name.startswith(store.TMP_PREFIX)]
         problems.append(
-            f"{moves.name} holds {len(kept)} move(s) with no {record.name} beside it, so nothing "
+            f"{store.printable(moves.name)} holds {len(kept)} move(s) with no "
+            f"{store.printable(record.name)} beside it, so nothing "
             "reads it and no handoff can ever be posted under that id again. Either write the "
             "record back or delete the directory."
         )

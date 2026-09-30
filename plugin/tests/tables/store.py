@@ -241,4 +241,11 @@ MUTATIONS = [
         new="{printable(directory.name)}/{path.name} is a half-written file left ",
         caught_by="test_store_claims.py",
     ),
+    Mutation(
+        module="store",
+        rule="and so is the directory it was found in, which for a moves directory came off disk",
+        old="{printable(directory.name)}/{printable(path.name)} is a half-written",
+        new="{directory.name}/{printable(path.name)} is a half-written",
+        caught_by="test_store_claims.py",
+    ),
 ]

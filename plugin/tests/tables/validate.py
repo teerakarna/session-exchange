@@ -40,4 +40,11 @@ MUTATIONS = [
         ),
         caught_by="test_validate.py",
     ),
+    Mutation(
+        module="validate",
+        rule="a key the file supplied is quoted in the location (#60)",
+        old='problems += validate(value, extra, f"{where}.{key!r}")',
+        new='problems += validate(value, extra, f"{where}.{key}")',
+        caught_by="test_validate.py",
+    ),
 ]

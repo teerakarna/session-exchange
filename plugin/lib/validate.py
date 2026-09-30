@@ -136,7 +136,10 @@ def validate(instance, schema, where="value"):
             elif extra is False:
                 problems.append(f"{where}: unexpected key {key!r}")
             elif isinstance(extra, dict):
-                problems += validate(value, extra, f"{where}.{key}")
+                # A repr, because this key came out of the file rather than out of the schema, and
+                # the problem is rendered at session start. The same reason the two messages above
+                # quote theirs. See #60.
+                problems += validate(value, extra, f"{where}.{key!r}")
 
     if isinstance(instance, list):
         if "minItems" in schema and len(instance) < schema["minItems"]:
