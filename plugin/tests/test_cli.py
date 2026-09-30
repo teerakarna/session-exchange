@@ -981,6 +981,57 @@ with tempfile.TemporaryDirectory() as tmp:
         (2, True, False),
     )
 
+print("a claim from inside a background job (#68)")
+with tempfile.TemporaryDirectory() as tmp:
+    home, area, repo = fixture(tmp)
+    (area / ".claude").mkdir()
+    (area / ".claude" / "exchange.json").write_text(json.dumps({"name": "area"}))
+    code, out = run(home, repo, "claim", "--focus", "what the person said")
+    assert code == 0, out
+    # This process becomes the job, and the one above it the session that spawned it: the chain a
+    # subagent's shell has. `claim` would resolve to the session and replace its focus.
+    sessions = home / ".claude" / "sessions"
+    (sessions / f"{os.getpid()}.json").write_text(
+        json.dumps({"pid": os.getpid(), "sessionId": "the-job", "name": "the-caller", "kind": "bg"})
+    )
+    (sessions / f"{os.getppid()}.json").write_text(
+        json.dumps({"pid": os.getppid(), "sessionId": "real-one", "name": "pane-\033x"})
+    )
+    code, out = run(home, repo, "claim", "--focus", "what the job said")
+    check(
+        "is refused, naming the session it would have claimed as, stripped, and its id",
+        (code, "the session that started it (pane-x)" in out, "--session real-one" in out),
+        (1, True, True),
+    )
+    code, out = run(home, repo, "show")
+    check(
+        "and that session's focus is what the person said",
+        ("what the person said" in out, "what the job said" in out),
+        (True, False),
+    )
+    code, out = run(home, repo, "claim", "--session", "real-one", "--focus", "on purpose")
+    check(
+        "--session still claims as it, on purpose",
+        (code, "on purpose" in run(home, repo, "show")[1]),
+        (0, True),
+    )
+    (sessions / f"{os.getppid()}.json").write_text(
+        json.dumps({"pid": os.getppid(), "sessionId": "real-one", "name": ""})
+    )
+    code, out = run(home, repo, "claim", "--focus", "again")
+    check(
+        "a session with no name is named by its id",
+        (code, "the session that started it (real-one)" in out),
+        (1, True),
+    )
+    (sessions / f"{os.getppid()}.json").unlink()
+    code, out = run(home, repo, "claim", "--focus", "again")
+    check(
+        "a job with no session above it says so rather than naming one",
+        (code, "no session above it is in the registry" in out, "started it" in out),
+        (1, True, False),
+    )
+
 print("the marker's name does not get to drive the reader's terminal either")
 
 with tempfile.TemporaryDirectory() as tmp:

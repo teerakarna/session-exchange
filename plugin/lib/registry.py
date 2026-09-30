@@ -155,7 +155,7 @@ def _parents(pid, limit=12, run=subprocess.run):
     return chain
 
 
-def own_entry(sessions_dir=SESSIONS_DIR):
+def own_entry(sessions_dir=SESSIONS_DIR, peers_only=True):
     """The registry row for the session this process is running inside, or None.
 
     Found by walking up the process tree until a pid matches a registry row, which is the only way a
@@ -169,10 +169,13 @@ def own_entry(sessions_dir=SESSIONS_DIR):
     back, and a handoff from a sender nobody can find. Skipping to the interactive ancestor
     attributes the work to the session a human can actually reach, which is the same call #31 makes
     about what a row means.
+
+    `peers_only=False` is the other question: which row is nearest, background or not. `claim` asks
+    it, because a claim is about this process rather than about who to attribute it to. See #68.
     """
     rows = {
         int(r["pid"]): r
-        for r in entries(sessions_dir, live_only=False)
+        for r in entries(sessions_dir, live_only=False, peers_only=peers_only)
         if str(r.get("pid", "")).isdigit()
     }
     for pid in _parents(os.getpid()):

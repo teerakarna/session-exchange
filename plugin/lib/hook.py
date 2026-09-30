@@ -60,6 +60,14 @@ def session_start(data, root, lines):
     # Returning rather than seeding-and-saying-nothing-else: the legacy warnings below go into the
     # same conversation the interactive half already got them in, so emitting them here is the
     # duplicate rendering this plugin exists to stop, one layer down. See #31.
+    #
+    # Best effort, and it rests on an ordering nothing here controls: the job's own registry file
+    # has to exist by the time its SessionStart fires. If it is written after, `known` is empty, the
+    # job reads as a peer and seeds a claim anyway. What contains that is not this guard but
+    # `presence` hiding a non-peer's claim while the job runs, then SessionEnd clearing it and the
+    # stale mark once its session has gone, so do not lean
+    # on this as though it were sufficient. The payload carries nothing that says a person did not
+    # start the process, so there is no second signal to branch on yet. See #69.
     if not registry.is_peer(known):
         return
     cwd = data.get("cwd") or os.getcwd()
@@ -146,7 +154,8 @@ def presence(root, held, session_id, config, rows):
     because a claim nobody cleared is a fault somebody should be able to see. The count says where
     the files are, since nothing removes them on its own: absence from the registry is also what a
     session looks like in the moment before its row is written (#69), so pruning on it would delete
-    live claims. A claim held by a live non-peer is neither, and is #68's to settle. Nothing at all
+    live claims. A claim held by a live non-peer is neither: it is hidden while the job runs and
+    counted as stale once it exits, which is where #69's race leaves one. Nothing at all
     when there is nobody else, for the reason `hookio.emit` gives.
 
     The root's name heads the block because a machine-wide legacy wiring can put another root's

@@ -94,6 +94,9 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
   session start. Every name this plugin writes is safe already, so this is for a file an importer, a
   hand edit or another tool put there (#60).
 
+- `claim` from inside a background job is refused instead of overwriting the focus of the session
+  that started it. `--session` still claims as that session on purpose (#68).
+
 ### Not built yet
 
 - `exchange migrate` exits 2 and names the step that builds it. Exit 2 is neither success nor
