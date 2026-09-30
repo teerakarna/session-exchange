@@ -32,7 +32,7 @@ CLAIM = {"session_id": "abc-123", "cwd": "/tmp/x", "updated_at": "2026-09-25T01:
 HANDOFF = {
     "id": "h1",
     "from": {"cwd": "/tmp/x"},
-    "to": {"repo": "dotfiles"},
+    "to": {"repo": "repo-one"},
     "created": "2026-09-25T01:02:03Z",
     "body": "please look at the thing",
 }

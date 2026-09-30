@@ -15,8 +15,7 @@ not. Nothing matches a handoff to a recipient yet, so a posted one is only seen 
 thinks to run `exchange handoff list`, which is the failure this project replaces rather than a use
 of it. Handoff matching and the import out of the existing markdown ledger are both unbuilt, and
 `Stop` stays deliberately unwired until the matcher gives it something to read. Seven migration
-steps, three done; `doctor` prints all seven derived from live state, and the design lives with the
-plan (see [Docs](#docs)).
+steps, three done; `doctor` prints all seven derived from live state.
 
 ## Why
 
@@ -168,7 +167,7 @@ between posting and listing. `--body -` reads the body from stdin, which is what
 anything with a backtick or a blank line in it:
 
 ```sh
-exchange handoff post --repo dotfiles --path plugin/lib --body - <<'EOF'
+exchange handoff post --repo my-repo --path plugin/lib --body - <<'EOF'
 The hooks manifest is wired twice. `doctor` names both files.
 EOF
 ```
@@ -233,7 +232,7 @@ Full threat model in [SECURITY.md](SECURITY.md).
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to test, and the one rule that is load-bearing |
 | [SECURITY.md](SECURITY.md) | Threat model, starting with cross-root leakage |
 | [CHANGELOG.md](CHANGELOG.md) | What works, and what is deliberately not built |
-| `plans/2026-09-25_portable-session-exchange*` | The design, the seven migration steps, and the evidence for each. Lives in the author's own environment repo rather than here, so this is a pointer for one person and not a doc you are missing. `doctor` prints the same seven steps from live state |
+| `exchange doctor` | The seven migration steps, derived from live state rather than written down anywhere they could go stale |
 
 ## Testing discipline
 

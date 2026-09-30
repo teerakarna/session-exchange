@@ -147,11 +147,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a detached head is no branch rather than a sha-shaped one", "git_branch" in claim, False)
 
     claims.update(root, "s1", focus="the thing", add={"paths": ["a", "b"]})
-    claim, _ = claims.update(root, "s1", add={"paths": ["b", "c"], "repos": ["dotfiles"]})
+    claim, _ = claims.update(root, "s1", add={"paths": ["b", "c"], "repos": ["repo-one"]})
     check(
         "adding to a list deduplicates rather than repeating",
         (claim["paths"], claim["repos"]),
-        (["a", "b", "c"], ["dotfiles"]),
+        (["a", "b", "c"], ["repo-one"]),
     )
 
     # SessionStart fires again on resume and on compact. Wiping the focus then would be a
