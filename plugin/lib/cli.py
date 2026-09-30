@@ -325,7 +325,7 @@ def _running():
         ]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return f"plugin    version unreadable ({type(exc).__name__}), running from {plugin}"
-    return f"plugin    {store.printable(str(version))}, running from {plugin}"
+    return f"plugin    {version}, running from {plugin}"
 
 
 def cmd_doctor(args):

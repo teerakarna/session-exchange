@@ -381,28 +381,36 @@ with tempfile.TemporaryDirectory() as tmp:
         f"plugin    {version}, running from {PLUGIN}",
     )
 
-with tempfile.TemporaryDirectory() as tmp:
-    # A copy with no manifest beside it, which is a broken install rather than a reason to stop.
-    home, area, repo = fixture(tmp)
-    run(home, repo, "init")
-    bare = pathlib.Path(tmp) / "bare"
-    for part in ("lib", "schemas"):
-        shutil.copytree(PLUGIN / part, bare / part)
-    done = subprocess.run(
-        [sys.executable, str(bare / "lib" / "cli.py"), "--cwd", str(repo), "doctor"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env={**os.environ, "HOME": str(home), "CC_EXCHANGE_ROOT": ""},
-    )
-    check(
-        "a manifest it cannot read is said, and doctor carries on",
-        (
-            done.stdout.splitlines()[0].startswith("plugin    version unreadable ("),
-            "by marker" in done.stdout,
-        ),
-        (True, True),
-    )
+# A manifest missing, unparseable, with no version, or not an object: a broken install rather than a
+# reason to stop, and each one a different exception on the way to saying so.
+for label, manifest in (
+    ("missing", None),
+    ("not JSON", "{"),
+    ("with no version", "{}"),
+    ("not an object", "[]"),
+):
+    with tempfile.TemporaryDirectory() as tmp:
+        home, area, repo = fixture(tmp)
+        run(home, repo, "init")
+        bare = pathlib.Path(tmp) / "bare"
+        for part in ("lib", "schemas"):
+            shutil.copytree(PLUGIN / part, bare / part)
+        if manifest is not None:
+            (bare / ".claude-plugin").mkdir()
+            (bare / ".claude-plugin" / "plugin.json").write_text(manifest)
+        done = subprocess.run(
+            [sys.executable, str(bare / "lib" / "cli.py"), "--cwd", str(repo), "doctor"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**os.environ, "HOME": str(home), "CC_EXCHANGE_ROOT": ""},
+        )
+        first = (done.stdout.splitlines() or [""])[0]
+        check(
+            f"a manifest {label} is said, and doctor carries on",
+            (first.startswith("plugin    version unreadable ("), "by marker" in done.stdout),
+            (True, True),
+        )
 
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
