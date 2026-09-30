@@ -497,6 +497,56 @@ def orphan_moves(root):
     return problems
 
 
+def spelling(scope):
+    """One spelling of a root-relative scope, for comparing and nothing else. #62.
+
+    `plugin/lib`, `./plugin/lib`, `plugin/lib/` and `plugin//lib` all pass `store.scope_fault` and
+    are one directory, and a matcher comparing them as strings leaves a handoff addressed to a real
+    scope unseen by the session claiming it, with nothing on either side looking wrong. Normalised
+    here and not on the way in, so a record keeps what its writer typed; `.` comes out as `""`, the
+    whole of whatever it is relative to.
+
+    String work, not `pathlib`: resolving asks the filesystem, and a scope names a directory in
+    somebody else's checkout as often as in this one. Case is kept, since a case-insensitive
+    filesystem is a property of one machine and the two spellings are different paths on another.
+    """
+    return "/".join(part for part in scope.split("/") if part not in ("", "."))
+
+
+def _overlaps(one, other):
+    """Is either of two spelt paths inside the other, by whole components?"""
+    one, other = one.split("/") if one else [], other.split("/") if other else []
+    shorter = min(len(one), len(other))
+    return one[:shorter] == other[:shorter]
+
+
+def addressed_to(to, session_id, repos, paths):
+    """Is a handoff with this `to` for a session with this id, working in these repos and paths?
+
+    `repos` and `paths` are everything the session has said about where it is, in whatever spelling:
+    its claim's lists, plus the repo its cwd is in. Both sides go through `spelling`.
+
+    Paths narrow, in either direction - a session on `plugin` is working on `plugin/lib`, and one on
+    `plugin/lib/hook.py` is working inside it. But only against a session that named any: most
+    sessions never run `claim --path`, and narrowing them out would hide a handoff from the one
+    session in the repo it was for, which is this project's founding failure. Shown to one session
+    too many is a row somebody can see is wrong.
+
+    Paths are compared as they stand on each side, both being relative to the repo the handoff
+    names, and not qualified by which of a claim's repos they belong to - a claim does not record
+    that. So a session in two repos is narrowed by the paths of both.
+    """
+    if "session_id" in to:
+        return to["session_id"] == session_id
+    if spelling(to["repo"]) not in {spelling(repo) for repo in repos}:
+        return False
+    if not to.get("paths") or not paths:
+        return True
+    return any(
+        _overlaps(spelling(wanted), spelling(held)) for wanted in to["paths"] for held in paths
+    )
+
+
 def describe(to, cap):
     """The addressing, in one short phrase, for a human reading a list.
 

@@ -226,9 +226,9 @@ def scope_fault(flag, value):
             f"Without them it reads as {shown!r}"
         )
     if value.startswith("/"):
-        return f"{flag} is relative to the root, so it cannot start with /: {value}"
+        return f"{flag} is a relative path, so it cannot start with /: {value}"
     if ".." in value.split("/"):
-        return f"{flag} cannot climb out of the root with ..: {value}"
+        return f"{flag} cannot use .. to climb out: {value}"
     return None
 
 

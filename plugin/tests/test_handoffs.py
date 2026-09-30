@@ -103,34 +103,34 @@ check("and a session scope reads as one", handoffs.describe({"session_id": "s"},
 check(
     "an absolute repo is refused, naming the flag and the shape",
     handoffs.to_scope(repo="/etc")[1],
-    "--repo is relative to the root, so it cannot start with /: /etc",
+    "--repo is a relative path, so it cannot start with /: /etc",
 )
 check(
     "so is one that climbs out, and it is a different message because it is a different mistake",
     handoffs.to_scope(repo="../../../../etc")[1],
-    "--repo cannot climb out of the root with ..: ../../../../etc",
+    "--repo cannot use .. to climb out: ../../../../etc",
 )
 check(
     "a .. anywhere in the repo counts, not only at the front",
     handoffs.to_scope(repo="a/../../b")[1],
-    "--repo cannot climb out of the root with ..: a/../../b",
+    "--repo cannot use .. to climb out: a/../../b",
 )
 # The half a guard written for `repo` alone leaves behind. Separate checks per shape and per field,
 # because one check over a loop passes as soon as any element is refused.
 check(
     "a path that climbs out is refused too, with a repo that is fine",
     handoffs.to_scope(repo="ok", paths=["../../etc"])[1],
-    "--path cannot climb out of the root with ..: ../../etc",
+    "--path cannot use .. to climb out: ../../etc",
 )
 check(
     "and an absolute one",
     handoffs.to_scope(repo="ok", paths=["/etc"])[1],
-    "--path is relative to the root, so it cannot start with /: /etc",
+    "--path is a relative path, so it cannot start with /: /etc",
 )
 check(
     "a later path is reached, so the loop does not stop at the first element",
     handoffs.to_scope(repo="ok", paths=["fine", "also/fine", "../out"])[1],
-    "--path cannot climb out of the root with ..: ../out",
+    "--path cannot use .. to climb out: ../out",
 )
 check(
     "a refused scope returns no scope, so a caller ignoring the problem writes nothing",
@@ -787,6 +787,88 @@ with tempfile.TemporaryDirectory() as tmp:
         (len(stored), len(problems), "h1-copy.json" in (problems[0] if problems else "")),
         (2, 1, True),
     )
+
+print("matching a handoff to a session")
+
+# #62, one check per spelling rather than one per branch: every one of these passes `scope_fault`,
+# and a matcher comparing them as strings misses the session claiming the same directory.
+for written in ("plugin/lib", "./plugin/lib", "plugin/lib/", "plugin//lib", "./plugin/./lib/"):
+    check(f"{written!r} is spelt plugin/lib", handoffs.spelling(written), "plugin/lib")
+check("'.' is the whole of what it is relative to", handoffs.spelling("."), "")
+check("case is kept", handoffs.spelling("Plugin/Lib"), "Plugin/Lib")
+check("a leading-dot name is not a '.' component", handoffs.spelling(".github/x"), ".github/x")
+
+to = {"repo": "./repo-one/", "paths": ["plugin//lib"]}
+check(
+    "the repo is compared by spelling on both sides",
+    handoffs.addressed_to({"repo": "repo-one/"}, "s", ["./repo-one"], []),
+    True,
+)
+check(
+    "a different repo is not the same one",
+    handoffs.addressed_to({"repo": "repo-one"}, "s", ["repo-two"], []),
+    False,
+)
+check(
+    "nor is a repo whose name only starts the same",
+    handoffs.addressed_to({"repo": "repo"}, "s", ["repo-one"], []),
+    False,
+)
+check(
+    "a path inside the one addressed is working on it",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["plugin/lib/hook.py"]),
+    True,
+)
+check(
+    "and so is a path that contains it",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["./plugin"]),
+    True,
+)
+check(
+    "a sibling is not, even one sharing a prefix of characters",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["plugin/lib2", "docs"]),
+    False,
+)
+check(
+    "any one overlapping path of several is enough",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["docs", "plugin/lib/x"]),
+    True,
+)
+check(
+    "a session that named no paths is not narrowed out of its repo",
+    handoffs.addressed_to(to, "s", ["repo-one"], []),
+    True,
+)
+check(
+    "nor is anyone by a handoff that named none",
+    handoffs.addressed_to({"repo": "repo-one"}, "s", ["repo-one"], ["docs"]),
+    True,
+)
+check(
+    "a session on '.' is working on every path in its repo",
+    handoffs.addressed_to(to, "s", ["repo-one"], ["./"]),
+    True,
+)
+check(
+    "and a handoff for '.' is for every path in it",
+    handoffs.addressed_to({"repo": "repo-one", "paths": ["."]}, "s", ["repo-one"], ["docs"]),
+    True,
+)
+check(
+    "paths do not reach a session in another repo",
+    handoffs.addressed_to(to, "s", ["repo-two"], ["plugin/lib"]),
+    False,
+)
+check(
+    "a session-addressed handoff reaches that session",
+    handoffs.addressed_to({"session_id": "s"}, "s", [], []),
+    True,
+)
+check(
+    "and no other, whatever scope it is in",
+    handoffs.addressed_to({"session_id": "s"}, "t", ["repo-one"], ["plugin"]),
+    False,
+)
 
 print()
 if failures:
