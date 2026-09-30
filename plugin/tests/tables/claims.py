@@ -254,4 +254,25 @@ MUTATIONS = [
         new="            lines.append(f\"  {field}: {', '.join(claim[field])}\")",
         caught_by="test_cli.py",
     ),
+    Mutation(
+        module="claims",
+        rule="a claim's scope is every list field it holds",
+        old="        for field in LIST_FIELDS\n        if claim.get(field)\n    ]",
+        new="        for field in LIST_FIELDS[:1]\n        if claim.get(field)\n    ]",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="each element of a claim's scope is stripped",
+        old="        (field, store.capped_list(describe_list(claim[field]), cap))",
+        new="        (field, store.capped_list(list(claim[field]), cap))",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="claims",
+        rule="a claim's scope is capped",
+        old="        (field, store.capped_list(describe_list(claim[field]), cap))",
+        new="        (field, store.capped_list(describe_list(claim[field]), 10**9))",
+        caught_by="test_hook.py",
+    ),
 ]

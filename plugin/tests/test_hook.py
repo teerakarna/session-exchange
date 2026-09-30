@@ -1099,6 +1099,143 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("and says the session is unaffected", "Session unaffected" in context, True)
 
+
+# Presence, #79. The claims are written straight to disk rather than through `claims.update`, so a
+# fixture can hold what a hand edit or an older writer could leave there: a control character in a
+# path, and more paths than the cap.
+def register(home, session_id, pid, **fields):
+    row = {"sessionId": session_id, "name": session_id, "pid": pid}
+    row.update(fields)
+    (home / ".claude" / "sessions" / f"{session_id}.json").write_text(json.dumps(row))
+
+
+def put_claim(root, session_id, **fields):
+    sessions = root / ".claude" / "exchange" / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    claim = {"session_id": session_id, "cwd": str(root), "updated_at": "2026-09-30T01:02:03Z"}
+    claim.update(fields)
+    (sessions / f"{session_id}.json").write_text(json.dumps(claim))
+
+
+def dead_pid():
+    """A pid that belonged to a process and no longer does, which is what a crash leaves behind."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
+def presence_fixture(tmp, *, wire_legacy=False):
+    home, root, repo = fixture(tmp, wire_legacy=wire_legacy)
+    # Caps well under the schema defaults, so a render reading the default instead of the marker
+    # shows up as a longer row rather than an identical one.
+    (root / ".claude" / "exchange.json").write_text(
+        json.dumps({"name": "are\x07a", "max_hot_paths": 3, "max_focus_chars": 20})
+    )
+    register(home, "me", os.getpid())
+    register(home, "peer", os.getpid())
+    register(home, "gone", dead_pid())
+    register(home, "job", os.getpid(), kind="bg")
+    put_claim(
+        root,
+        "peer",
+        name="pane-\x1bb",
+        focus="the \x1bimporter, and then a great deal more than twenty characters",
+        repos=["repo-one"],
+        paths=["p1", "a\x1bb", "p3", "p4", "p5"],
+        tickets=["T-1"],
+    )
+    put_claim(root, "gone", name="pane-gone", focus="long finished")
+    # Held by a background job that is still running: not a peer to coordinate with, and not a
+    # session that has stopped either. #68 is where such a claim comes from.
+    put_claim(root, "job", name="pane-job", focus="background work")
+    return home, root, repo
+
+
+def context_rows(out):
+    return out["hookSpecificOutput"]["additionalContext"].splitlines() if out else []
+
+
+print("presence, with nobody else under the root")
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    # Registered and live, so a render that forgot to leave this session out would show it as a
+    # peer rather than counting it as stale - which is the version of the mistake that looks right.
+    register(home, "me", os.getpid())
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
+    check("a session alone under its root is injected nothing at all", out, None)
+
+print("presence, with a live peer, a crashed session and a background job")
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = presence_fixture(tmp)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
+    rows = context_rows(out)
+    check(
+        "the block is headed by the root's name, with what a terminal acts on stripped",
+        "[session-exchange] 1 other session(s) under area:" in rows,
+        True,
+    )
+    check(
+        "a peer is shown by its stripped name, its focus stripped and capped per the marker",
+        "- pane-b: the importer, and th +43 more chars" in rows,
+        True,
+    )
+    check(
+        "and with every list it claims",
+        ("  repos: repo-one" in rows, "  tickets: T-1" in rows),
+        (True, True),
+    )
+    check(
+        "a list is stripped per element and cut at the marker's cap, saying how many it left out",
+        "  paths: p1, ab, p3, +2 more" in rows,
+        True,
+    )
+    check("a session is not shown its own claim", any(r.startswith("- me") for r in rows), False)
+    check(
+        "a claim whose session's pid is dead is not rendered as current",
+        any("pane-gone" in r for r in rows),
+        False,
+    )
+    check(
+        "a live background job's claim is not rendered as a peer",
+        any("pane-job" in r for r in rows),
+        False,
+    )
+    sessions = root / ".claude" / "exchange" / "sessions"
+    check(
+        "the dead one is counted, the job is not, and the line says where the files are",
+        "[session-exchange] 1 claim(s) left by sessions no longer running. `exchange show` lists "
+        f"them; once sure they are gone, delete their files under {sessions}" in rows,
+        True,
+    )
+
+print("presence, under a root whose path a terminal would act on")
+with tempfile.TemporaryDirectory() as tmp:
+    # The path comes off the filesystem rather than out of anything this plugin wrote, and a
+    # directory name can carry an escape or a newline as easily as a marker can.
+    odd = pathlib.Path(tmp) / "we\x1bird"
+    odd.mkdir()
+    home, root, repo = presence_fixture(odd)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
+    stale = [r for r in context_rows(out) if "left by sessions no longer running" in r]
+    check(
+        "the stale line's path is stripped too",
+        (len(stale), "\x1b" in "".join(stale), "weird" in "".join(stale)),
+        (1, False, True),
+    )
+
+print("presence comes before the migration guard that refers to it")
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = presence_fixture(tmp, wire_legacy=True)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
+    rows = context_rows(out)
+    heading = [i for i, r in enumerate(rows) if "other session(s) under" in r]
+    guard = [i for i, r in enumerate(rows) if "wired machine-wide" in r]
+    check(
+        "the machine-wide warning's 'presence shown above' has presence above it",
+        bool(heading and guard and heading[0] < guard[0]),
+        True,
+    )
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")

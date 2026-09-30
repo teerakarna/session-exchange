@@ -140,10 +140,10 @@ def load_all(root):
 # `describe_settings` is the same shape a third time, one commit later again: the first cut of these
 # three fixed `show` and left `claim`'s own echo, which renders the same fields off the same record.
 #
-# Today this reaches a human's terminal only. `hook.py` says presence and handoff rendering land
-# next and it renders no claim content yet, so the model's context is not on this path - which is
-# the reason to fix it now rather than the reason it is urgent: when that rendering lands it reads
-# claims, and a stripper added afterwards is a stripper added after the first injection.
+# These were written while only a human's terminal read them, ahead of the hook rendering presence
+# (#79), so that the stripper was in place before the first injection rather than after it. The
+# hook's presence block now reads claims through the same three functions, so the model's context
+# is on this path too.
 
 
 def describe_focus(claim, cap):
@@ -181,6 +181,20 @@ def describe_list(values):
     `values[0]` looks right in every case anyone tries by hand.
     """
     return [store.printable(v) for v in values]
+
+
+def describe_scope(claim, cap):
+    """Each list field a claim holds, as `(field, rendered)`, stripped and capped.
+
+    One copy for the two renders of another session's claim, `exchange show` and the hook's
+    presence block, so a field or a stripper added to one cannot miss the other the way
+    `describe_settings` once missed `show`'s fix.
+    """
+    return [
+        (field, store.capped_list(describe_list(claim[field]), cap))
+        for field in LIST_FIELDS
+        if claim.get(field)
+    ]
 
 
 def describe_settings(claim):

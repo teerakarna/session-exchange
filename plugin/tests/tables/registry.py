@@ -118,8 +118,8 @@ MUTATIONS = [
         # A SessionEnd hook is the caller that needs this: by the time it runs, the session it is
         # naming may already be gone, and filtering on liveness would lose exactly that row.
         rule="a session that has just died still resolves by id",
-        old="    for row in entries(sessions_dir, live_only=False, peers_only=False):",
-        new="    for row in entries(sessions_dir, peers_only=False):",
+        old="        rows = entries(sessions_dir, live_only=False, peers_only=False)",
+        new="        rows = entries(sessions_dir, peers_only=False)",
         caught_by="test_registry.py",
     ),
     Mutation(
@@ -249,8 +249,8 @@ MUTATIONS = [
         # same answer it gives for an id the registry never had - and the hook branches on the
         # difference.
         rule="resolving an id by name sees every kind of row",
-        old="    for row in entries(sessions_dir, live_only=False, peers_only=False):",
-        new="    for row in entries(sessions_dir, live_only=False):",
+        old="        rows = entries(sessions_dir, live_only=False, peers_only=False)",
+        new="        rows = entries(sessions_dir, live_only=False)",
         caught_by="test_registry.py",
     ),
     Mutation(

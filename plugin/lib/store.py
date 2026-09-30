@@ -89,7 +89,7 @@ def safe_id(value):
     `fullmatch`, not `match`, and the difference is not the obvious one: the pattern is anchored at
     both ends already, but Python's `$` also matches just *before* a trailing newline. So `match`
     accepted `"sess-1\\n"`, wrote a claim under that name, and put the newline in the `session_id`
-    field, where presence rendering will later put it inside a markdown table cell and end the row
+    field, where any line-oriented render - presence in a session's context is one - ends the row
     early. The guard read as tight and let through the one character that matters most.
     """
     return value if isinstance(value, str) and SAFE_ID.fullmatch(value) else None
@@ -129,10 +129,24 @@ def printable(value):
     return "".join(ch for ch in value if ch.isprintable())
 
 
+def capped_list(values, cap):
+    """The first `cap` values, with anything beyond it counted rather than dropped.
+
+    A silent truncation is the failure this repo keeps finding in other shapes: the output looks
+    complete, so nobody goes looking for the rest. The caps themselves stay, because the row that
+    went into every session at 23 KB is why they exist.
+    """
+    shown = ", ".join(values[:cap])
+    extra = len(values) - cap
+    if extra <= 0:
+        return shown
+    return f"{shown}, +{extra} more" if shown else f"+{extra} more"
+
+
 def capped_text(value, cap):
     """`value` bounded to `cap` characters, with whatever was cut off counted rather than dropped.
 
-    The text half of what `cli._capped` does for a list, and the same argument: a line that stops at
+    The text half of what `capped_list` does for a list, and the same argument: a line that stops at
     the cap silently reads as the whole of what the sender wrote, so nobody goes looking for the
     rest. `[:cap]` was what the one capped render in this plugin did, and the row that went into
     every session at 23 KB is why any of these caps exist at all.

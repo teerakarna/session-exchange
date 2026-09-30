@@ -78,11 +78,11 @@ def emit(event, lines, out=None):
     empty section header injected every session would train the reader to skip the section.
 
     The falsy filter is a contract, not a live rule, and is labelled as such because this repo
-    deletes rules nothing can reach. Every line the one caller appends comes from `problem()`, which
-    always returns a non-empty string, so today the filter removes nothing and `if not lines` does
-    all the work. It is kept because the caller set grows by design - presence rendering and the
-    write path both land later, and a renderer with nothing to say returning `""` is the ordinary
-    way to write one. That would inject the empty section this function exists to prevent, so the
+    deletes rules nothing can reach. Every line the one caller appends is a `problem()` or a
+    presence row, neither of which is ever empty, so today the filter removes nothing and
+    `if not lines` does all the work. It is kept because the caller set grows by design - handoff
+    rendering lands next, and a renderer with nothing to say returning `""` is the ordinary way to
+    write one. That would inject the empty section this function exists to prevent, so the
     filter is here first and its test hand-feeds an input no caller can currently produce.
 
     The guarantee at the top of this module used to stop at the *reader*. Three states of it, all

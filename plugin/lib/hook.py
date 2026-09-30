@@ -3,9 +3,9 @@
 What each event is for:
 
 - **SessionStart** - resolve the root, seed this session's claim, and inject whatever the root has
-  to
-  say. Fires on startup, resume, clear and compact, so it has to be safe to run repeatedly against
-  state it may already have written.
+  to say: problems, then who else is here, then the migration guard. Fires on startup, resume,
+  clear and compact, so it has to be safe to run repeatedly against state it may already have
+  written.
 - **SessionEnd** - clear the claim. This is what makes "set your row to idle when you are done" stop
   depending on a session remembering to, which it reliably did not.
 
@@ -35,7 +35,7 @@ import store
 # machine and push out the thing the session was started to do. Not a setting in the marker: the
 # marker's caps bound *content*, which is a judgement about how much detail is useful, and this
 # bounds a fault report, where the only useful number is "enough to act on one". The remainder is
-# counted, never dropped, which is the same rule `_capped` states for a claim's lists.
+# counted, never dropped, which is the same rule `store.capped_list` states for a claim's lists.
 MAX_PROBLEMS = 3
 
 
@@ -43,8 +43,10 @@ def session_start(data, root, lines):
     session_id = data.get("session_id")
     # The payload has no display name, so it comes from the registry - looked up by the id the
     # payload does carry, rather than by walking the process tree, which is the same answer for the
-    # price of one directory read.
-    known = registry.by_session_id(session_id) or {}
+    # price of one directory read. Every row, read once: presence below needs the same rows, and a
+    # second `entries()` would parse every session file again on every start, resume and compact.
+    rows = registry.entries(live_only=False, peers_only=False)
+    known = registry.by_session_id(session_id, rows=rows) or {}
     # A background job fires SessionStart with its own id, so without this the root gets two claims
     # for what the user thinks is one session, each with the same `name` copied out of the
     # registry, and `SessionEnd` clears only the one that ended. Nothing then renders that leftover
@@ -65,7 +67,7 @@ def session_start(data, root, lines):
     if problem:
         lines.append(hookio.problem(problem))
 
-    _, config_problem = store.config(root)
+    config, config_problem = store.config(root)
     if config_problem:
         lines.append(hookio.problem(config_problem))
 
@@ -78,10 +80,9 @@ def session_start(data, root, lines):
     # it is reported by `show`, by `doctor`, and until now by nothing a session sees. The added
     # cost is one directory read plus one per handoff for its moves, which is the read `show`
     # already does and which the handoff rendering that lands next needs anyway.
-    problems = []
-    for load in (claims.load_all, handoffs.load_all):
-        _, found = load(root)
-        problems += found
+    held, problems = claims.load_all(root)
+    _, found = handoffs.load_all(root)
+    problems += found
     for problem in problems[:MAX_PROBLEMS]:
         lines.append(hookio.problem(problem))
     if len(problems) > MAX_PROBLEMS:
@@ -94,9 +95,12 @@ def session_start(data, root, lines):
             )
         )
 
-    # Presence and handoff rendering land next. Until then the only thing worth injecting is the
-    # migration guard, which is the one that must not wait: a half-migrated machine looks identical
-    # to a finished one at the output, and this line is the only thing that distinguishes them.
+    lines += presence(root, held, session_id, config, rows)
+
+    # Handoff rendering lands next. The migration guard stays last, after presence, because it is
+    # what tells the reader whether the block above is the only one of its kind in the context: a
+    # half-migrated machine looks identical to a finished one at the output, and this line is the
+    # only thing that distinguishes them.
     state = legacy.report(root)
     if state["double_fire"]:
         # `scoped`, not `wired`. With a machine-wide wiring in place too, naming everything here
@@ -125,6 +129,49 @@ def session_start(data, root, lines):
         )
     for problem in state["problems"]:
         lines.append(hookio.problem(problem))
+
+
+def presence(root, held, session_id, config, rows):
+    """Who else is under this root and what they say they are doing, as context lines.
+
+    Other sessions only: a session reading its own claim back is being told what it already knows,
+    at the cost of a row. Live peers in full. A claim whose session is not running - no registry
+    row, or a row whose pid is dead, which is what a crash leaves - is counted rather than rendered,
+    because a stale row that reads as current is worse than no row, and counted rather than dropped,
+    because a claim nobody cleared is a fault somebody should be able to see. The count says where
+    the files are, since nothing removes them on its own: absence from the registry is also what a
+    session looks like in the moment before its row is written (#69), so pruning on it would delete
+    live claims. A claim held by a live non-peer is neither, and is #68's to settle. Nothing at all
+    when there is nobody else, for the reason `hookio.emit` gives.
+
+    The root's name heads the block because a machine-wide legacy wiring can put another root's
+    presence into the same context, and the reader has to be able to tell which one this is. It is
+    marker text, typed by hand, so it goes through `store.printable` like anything else a render
+    did not write itself.
+    """
+    live = {row.get("sessionId") for row in rows if registry.alive(row.get("pid"))}
+    peers = {row.get("sessionId") for row in rows if registry.is_peer(row)} & live
+    others = [claim for claim in held if claim["session_id"] != session_id]
+    current = [claim for claim in others if claim["session_id"] in peers]
+    stale = [claim for claim in others if claim["session_id"] not in live]
+    out = []
+    if current:
+        out.append(
+            f"[{hookio.PREFIX}] {len(current)} other session(s) under "
+            f"{store.printable(config['name'])}:"
+        )
+        for claim in current:
+            focus = claims.describe_focus(claim, config["max_focus_chars"])
+            out.append(f"- {claims.describe_name(claim)}: {focus}")
+            for field, shown in claims.describe_scope(claim, config["max_hot_paths"]):
+                out.append(f"  {field}: {shown}")
+    if stale:
+        out.append(
+            f"[{hookio.PREFIX}] {len(stale)} claim(s) left by sessions no longer running. "
+            f"`exchange show` lists them; once sure they are gone, delete their files under "
+            f"{store.printable(str(store.sessions_dir(root)))}"
+        )
+    return out
 
 
 def session_end(data, root, lines):
