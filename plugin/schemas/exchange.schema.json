@@ -40,6 +40,19 @@
       "type": "object",
       "additionalProperties": { "type": "string" },
       "description": "Optional display-only grouping: root-relative directory to human-readable label. Never a matching key. A hand-typed label having to agree with a hand-typed label elsewhere is the defect class this design removes, so nothing is ever addressed or matched by these."
+    },
+    "legacy_ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "description": "The markdown ledger this root's handoffs used to live in, for migration step 4 to import from. Absent means there never was one, so step 4 is not applicable here rather than outstanding, which is true of every root `init` creates (#38). Declared rather than derived because the plugin never names a ledger path of its own: whether a root had one is a fact only its owner knows.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The ledger file. Absolute, or relative to the root."
+        }
+      }
     }
   }
 }
