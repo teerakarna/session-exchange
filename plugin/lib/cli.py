@@ -317,19 +317,27 @@ def _step4(root, stored):
     """`(done, why)` for the import. Three real states, which is why it has its own function.
 
     Whether a root ever had a markdown ledger cannot be derived: the plugin names no paths, so the
-    marker has to say. Absent means none, which is the default `init` writes and is true of every
-    new root. Before this the evidence was pinned false on any such root, so `doctor` pointed at
-    step 4 forever and would have kept steps 5 to 7 unreachable once `migrate` gates on it.
+    marker has to say. Absent means none. `init` never writes it, so on a root that did have a
+    ledger the owner has to add it, and the reason line says how, since this is the one answer that
+    reads as finished when it may only be undeclared. Before this the evidence was pinned false on
+    every root, so `doctor` pointed at step 4 forever and would have kept steps 5 to 7 unreachable
+    once `migrate` gates on it.
 
-    An unreadable marker is unknown rather than not applicable. `store.config` hands back defaults
-    with the problem, and the defaults have no `legacy_ledger`, so reading them as an answer would
-    call a root finished because its marker was broken.
+    A missing or unreadable marker is unknown rather than not applicable. A missing one declares
+    nothing, and `store.config` reads it as defaults with no problem. A broken one hands back
+    defaults with the problem. Neither set of defaults has a `legacy_ledger`, so reading them as an
+    answer would call a root finished because its marker was absent or broken.
     """
+    if not store.marker_path(root).is_file():
+        return None, "there is no marker yet, so whether this root had a ledger cannot be told"
     config, problem = store.config(root)
     if problem:
         return None, "the marker is unreadable, so whether this root had a ledger cannot be told"
     if "legacy_ledger" not in config:
-        return NOT_APPLICABLE, "no `legacy_ledger` in the marker, so there is nothing to import"
+        return NOT_APPLICABLE, (
+            "no `legacy_ledger` in the marker, so there is nothing to import. If this root did keep"
+            " a markdown ledger, name it there"
+        )
     return any("imported" in record for record, _ in stored), None
 
 

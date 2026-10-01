@@ -45,7 +45,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["path"],
-      "description": "The markdown ledger this root's handoffs used to live in, for migration step 4 to import from. Absent means there never was one, so step 4 is not applicable here rather than outstanding, which is true of every root `init` creates (#38). Declared rather than derived because the plugin never names a ledger path of its own: whether a root had one is a fact only its owner knows.",
+      "description": "The markdown ledger this root's handoffs used to live in, for migration step 4 to import from. Absent means there never was one, so step 4 is not applicable here rather than outstanding (#38). `init` never writes it, so a root that did keep a ledger has to have it added. Declared rather than derived because the plugin never names a ledger path of its own: whether a root had one is a fact only its owner knows.",
       "properties": {
         "path": {
           "type": "string",

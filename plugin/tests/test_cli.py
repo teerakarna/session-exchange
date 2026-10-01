@@ -377,7 +377,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (True, True),
     )
     check("and step 4 is not what comes next", "next      step 4" in out, False)
-    check("and nothing outstanding is not a fault", code, 0)
+    check("and says how to declare one that was missed", "name it there" in out, True)
     marker = area / ".claude" / "exchange.json"
     written = json.loads(marker.read_text())
     marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "ledger.md"})))
@@ -393,10 +393,11 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "doctor")
     check(
         "an unreadable marker leaves step 4 unknown, not finished",
-        ("  [?] 4." in out, "  [-] 4." in out),
-        (True, False),
+        ("  [?] 4." in out, "  [-] 4." in out, code),
+        (True, False, 1),
     )
     marker.write_text(json.dumps(written))
+    code, out = run(home, repo, "doctor")
     # A diagnostic that quietly omits a check reads exactly like one that passed it.
     check("prints the checks it cannot answer rather than skipping them", "[?]" in out, True)
     check("says why each one is unanswerable", "not checkable here" in out, True)
@@ -457,6 +458,13 @@ with tempfile.TemporaryDirectory() as tmp:
         (True, False),
     )
     check("and it agrees with step 5 instead of contradicting it", "[ ] 5." in out, True)
+    # Defaults with no problem have no `legacy_ledger` either, so without its own guard step 4
+    # would read as not applicable on a root that has declared nothing yet.
+    check(
+        "and step 4 is unknown there, not not applicable",
+        ("  [?] 4." in out, "  [-] 4." in out),
+        (True, False),
+    )
     check("an unconfigured root is not a fault on its own", code, 0)
 
 with tempfile.TemporaryDirectory() as tmp:
