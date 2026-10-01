@@ -36,7 +36,9 @@ a name the first already took, and `create_json` refuses it at the filesystem.
 ledger, or one whose key changed under it (a date added, a sender renamed), leaves its stored copy
 open with nothing to close it. Nothing here can tell which entry it became, so nothing is written,
 but `doctor` does not call the step done while one is there: the store would say a handoff is
-waiting that the ledger has finished with.
+waiting that the ledger has finished with. The key includes the ledger's own labels, so pointing
+`legacy_ledger` at a different file or section after an import strands every open row from the old
+one, which is the right reading: nothing will close them from there either.
 
 **`created` is the ledger's date, not the import's.** Staleness is read off `created`, and an entry
 nine days old imported today would otherwise read as fresh, which is the ten-day silent failure this
@@ -195,10 +197,13 @@ def _emptied(text, section):
     recognises is the silent short count `ledger` exists to refuse.
     """
     wanted = ledger.normalise_label(section)
-    return any(
-        ledger.normalise_label(title).startswith(wanted) and not body.strip()
+    bodies = [
+        body
         for title, body in ledger.sections(text)
-    )
+        if ledger.normalise_label(title).startswith(wanted)
+    ]
+    # Every matching heading, not any: a blank archive must not excuse prose in the real one.
+    return bool(bodies) and not any(body.strip() for body in bodies)
 
 
 def id_of(entry):

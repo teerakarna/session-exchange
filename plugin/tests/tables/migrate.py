@@ -204,15 +204,22 @@ MUTATIONS = [
     Mutation(
         module="migrate",
         rule="a blank section is an empty ledger, not a problem",
-        old="        ledger.normalise_label(title).startswith(wanted) and not body.strip()",
-        new="        False",
+        old="    return bool(bodies) and not any(body.strip() for body in bodies)",
+        new="    return False",
         caught_by="test_migrate.py",
     ),
     Mutation(
         module="migrate",
         rule="a section with text and no entry is still a problem",
-        old="        ledger.normalise_label(title).startswith(wanted) and not body.strip()",
-        new="        ledger.normalise_label(title).startswith(wanted)",
+        old="    return bool(bodies) and not any(body.strip() for body in bodies)",
+        new="    return bool(bodies)",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="every matching heading has to be blank, not just one",
+        old="    return bool(bodies) and not any(body.strip() for body in bodies)",
+        new="    return bool(bodies) and not all(body.strip() for body in bodies)",
         caught_by="test_migrate.py",
     ),
     Mutation(

@@ -253,6 +253,12 @@ with tempfile.TemporaryDirectory() as tmp:
     (root / "ledger.md").write_text("## Open questions / handoffs\n\nall moved to the store\n")
     plan = migrate.prepare(root, SMALL_BLOCK)
     check("but a section with text and no entry still is", len(plan.problems), 1)
+    (root / "ledger.md").write_text(
+        "## Open questions / handoffs\n\nall moved to the store\n\n"
+        "## Open questions / handoffs (archive)\n\n"
+    )
+    plan = migrate.prepare(root, SMALL_BLOCK)
+    check("and a blank heading beside it does not excuse it", len(plan.problems), 1)
 
 print()
 print("after the import: only a closure is written back")
