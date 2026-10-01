@@ -384,6 +384,19 @@ PR computing the next semver bump and changelog from commits since the last rele
 that PR is the release. This project has never cut one yet, so the first merge of that PR is also
 the first tag.
 
+Two things about that PR that are not automatic. It needs "Allow GitHub Actions to create and approve
+pull requests" ticked under Settings > Actions > General, or the workflow fails and no PR appears.
+And it is opened with the workflow's own token, which by GitHub's design starts no workflow run, so
+`ci` never reports on it and the ruleset will not let it merge. Close and reopen it as yourself,
+`gh pr close N && gh pr reopen N`, and `ci` runs as it does on any other PR.
+
+The first one is also curated by hand, once. release-please writes its section from commits and puts
+it above the hand-written `Unreleased` one, which would leave everything this project did before
+its first release below a version that already shipped it. So on that PR's branch the generated
+section is replaced with the hand-written content under the release heading, the "nothing is
+released yet" line goes, and the compare link, which points at a `v0.0.1` tag that was never cut,
+is dropped. From the second release on, the generated section is the changelog.
+
 The release also moves `version` in `plugin/.claude-plugin/plugin.json`, through `extra-files` in
 `release-please-config.json`, and that is the number that matters most: the host caches an install
 by it, so a change merged since the last release has not reached anyone who installed the plugin,
