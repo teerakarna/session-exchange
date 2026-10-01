@@ -125,15 +125,15 @@ MUTATIONS = [
     Mutation(
         module="legacy",
         rule="a command in quotes is still split into tokens",
-        old='            for token in text.replace(\'"\', " ").replace("\'", " ").split():',
-        new="            for token in text.split():",
+        old='    for token in text.replace(\'"\', " ").replace("\'", " ").split():',
+        new="    for token in text.split():",
         caught_by="test_legacy.py",
     ),
     Mutation(
         module="legacy",
         rule="a token is reduced to its basename, or a path never matches a glob",
-        old="                name = pathlib.PurePath(token).name",
-        new="                name = token",
+        old="        name = pathlib.PurePath(token).name",
+        new="        name = token",
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -141,15 +141,15 @@ MUTATIONS = [
         # The privacy rule, and the only one here whose failure is a diagnostic quoting another
         # environment's arguments back at a log to establish a fact the basename already makes.
         rule="only the script's name is reported, never the command string it sat in",
-        old="                    names.add(name)",
-        new="                    names.add(text)",
+        old="            names.add(name)",
+        new="            names.add(text)",
         caught_by="test_legacy.py",
     ),
     Mutation(
         module="legacy",
         rule="something that is not a legacy script is not a wiring",
-        old="                if looks_legacy(name):",
-        new="                if True:",
+        old="        if looks_legacy(name):",
+        new="        if True:",
         caught_by="test_hook.py",
     ),
     Mutation(

@@ -36,6 +36,16 @@ def looks_legacy(name):
     return any(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)
 
 
+def names_in(text):
+    """The legacy scripts one string mentions, by bare name. Step 7 removes by the same rule."""
+    names = set()
+    for token in text.replace('"', " ").replace("'", " ").split():
+        name = pathlib.PurePath(token).name
+        if looks_legacy(name):
+            names.add(name)
+    return names
+
+
 def scripts_on_disk(hooks_dir=HOOKS_DIR):
     """Legacy scripts present in the hooks directory, sorted.
 
@@ -103,10 +113,7 @@ def wirings(settings_paths):
             continue
         names = set()
         for text in _strings(settings):
-            for token in text.replace('"', " ").replace("'", " ").split():
-                name = pathlib.PurePath(token).name
-                if looks_legacy(name):
-                    names.add(name)
+            names |= names_in(text)
         found += [(path, name) for name in sorted(names)]
     return found, problems
 
