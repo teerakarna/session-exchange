@@ -27,6 +27,17 @@ is built on, so a body edited in the ledger stays as it was imported. And a stat
 way - a stored close the ledger still calls open, an acceptance the ledger has no word for - is the
 store being ahead of the ledger, which is the direction the migration is going.
 
+**The id comes from the key, not from the clock.** Two sessions told by `doctor` to run this at the
+same moment would otherwise each post every entry, and the pair would block every later run as two
+rows sharing a key, with no verb that removes either. Derived from the key, the second post lands on
+a name the first already took, and `create_json` refuses it at the filesystem.
+
+**An imported row that is open with no entry left is outstanding.** An entry deleted from the
+ledger, or one whose key changed under it (a date added, a sender renamed), leaves its stored copy
+open with nothing to close it. Nothing here can tell which entry it became, so nothing is written,
+but `doctor` does not call the step done while one is there: the store would say a handoff is
+waiting that the ledger has finished with.
+
 **`created` is the ledger's date, not the import's.** Staleness is read off `created`, and an entry
 nine days old imported today would otherwise read as fresh, which is the ten-day silent failure this
 project started from arriving by a new route. An undated entry gets the time of the import, and that
@@ -35,6 +46,7 @@ is the one place it has to be said, so it is said in the report.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 import sys
@@ -56,7 +68,7 @@ class Prepared(NamedTuple):
     `routes` holds the `to` block for each entry in `plan.create`, in the same order. `closes` are
     the updates that carry a closure, which is written. `drift` is every update with a field that is
     not written, paired with just those fields, so an entry closed and edited in the ledger is in
-    both.
+    both. `stranded` are the orphans still open, which nothing here can close.
     """
 
     path: pathlib.Path
@@ -65,6 +77,7 @@ class Prepared(NamedTuple):
     routes: list[dict[str, Any]]
     closes: list[reconcile.Change]
     drift: list[tuple[reconcile.Change, dict[str, tuple[Any, Any]]]]
+    stranded: list[dict[str, Any]]
     problems: list[str]
 
 
@@ -74,14 +87,34 @@ def ledger_path(root, block):
     return path if path.is_absolute() else pathlib.Path(root) / path
 
 
-def _route_table(block):
-    return {
-        ledger.normalise_label(label): scope for label, scope in block.get("routes", {}).items()
-    }
+def route_label(label):
+    """A route key from the marker, in the form `route_of` looks it up by.
+
+    A group is sorted the way `reconcile.route_key` sorts recipients, so `Lane G + Lane B` written
+    as the ledger writes it finds the entry addressed that way.
+    """
+    parts = [ledger.normalise_label(part) for part in label.split(reconcile.RECIPIENT_JOIN)]
+    return reconcile.RECIPIENT_JOIN.join(sorted(part for part in parts if part))
+
+
+def route_table(block):
+    """`(table, problems)`. Two keys that normalise alike are a problem, not a last-wins."""
+    table, problems = {}, []
+    for label, scope in block.get("routes", {}).items():
+        key = route_label(label)
+        if not key:
+            problems.append(f"legacy_ledger.routes has an empty label ({store.printable(label)!r})")
+        elif key in table:
+            problems.append(f"legacy_ledger.routes names {key!r} twice, in different spellings")
+        else:
+            table[key] = scope
+    return table, problems
 
 
 def route_of(entry, table):
     """The `to` block for one entry, or `(None, problem)`."""
+    if not entry.recipients:
+        return None, f"no recipient to route to ({store.printable(entry.headline[:60])!r})"
     group = reconcile.route_key(None, entry.recipients).lstrip(reconcile.ROUTE_JOIN)
     if group in table:
         scopes = [table[group]]
@@ -102,7 +135,10 @@ def route_of(entry, table):
             f" ({store.printable(entry.headline[:60])!r})"
         )
     scope = scopes[0]
-    return handoffs.to_scope(repo=scope.get("repo"), paths=scope.get("paths", ()))
+    to, fault = handoffs.to_scope(repo=scope.get("repo"), paths=scope.get("paths", ()))
+    if fault:
+        return None, f"the route for {group!r} in legacy_ledger.routes: {fault}"
+    return to, None
 
 
 def _is_close(change):
@@ -127,15 +163,16 @@ def prepare(root, block):
     try:
         text = path.read_text("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        return Prepared(path, 0, empty, [], [], [], [f"cannot read {path}: {type(exc).__name__}"])
+        fault = f"cannot read {path}: {type(exc).__name__}"
+        return Prepared(path, 0, empty, [], [], [], [], [fault])
     section = block.get("section", ledger.DEFAULT_SECTION)
     entries, problem = ledger.entries(text, section)
-    if problem:
-        return Prepared(path, 0, empty, [], [], [], [problem])
+    if problem and not _emptied(text, section):
+        return Prepared(path, 0, empty, [], [], [], [], [problem])
     held, problems = handoffs.load_all(root)
     plan = reconcile.reconcile(entries, held)
-    problems = [*problems, *plan.problems]
-    table = _route_table(block)
+    table, route_problems = route_table(block)
+    problems = [*problems, *plan.problems, *route_problems]
     routes = []
     for entry in plan.create:
         scope, fault = route_of(entry, table)
@@ -144,7 +181,31 @@ def prepare(root, block):
         routes.append(scope)
     closes = [change for change in plan.update if _is_close(change)]
     drift = [(change, _unwritten(change)) for change in plan.update if _unwritten(change)]
-    return Prepared(path, len(entries), plan, routes, closes, drift, problems)
+    status = {record["id"]: state for record, state in held}
+    stranded = [record for record in plan.orphan if status.get(record["id"]) != handoffs.CLOSED]
+    return Prepared(path, len(entries), plan, routes, closes, drift, stranded, problems)
+
+
+def _emptied(text, section):
+    """Whether the section is there and blank, which is where a pruned ledger ends up.
+
+    Not a problem then: blocking forever on the end state of the dual run would be the wrong way
+    round. The rows it held are orphans by now, and an open one is still reported as stranded.
+    Blank and not merely entry-less, because a section with text in it and no entry the parser
+    recognises is the silent short count `ledger` exists to refuse.
+    """
+    wanted = ledger.normalise_label(section)
+    return any(
+        ledger.normalise_label(title).startswith(wanted) and not body.strip()
+        for title, body in ledger.sections(text)
+    )
+
+
+def id_of(entry):
+    """The id an imported entry is posted under, the same on every run and every machine."""
+    key = json.dumps(reconcile.imported_of(entry), sort_keys=True)
+    stamp = entry.date.replace("-", "") + "T000000Z" if entry.date else "undated"
+    return f"{stamp}-{hashlib.sha256(key.encode()).hexdigest()[:12]}"
 
 
 def created_of(entry):
@@ -164,6 +225,7 @@ def apply(root, prepared):
             reconcile.body_of(entry),
             cwd=str(root),
             name=entry.sender,
+            handoff_id=id_of(entry),
             at=created_of(entry),
             imported=reconcile.imported_of(entry),
         )
@@ -180,9 +242,13 @@ def apply(root, prepared):
             problems.append(problem)
         else:
             lines.append(f"closed  {handoff_id}")
+    if problems:
+        done = len(lines)
+        total = len(prepared.plan.create) + len(prepared.closes)
+        problems.append(f"{done} of {total} write(s) made; run it again to finish the rest")
     return lines, problems
 
 
 def outstanding(prepared):
     """What an import still has to do, as a count. Zero with no problems is step 4 done."""
-    return len(prepared.plan.create) + len(prepared.closes)
+    return len(prepared.plan.create) + len(prepared.closes) + len(prepared.stranded)

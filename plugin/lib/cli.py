@@ -342,12 +342,20 @@ def _step4(root):
             " a markdown ledger, name it there"
         )
     block = config["legacy_ledger"]
-    if not migrate.ledger_path(root, block).is_file():
-        return None, f"the ledger is not at {migrate.ledger_path(root, block)}"
+    path = migrate.ledger_path(root, block)
+    try:
+        path.read_bytes()
+    except OSError as exc:
+        return None, f"the ledger at {path} cannot be read: {type(exc).__name__}"
     prepared = migrate.prepare(root, block)
     if prepared.problems:
         return False, (
             f"{len(prepared.problems)} problem(s), listed by `exchange migrate --step 4`"
+        )
+    if prepared.stranded:
+        return False, (
+            f"{len(prepared.stranded)} imported handoff(s) open with no entry left in the ledger;"
+            " close them, or restore the entry"
         )
     pending = migrate.outstanding(prepared)
     if pending:
@@ -685,7 +693,8 @@ def _cmd_migrate_step4(root, apply):
         f"counts    {prepared.parsed} parsed, {len(plan.create)} to create, "
         f"{len(prepared.closes)} to close, {len(plan.unchanged)} unchanged, "
         f"{len(plan.skipped)} closed and skipped, {len(plan.orphan)} stored with no entry, "
-        f"{len(prepared.drift)} drifted, {len(prepared.problems)} problem(s)"
+        f"{len(prepared.drift)} drifted, {len(prepared.stranded)} stranded open, "
+        f"{len(prepared.problems)} problem(s)"
     )
     for entry, to in zip(plan.create, prepared.routes):
         where = handoffs.describe(to, config["max_focus_chars"]) if to else "(no route)"
@@ -697,8 +706,15 @@ def _cmd_migrate_step4(root, apply):
         print(
             f"drift     {change.record['id']}  {', '.join(sorted(fields))}, reported, not written"
         )
+    stranded = {record["id"] for record in prepared.stranded}
     for record in plan.orphan:
-        print(f"orphan    {record['id']}  imported, and no longer in the ledger")
+        if record["id"] in stranded:
+            print(
+                f"stranded  {record['id']}  open, and no longer in the ledger; close it with "
+                "`exchange handoff close`, or restore the entry"
+            )
+        else:
+            print(f"orphan    {record['id']}  closed, and no longer in the ledger")
     for problem in prepared.problems:
         print(f"problem   {problem}")
     if not apply:

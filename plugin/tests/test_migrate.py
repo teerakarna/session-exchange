@@ -147,7 +147,11 @@ with tempfile.TemporaryDirectory() as tmp:
     # not pass for a refusal.
     routes = dict(routes, **{"Lane C/D": {"repo": "b"}})
     plan = migrate.prepare(root, {"path": "ledger.md", "routes": routes})
-    check("two scopes among three labels is still more than one", len(plan.problems), 1)
+    check(
+        "two scopes among three labels is still more than one",
+        [p.split(";")[0] for p in plan.problems],
+        ["3 recipients map to different scopes and a handoff has one"],
+    )
     routes = dict(routes, **{"Lane G": {"repo": "b"}})
     plan = migrate.prepare(root, {"path": "ledger.md", "routes": routes})
     check("and labels mapped one by one to the same scope go through", plan.problems, [])
@@ -156,9 +160,10 @@ with tempfile.TemporaryDirectory() as tmp:
     root = rooted(tmp, SMALL)
     plan = migrate.prepare(root, {"path": "ledger.md", "routes": {"lane b": {"repo": "../b"}}})
     check(
-        "a route the store would refuse is refused here, before anything is posted",
-        len(plan.problems),
-        2,
+        "a route the store would refuse is refused here, naming the route it came from",
+        plan.problems,
+        ["the route for 'lane b' in legacy_ledger.routes: --repo cannot use .. to climb out: ../b"]
+        * 2,
     )
     plan = migrate.prepare(root, {"path": "ledger.md", "routes": {"LANE  B": {"repo": "b"}}})
     check("route keys compare normalised, like the labels they match", plan.problems, [])
@@ -180,13 +185,74 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     root = rooted(tmp, SMALL + f"\n**[Lane A {A} Lane B]** 2026-01-02 - first thing\n\nagain\n")
     plan = migrate.prepare(root, SMALL_BLOCK)
-    check("two entries reconcile cannot tell apart are a problem", len(plan.problems), 1)
+    check(
+        "two entries reconcile cannot tell apart are a problem",
+        plan.problems,
+        ["2 ledger entries share the key lane a>lane b / '- first thing'"],
+    )
     root = rooted(tmp + "/b", SMALL)
     (store.handoffs_dir(root) / "broken.json").write_text("{")
     plan = migrate.prepare(root, SMALL_BLOCK)
     # An unreadable record may be one this import already wrote, so planning past it could post a
     # second copy of it.
-    check("an unreadable record in the store is a problem too", len(plan.problems), 1)
+    check(
+        "an unreadable record in the store is a problem too",
+        [p.split(":")[0] for p in plan.problems],
+        ["broken.json could not be read"],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp, f"## Open questions / handoffs\n\n**[Lane A {A}]** 2026-01-02 - x\n")
+    # Keyed, since the sender alone makes a route, so it reaches routing with nothing to route.
+    try:
+        got = migrate.prepare(root, SMALL_BLOCK).problems
+    except Exception as exc:
+        got = f"raised {type(exc).__name__}"
+    check(
+        "an entry with a sender and no recipient is a problem, not a crash",
+        got,
+        ["no recipient to route to ('- x')"],
+    )
+    root = rooted(
+        tmp + "/g",
+        f"## Open questions / handoffs\n\n**[Lane A {A} Lane G + Lane B]** 2026-01-02 - x\n",
+    )
+    plan = migrate.prepare(
+        root, {"path": "ledger.md", "routes": {"Lane G + Lane B": {"repo": "b"}}}
+    )
+    check("a group mapped in the order the ledger writes it is found", plan.problems, [])
+    plan = migrate.prepare(
+        root,
+        {
+            "path": "ledger.md",
+            "routes": {"Lane B": {"repo": "b"}, "lane  b": {"repo": "c"}, "Lane G": {"repo": "b"}},
+        },
+    )
+    check(
+        "two route keys that normalise alike are a problem",
+        plan.problems,
+        ["legacy_ledger.routes names 'lane b' twice, in different spellings"],
+    )
+    plan = migrate.prepare(
+        root,
+        {"path": "ledger.md", "routes": {" + ": {"repo": "b"}, "Lane G + Lane B": {"repo": "b"}}},
+    )
+    check(
+        "an empty route label is a problem",
+        plan.problems,
+        ["legacy_ledger.routes has an empty label (' + ')"],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp, "# notes\n\n## Open questions / handoffs\n\n## Later\n\nprose\n")
+    plan = migrate.prepare(root, SMALL_BLOCK)
+    # Pruning every entry out is the end state of the dual run, and blocking on it would never end.
+    check(
+        "a blank section is an empty ledger, not a problem", (plan.parsed, plan.problems), (0, [])
+    )
+    (root / "ledger.md").write_text("## Open questions / handoffs\n\nall moved to the store\n")
+    plan = migrate.prepare(root, SMALL_BLOCK)
+    check("but a section with text and no entry still is", len(plan.problems), 1)
 
 print()
 print("after the import: only a closure is written back")
@@ -239,6 +305,79 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     migrate.apply(root, plan)
     check("and applying leaves it accepted", sorted(s for _, s in held(root)), ["accepted", "open"])
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp, SMALL)
+    migrate.apply(root, migrate.prepare(root, SMALL_BLOCK))
+    (root / "ledger.md").write_text(SMALL.split(f"**[Lane A {A} Lane B]** 2026-01-03")[0])
+    plan = migrate.prepare(root, SMALL_BLOCK)
+    # Deleted from the ledger, or re-keyed under it. Either way nothing will ever close the copy.
+    check(
+        "an imported row left open with no entry is stranded, and outstanding",
+        (len(plan.stranded), migrate.outstanding(plan), plan.problems),
+        (1, 1, []),
+    )
+    handoffs.set_status(root, plan.stranded[0]["id"], handoffs.CLOSED) if plan.stranded else None
+    plan = migrate.prepare(root, SMALL_BLOCK)
+    check(
+        "and once closed it is an orphan, not outstanding",
+        (len(plan.plan.orphan), len(plan.stranded), migrate.outstanding(plan)),
+        (1, 0, 0),
+    )
+
+
+def guarded(root, plan):
+    """`apply`, with a raise turned into a failed check rather than the end of the file."""
+    try:
+        return migrate.apply(root, plan)
+    except Exception as exc:
+        return [], [f"raised {type(exc).__name__}"]
+
+
+print()
+print("two runs at once, and a run that is cut short")
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp, SMALL)
+    one, two = migrate.prepare(root, SMALL_BLOCK), migrate.prepare(root, SMALL_BLOCK)
+    guarded(root, one)
+    lines, problems = guarded(root, two)
+    # Two sessions sent to the same command by `doctor`. The ids come from the key, so the second
+    # post lands on a name already taken, rather than a pair that blocks every later run.
+    check("a second concurrent run posts nothing", (lines, len(held(root))), ([], 2))
+    check(
+        "and says how far it got",
+        problems[-1:],
+        ["0 of 2 write(s) made; run it again to finish the rest"],
+    )
+    check("and every later run is clean", migrate.prepare(root, SMALL_BLOCK).problems, [])
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp, SMALL)
+    migrate.apply(root, migrate.prepare(root, SMALL_BLOCK))
+    (root / "ledger.md").write_text(
+        SMALL.replace("- first thing", "- first thing **Status:** DONE")
+    )
+    plan = migrate.prepare(root, SMALL_BLOCK)
+    for change in plan.closes:
+        handoffs.set_status(root, change.record["id"], handoffs.CLOSED)
+    lines, problems = guarded(root, plan)
+    check(
+        "a close refused at write time is reported, not printed as done",
+        (lines, len(problems), problems[-1:]),
+        ([], 2, ["0 of 1 write(s) made; run it again to finish the rest"]),
+    )
+
+same_day = ledger.entries(
+    "## Open questions / handoffs\n\n"
+    f"**[A {A} B]** 2026-01-02 - one\n\n**[A {A} B]** 2026-01-02 - two\n"
+)[0]
+check(
+    "two entries on one day get different ids",
+    len({migrate.id_of(entry) for entry in same_day}),
+    2,
+)
+check("and an id is filename-safe", all(store.safe_id(migrate.id_of(e)) for e in same_day), True)
 
 print()
 print("dates")

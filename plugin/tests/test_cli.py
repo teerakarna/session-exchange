@@ -391,7 +391,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "doctor")
     check(
         "a ledger named and not there is unknown, not finished",
-        ("  [?] 4." in out, "the ledger is not at" in out),
+        ("  [?] 4." in out, "cannot be read: FileNotFoundError" in out),
         (True, True),
     )
     (area / "ledger.md").write_text(LEDGER)
@@ -1082,6 +1082,8 @@ with tempfile.TemporaryDirectory() as tmp:
         (code, "no route for Lane B" in out, count()),
         (1, True, 0),
     )
+    code, out = run(home, repo, "migrate", "--step", "4")
+    check("and a dry run of a plan with problems exits 1 too", (code, count()), (1, 0))
     block = {"path": "ledger.md", "routes": {"Lane B": {"repo": "repo"}}}
     marker.write_text(json.dumps(dict(written, legacy_ledger=block)))
     code, out = run(home, repo, "migrate", "--step", "4")
@@ -1109,6 +1111,13 @@ with tempfile.TemporaryDirectory() as tmp:
         "and doctor then calls step 4 done",
         ("  [x] 4." in out, "next      step 4" in out),
         (True, False),
+    )
+    (area / "ledger.md").write_text(LEDGER.split("**[Lane A \u2192 Lane B]** 2026-01-02")[0])
+    code, out = run(home, repo, "doctor")
+    check(
+        "an imported row left open after its entry is gone is outstanding, not done",
+        ("  [ ] 4." in out, "1 imported handoff(s) open with no entry left" in out),
+        (True, True),
     )
     code, out = run(home, repo, "migrate", "--step", "7")
     check(

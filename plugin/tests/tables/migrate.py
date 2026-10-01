@@ -8,6 +8,13 @@ the whole.
 
 from .shape import Mutation
 
+# The branch both write loops share, up to the verb that tells them apart.
+FAILED = (
+    "        if problem:\n            problems.append(problem)\n"
+    '        else:\n            lines.append(f"'
+)
+FAILED_NOT = FAILED.replace("if problem:", "if False:", 1)
+
 MUTATIONS = [
     Mutation(
         module="migrate",
@@ -19,8 +26,11 @@ MUTATIONS = [
     Mutation(
         module="migrate",
         rule="route keys are normalised like the labels they are matched against",
-        old="        ledger.normalise_label(label): scope for label, scope in",
-        new="        label: scope for label, scope in",
+        old=(
+            "    parts = [ledger.normalise_label(part)"
+            " for part in label.split(reconcile.RECIPIENT_JOIN)]"
+        ),
+        new="    parts = [part for part in label.split(reconcile.RECIPIENT_JOIN)]",
         caught_by="test_migrate.py",
     ),
     Mutation(
@@ -40,15 +50,15 @@ MUTATIONS = [
     Mutation(
         module="migrate",
         rule="a route goes through the store's own scope check",
-        old='    return handoffs.to_scope(repo=scope.get("repo"), paths=scope.get("paths", ()))',
-        new="    return scope, None",
+        old='    if fault:\n        return None, f"the route for',
+        new='    if False:\n        return None, f"the route for',
         caught_by="test_migrate.py",
     ),
     Mutation(
         module="migrate",
         rule="a route's paths are carried, not just its repo",
-        old='    return handoffs.to_scope(repo=scope.get("repo"), paths=scope.get("paths", ()))',
-        new='    return handoffs.to_scope(repo=scope.get("repo"))',
+        old='handoffs.to_scope(repo=scope.get("repo"), paths=scope.get("paths", ()))',
+        new='handoffs.to_scope(repo=scope.get("repo"))',
         caught_by="test_migrate.py",
     ),
     Mutation(
@@ -75,22 +85,22 @@ MUTATIONS = [
     Mutation(
         module="migrate",
         rule="a ledger with no readable section is a problem, not an empty import",
-        old="    if problem:\n        return Prepared(path, 0, empty, [], [], [], [problem])",
-        new="    if False:\n        return Prepared(path, 0, empty, [], [], [], [problem])",
+        old="    if problem and not _emptied(text, section):",
+        new="    if False:",
         caught_by="test_migrate.py",
     ),
     Mutation(
         module="migrate",
         rule="an unreadable record in the store blocks the import",
-        old="    problems = [*problems, *plan.problems]",
-        new="    problems = [*plan.problems]",
+        old="    problems = [*problems, *plan.problems, *route_problems]",
+        new="    problems = [*plan.problems, *route_problems]",
         caught_by="test_migrate.py",
     ),
     Mutation(
         module="migrate",
         rule="two entries reconcile cannot tell apart block the import",
-        old="    problems = [*problems, *plan.problems]",
-        new="    problems = [*problems]",
+        old="    problems = [*problems, *plan.problems, *route_problems]",
+        new="    problems = [*problems, *route_problems]",
         caught_by="test_migrate.py",
     ),
     Mutation(
@@ -154,6 +164,104 @@ MUTATIONS = [
         rule="a planned close is outstanding work",
         old="    return len(prepared.plan.create) + len(prepared.closes)",
         new="    return len(prepared.plan.create)",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="a recipient group in the marker is sorted, so it matches however it is written",
+        old="    return reconcile.RECIPIENT_JOIN.join(sorted(part for part in parts if part))",
+        new="    return reconcile.RECIPIENT_JOIN.join(part for part in parts if part)",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="two route keys that normalise alike are a problem, not a last-wins",
+        old="        elif key in table:",
+        new="        elif False:",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="an empty route label is a problem",
+        old="        if not key:",
+        new="        if False:",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="route problems block the import",
+        old="    problems = [*problems, *plan.problems, *route_problems]",
+        new="    problems = [*problems, *plan.problems]",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="an entry with no recipient is a problem, not a crash",
+        old="    if not entry.recipients:",
+        new="    if False:",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="a blank section is an empty ledger, not a problem",
+        old="        ledger.normalise_label(title).startswith(wanted) and not body.strip()",
+        new="        False",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="a section with text and no entry is still a problem",
+        old="        ledger.normalise_label(title).startswith(wanted) and not body.strip()",
+        new="        ledger.normalise_label(title).startswith(wanted)",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="an open orphan is stranded, a closed one is not",
+        old='if status.get(record["id"]) != handoffs.CLOSED]',
+        new="if True]",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="a stranded row is outstanding",
+        old="len(prepared.closes) + len(prepared.stranded)",
+        new="len(prepared.closes)",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="the id comes from the key, so a concurrent second run is refused at the filesystem",
+        old="            handoff_id=id_of(entry),",
+        new="            handoff_id=None,",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="the id covers the whole key, not just the date",
+        old="    key = json.dumps(reconcile.imported_of(entry), sort_keys=True)",
+        new="    key = str(entry.date)",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="a failed post is reported",
+        old=f"{FAILED}posted",
+        new=f"{FAILED_NOT}posted",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="a failed close is reported",
+        old=f"{FAILED}closed",
+        new=f"{FAILED_NOT}closed",
+        caught_by="test_migrate.py",
+    ),
+    Mutation(
+        module="migrate",
+        rule="a partial write says how much was made and to run again",
+        old="    if problems:\n        done = len(lines)",
+        new="    if False:\n        done = len(lines)",
         caught_by="test_migrate.py",
     ),
 ]
