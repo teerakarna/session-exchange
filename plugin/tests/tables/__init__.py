@@ -7,7 +7,7 @@ rule is that a fix adds a mutation, so nearly every PR edited `mutate.py`, tripp
 paid the full sweep. The narrowing only ever applied to the PR this repo tries not to produce: one
 that changes behaviour and asserts nothing new about it.
 
-**One file per module rather than one file holding all nine**, which is the part that makes the
+**One file per module rather than one file holding them all**, which is the part that makes the
 narrowing work rather than just moving code. `targets` maps a changed path to the modules worth
 sweeping, and it is pure: all it has is the path. `tables/handoffs.py` names its module in the path,
 so a diff that adds a mutation there sweeps `handoffs` and nothing else. A single `tables.py` would

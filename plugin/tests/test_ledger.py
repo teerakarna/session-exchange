@@ -315,8 +315,8 @@ check(
     False,
 )
 
-# The prose has to sit further from the label than `STATUS_WINDOW`, or the window itself reads it
-# and the check passes for the wrong reason.
+# The prose has to sit further from the label than `STATUS_WINDOW`, so that only a search of the
+# whole block can reach it. Inside the window the keyword would count, and correctly.
 far, _ = ledger.entries(
     "## Open questions / handoffs\n\n**[A " + ledger.ARROW + " B]** 2026-01-01 - headline "
     "**Status:** OPEN\n\n" + "filler " * 20 + "and the other lane got theirs done\n"
@@ -335,6 +335,37 @@ check(
     lower[0].closed if lower else None,
     True,
 )
+
+
+def one(header):
+    """The single entry a one-line section parses to, or `None`."""
+    found, _ = ledger.entries("## Open questions / handoffs\n\n" + header + "\n")
+    return found[0] if found else None
+
+
+check("the ASCII reversed arrow swaps the sides too", ledger.split_route("A <- B"), ("B", ["A"]))
+merged = one("**[A " + ledger.ARROW + " B]** 2026-01-01 - headline **Status:** MERGED")
+check("merged is a closure word", merged.closed if merged else None, True)
+was = one("**[A " + ledger.ARROW + " B]** 2026-01-01 - new one was: old one here")
+check(
+    "a lowercase was: marker still holds the original",
+    was and was.original_headline,
+    "old one here",
+)
+sender_case = one("**" + ledger.ARROW + " B, From A 2026-01-01 - headline**")
+check(
+    "the sender clause matches in any case",
+    sender_case and sender_case.route,
+    "A " + ledger.ARROW + " B",
+)
+# Keyed as `>B` instead, an empty sender would pass for a route and reconcile would never report it.
+no_sender = one("**" + ledger.ARROW + " B, from 2026-01-01 - headline**")
+check("a shape B header with an empty sender has no route", no_sender and no_sender.route, None)
+first, _ = ledger.find_section(
+    "## Open questions / handoffs one\n\n**[A " + ledger.ARROW + " B]** 2026-01-01 - first\n\n"
+    "## Open questions / handoffs two\n\n**[A " + ledger.ARROW + " B]** 2026-01-02 - second\n"
+)
+check("of two qualifying sections the first wins", "first" in (first or ""), True)
 
 print()
 if failures:

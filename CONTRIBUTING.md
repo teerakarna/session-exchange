@@ -62,14 +62,15 @@ A sweep costs one full suite run per mutation, so it is its own CI job and not p
 `plugin/tests/run.py`. What *is* in the suite is `test_mutations.py`, the cheap half: it asserts that
 every mutation still matches the source it claims to patch, and that `TABLES` and `UNSWEPT` together
 account for every module in `plugin/lib`. Both failures are otherwise silent. A mutation whose text
-has drifted tests nothing while still reporting a catch, and none of the eleven modules had a table in
-the repo at all before this, which is the same "thorough where it was pointed" problem one level up.
-Eleven have one now, and `cli` is the single entry in `DECLINED`: 400-odd lines of argument parsing and output formatting, every path of it reached
-by somebody who typed the command and is reading the answer, with `test_cli.py` driving all of it end
-to end. That is the trade the sweep loses on, and it is a claim about `cli` rather than a general
-argument - it was briefly recycled for `ledger` and `reconcile`, and once written out honestly it did
-not apply to them, because neither had a caller at all so there was no person and no answer to
-misread (#40). They sat in `NOT_YET` until their tables landed ahead of `migrate` (#55).
+has drifted tests nothing while still reporting a catch, and none of the modules had a table in the
+repo at all before this, which is the same "thorough where it was pointed" problem one level up.
+Eleven of the twelve have one now, and `cli` is the single entry in `DECLINED`: 400-odd lines of
+argument parsing and output formatting, every path of it reached by somebody who typed the command
+and is reading the answer, with `test_cli.py` driving all of it end to end. That is the trade the
+sweep loses on, and it is a claim about `cli` rather than a general argument - it was briefly
+recycled for `ledger` and `reconcile`, and once written out honestly it did not apply to them,
+because neither had a caller at all so there was no person and no answer to misread (#40). They sat
+in `NOT_YET` until their tables landed ahead of `migrate` (#55).
 
 The split exists because a debt list that quietly contains permanent entries stops being read as a
 debt list. Reversing either decision is an edit to a dict, which is the point of writing the reason
