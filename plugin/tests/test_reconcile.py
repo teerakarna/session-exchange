@@ -561,6 +561,31 @@ check(
 )
 
 print()
+print("a stored block with only one half of its key")
+
+
+# The half that is missing gets passed on as None, so the broken version raises inside the key
+# rather than returning a wrong one. Caught here so the check names itself instead of the run
+# ending on a traceback.
+def half_key(imported):
+    try:
+        return reconcile.key_of_record({"imported": imported})
+    except Exception as exc:
+        return type(exc).__name__
+
+
+check(
+    "a route and no headline reads as not imported",
+    half_key({"route": "a>b"}),
+    None,
+)
+check(
+    "a headline and no route reads as not imported",
+    half_key({"headline": "x"}),
+    None,
+)
+
+print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
     raise SystemExit(1)

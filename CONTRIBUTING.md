@@ -62,14 +62,15 @@ A sweep costs one full suite run per mutation, so it is its own CI job and not p
 `plugin/tests/run.py`. What *is* in the suite is `test_mutations.py`, the cheap half: it asserts that
 every mutation still matches the source it claims to patch, and that `TABLES` and `UNSWEPT` together
 account for every module in `plugin/lib`. Both failures are otherwise silent. A mutation whose text
-has drifted tests nothing while still reporting a catch, and none of the eleven modules had a table in
-the repo at all before this, which is the same "thorough where it was pointed" problem one level up.
-Nine have one now. `ledger` and `reconcile` are in `NOT_YET`, tables owed, and `cli` is the single
-entry in `DECLINED`: 400-odd lines of argument parsing and output formatting, every path of it reached
-by somebody who typed the command and is reading the answer, with `test_cli.py` driving all of it end
-to end. That is the trade the sweep loses on, and it is a claim about `cli` rather than a general
-argument - it was briefly recycled for the other two, and once written out honestly it did not apply
-to them, because neither has a caller at all so there is no person and no answer to misread (#40).
+has drifted tests nothing while still reporting a catch, and none of the modules had a table in the
+repo at all before this, which is the same "thorough where it was pointed" problem one level up.
+Eleven of the twelve have one now, and `cli` is the single entry in `DECLINED`: 400-odd lines of
+argument parsing and output formatting, every path of it reached by somebody who typed the command
+and is reading the answer, with `test_cli.py` driving all of it end to end. That is the trade the
+sweep loses on, and it is a claim about `cli` rather than a general argument - it was briefly
+recycled for `ledger` and `reconcile`, and once written out honestly it did not apply to them,
+because neither had a caller at all so there was no person and no answer to misread (#40). They sat
+in `NOT_YET` until their tables landed ahead of `migrate` (#55).
 
 The split exists because a debt list that quietly contains permanent entries stops being read as a
 debt list. Reversing either decision is an edit to a dict, which is the point of writing the reason
@@ -308,7 +309,8 @@ Two things the narrowing gives up, both real. A rule can stop being asserted for
 points at: a check that covered a second module by accident, an interpreter change under the suite,
 two changes that are each fine and together are not. And a module in `UNSWEPT` is swept by nothing at
 all, weekly included, which is why a change to one of those prints a line saying the change went
-unswept rather than passing quietly. The weekly run is the net under the first; issue #55 is the second.
+unswept rather than passing quietly. The weekly run is the net under the first; keeping `UNSWEPT` down
+to `cli` is the answer to the second.
 
 A third thing the scoring gives up, part of which is now reported. A mutation counts as caught when
 the file named in its `caught_by` fails, and a file that dies on a traceback fails too - so a module

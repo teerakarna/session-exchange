@@ -250,9 +250,7 @@ def targets(paths):
             elif name in DECLINED:
                 notes.append(f"{name} changed and is deliberately not swept: {DECLINED[name]}")
             elif name in NOT_YET:
-                notes.append(
-                    f"{name} changed and has no table yet, so this change goes unswept (#55)"
-                )
+                notes.append(f"{name} changed and has no table yet, so this change goes unswept")
         elif parts[1] == "tests":
             named = by_test.get(parts[2], set())
             modules |= named
