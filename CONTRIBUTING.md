@@ -64,7 +64,7 @@ every mutation still matches the source it claims to patch, and that `TABLES` an
 account for every module in `plugin/lib`. Both failures are otherwise silent. A mutation whose text
 has drifted tests nothing while still reporting a catch, and none of the modules had a table in the
 repo at all before this, which is the same "thorough where it was pointed" problem one level up.
-Twelve of the thirteen have one now, and `cli` is the single entry in `DECLINED`: 400-odd lines of
+Thirteen of the fourteen have one now, and `cli` is the single entry in `DECLINED`: 400-odd lines of
 argument parsing and output formatting, every path of it reached by somebody who typed the command
 and is reading the answer, with `test_cli.py` driving all of it end to end. That is the trade the
 sweep loses on, and it is a claim about `cli` rather than a general argument - it was briefly

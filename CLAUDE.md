@@ -56,7 +56,9 @@ from live state, which is the one copy that cannot go stale.
 
 - **`Stop` is unwired.** Its only job is catching handoffs posted mid-session. The matcher it would call
   exists, but a hook on every turn is a cost every session pays, so it goes in as its own reviewed change.
-- **`migrate --step 7` exits 2** and says it is not built. Exit 2 is neither success nor fault.
+- **`migrate --step 7` never edits `~/.claude/settings.json`.** A wiring there serves every root on
+  the machine, and the file is often generated, so it is reported and left. Scripts are retired into
+  a dated directory, never deleted.
 - **No `pyproject.toml`.** Nothing pip-installs this and there is no distribution to build, so
   packaging metadata would be a claim the repo cannot honour. Ruff config lives in `ruff.toml`.
 

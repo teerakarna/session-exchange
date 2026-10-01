@@ -1170,6 +1170,8 @@ with tempfile.TemporaryDirectory() as tmp:
         (code, "step 4 is not done" in out, (hooks / "alpha-session-lane.sh").is_file()),
         (1, True, True),
     )
+    code, out = run(home, repo, "migrate", "--step", "7")
+    check("and its dry run exits 1 as well", (code, "dry run" in out), (1, True))
     marker.write_text(json.dumps(written))
     code, out = run(home, repo, "migrate", "--step", "7")
     check(

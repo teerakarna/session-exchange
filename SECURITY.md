@@ -76,3 +76,8 @@ hook that runs on every session start is a bad place to have a supply chain.
 never written. `~/.claude/settings.json` and `settings.local.json` files under the root, to detect a
 legacy hook still wired: that scan reports the settings path and the bare script name only, and
 deliberately never the command string, because a command string is where somebody's arguments are.
+
+`exchange migrate --step 7 --apply` is the one command that writes outside the store, and only when
+typed. It rewrites the `settings.local.json` files under the root, keeping each old copy beside it,
+and moves legacy scripts out of `~/.claude/hooks` into a dated directory there. It never writes
+`~/.claude/settings.json`, and it never deletes a file.
