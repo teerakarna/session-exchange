@@ -377,8 +377,6 @@ def entries(text: str, name: str = DEFAULT_SECTION) -> tuple[list[Entry], str | 
         return [], problem
     lines = body.split("\n")
     starts = [index for index, line in enumerate(lines) if is_entry(line)]
-    if not starts:
-        return [], "the section has content but no entry parsed out of it"
     out = []
     for position, start in enumerate(starts):
         end = starts[position + 1] if position + 1 < len(starts) else len(lines)

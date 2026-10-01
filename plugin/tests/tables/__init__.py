@@ -19,7 +19,19 @@ second decides which tables exist, so a change to either can invalidate any verd
 `INSTRUMENT` alongside `mutate.py` and `run.py`.
 """
 
-from . import claims, exchange_root, handoffs, hook, hookio, legacy, registry, store, validate
+from . import (
+    claims,
+    exchange_root,
+    handoffs,
+    hook,
+    hookio,
+    ledger,
+    legacy,
+    reconcile,
+    registry,
+    store,
+    validate,
+)
 from .shape import Mutation  # noqa: F401  - re-exported; the tables and `mutate.py` both import it
 
 TABLES = {
@@ -28,7 +40,9 @@ TABLES = {
     "handoffs": handoffs.MUTATIONS,
     "hook": hook.MUTATIONS,
     "hookio": hookio.MUTATIONS,
+    "ledger": ledger.MUTATIONS,
     "legacy": legacy.MUTATIONS,
+    "reconcile": reconcile.MUTATIONS,
     "registry": registry.MUTATIONS,
     "store": store.MUTATIONS,
     "validate": validate.MUTATIONS,
@@ -37,16 +51,12 @@ TABLES = {
 # Modules with no table yet, listed rather than merely absent so that the debt is a thing you have
 # to look at and a new module cannot join it by accident. `test_mutations.py` asserts these two sets
 # plus the keys of TABLES are exactly what is in `plugin/lib`, so adding a module without deciding
-# which of the three it belongs in fails the build. The mechanism came from issue #8; these two
-# entries are #55.
+# which of the three it belongs in fails the build. The mechanism came from issue #8.
 #
-# It was empty for a day, with all three untabled modules in `DECLINED`. Two of them are back here
-# because the reason recorded for declining them described other modules (#40), and once written
-# honestly the argument `DECLINED` makes turned out to be unavailable to either: it is that a wrong
-# answer lands in front of the person who typed the command, and neither module has a caller at all.
-# `migrate` is the only command that would reach them and it exits 2. So the honest position is that
-# a table is owed, which is this set, rather than that one is not wanted, which is the other.
-NOT_YET = {"ledger", "reconcile"}
+# Empty, and kept rather than deleted so the next module has somewhere honest to go. `ledger` and
+# `reconcile` sat here until #55 gave them tables, ahead of `migrate`, which is their first caller.
+# They had been in `DECLINED` before that, on a reason that described other modules (#40).
+NOT_YET = set()
 
 # Not "not yet". Decided against, with the reason next to the name, because a debt list that
 # silently contains permanent entries stops being a debt list. Reversing one of these is an edit to

@@ -299,6 +299,44 @@ check(
 )
 
 print()
+print("the rules the mutation sweep found nothing asserting (#55)")
+
+check("labels fold case", ledger.normalise_label("Ops"), "ops")
+check("spacing around a separator is not part of a label", ledger.normalise_label("a / b"), "a/b")
+
+nested, _ = ledger.entries(
+    "# Open questions / handoffs\n\n**[A " + ledger.ARROW + " B]** 2026-01-01 - first\n\n"
+    "## Notes\n\nprose under the next heading\n"
+)
+check(
+    "an entry stops at a second-level heading inside its section",
+    "prose under the next heading"
+    in (nested[0].block if nested else "prose under the next heading"),
+    False,
+)
+
+# The prose has to sit further from the label than `STATUS_WINDOW`, or the window itself reads it
+# and the check passes for the wrong reason.
+far, _ = ledger.entries(
+    "## Open questions / handoffs\n\n**[A " + ledger.ARROW + " B]** 2026-01-01 - headline "
+    "**Status:** OPEN\n\n" + "filler " * 20 + "and the other lane got theirs done\n"
+)
+check(
+    "a lowercase keyword in prose far from the label does not close",
+    far[0].closed if far else None,
+    False,
+)
+lower, _ = ledger.entries(
+    "## Open questions / handoffs\n\n**[A " + ledger.ARROW + " B]** 2026-01-01 - headline "
+    "status: done\n"
+)
+check(
+    "a lowercase status label still counts as one",
+    lower[0].closed if lower else None,
+    True,
+)
+
+print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
     raise SystemExit(1)
