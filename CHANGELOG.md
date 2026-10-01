@@ -1,9 +1,10 @@
 # Changelog
 
 Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
-[semver](https://semver.org/spec/v2.0.0.html). Nothing is released yet, so there is one section.
+[semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
+each section is generated from the commits it ships.
 
-## [Unreleased]
+## [0.1.0] - 2026-10-01
 
 ### Added
 
