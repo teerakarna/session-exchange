@@ -88,6 +88,27 @@ for joined in (f"{LEGACY} && {OTHER}", f"{LEGACY}; {OTHER}", f"{LEGACY} | tee x"
         (settings, [], 1),
     )
 
+for redirected in (f"{LEGACY} 2>&1", f"{LEGACY} &> /dev/null", f"{LEGACY} >&2"):
+    new, removed, problems = decommission.unwired(
+        {"hooks": {"SessionStart": [{"hooks": [hook(redirected)]}]}}
+    )
+    # One command with its output redirected, and the most common shape a hook is wired in.
+    check(
+        f"a redirect is not another command ({redirected[-10:]!r})",
+        (removed, problems),
+        (["alpha-session-lane.sh"], []),
+    )
+
+quiet = {"type": "command", "command": OTHER, "statusMessage": "was alpha-session-lane.sh"}
+settings = {"hooks": {"SessionStart": [{"hooks": [quiet, "alpha-session-lane.sh"]}]}}
+# Only the command says what an entry runs. Dropping one for a name in its status line deletes a
+# hook that never ran the script, and nothing would say so.
+try:
+    got = decommission.unwired(settings)
+except Exception as exc:
+    got = f"raised {type(exc).__name__}"
+check("a name outside the command does not remove the entry", got, (settings, [], []))
+
 check(
     "a file with no hooks is no edit",
     decommission.unwired({"hooks": "odd"}),
@@ -168,6 +189,57 @@ with tempfile.TemporaryDirectory() as tmp:
     again = decommission.prepare(root, hooks, user)
     check(
         "a second run has nothing to do", (again.edits, again.retire, again.problems), ([], [], [])
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root, hooks, local, user = layout(tmp)
+    stowed = root / "dotfiles" / ".claude" / "settings.json"
+    stowed.parent.mkdir(parents=True)
+    user.rename(stowed)
+    user.symlink_to(stowed)
+    plan = decommission.prepare(root, hooks, user)
+    # Stowed or symlinked dotfiles under the root are still the user's settings, and still fire for
+    # every root on the machine.
+    check(
+        "the user's settings are machine-wide even when they resolve under the root",
+        ([p for p, _, _ in plan.edits], [n for _, n in plan.machine_wide]),
+        ([local], ["session_exchange_handoffs.py"]),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root, hooks, local, user = layout(tmp)
+    real = root / "elsewhere.json"
+    local.rename(real)
+    local.symlink_to(real)
+    plan = decommission.prepare(root, hooks, user)
+    check(
+        "a symlinked settings file is a problem, not replaced by a file",
+        [p.split("; ")[-1] for p in plan.problems],
+        ["unwire it in the file it points to"],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root, hooks, local, user = layout(tmp)
+    local.chmod(0o640)
+    lines, problems = decommission.apply(decommission.prepare(root, hooks, user), hooks, at="t")
+    check(
+        "a rewritten file keeps its mode",
+        (problems, oct(local.stat().st_mode & 0o777)),
+        ([], "0o640"),
+    )
+    local.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [hook(LEGACY)]}]}}))
+    (hooks / "alpha-session-lane.sh").write_text("# back again\n")
+    lines, problems = decommission.apply(decommission.prepare(root, hooks, user), hooks, at="t")
+    check(
+        "a second run in the same second overwrites neither the backup nor the retired script",
+        (
+            problems,
+            local.with_name("settings.local.json.bak-t").is_file(),
+            local.with_name("settings.local.json.bak-t-2").is_file(),
+            (hooks / "retired-t" / "alpha-session-lane.sh").is_file(),
+            (hooks / "retired-t-2" / "alpha-session-lane.sh").is_file(),
+        ),
+        ([], True, True, True, True),
     )
 
 with tempfile.TemporaryDirectory() as tmp:

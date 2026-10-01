@@ -769,9 +769,13 @@ def _cmd_migrate_step7(root, apply):
     for problem in prepared.problems:
         print(f"problem   {problem}")
     if not (prepared.edits or prepared.retire or prepared.problems):
-        print(
-            "nothing   to do here" + ("; the machine-wide half is above" if prepared.keep else "")
-        )
+        if prepared.machine_wide:
+            print(
+                "nothing   to do here. The machine-wide wiring above is the rest of step 7, and"
+                " `doctor` reads it done once that and every script it keeps are gone"
+            )
+        else:
+            print("nothing   to do here")
         return 0
     if not apply:
         if prepared.problems:

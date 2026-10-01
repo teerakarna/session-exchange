@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -44,8 +45,9 @@ import legacy
 import store
 
 # A hook command with any of these in it runs more than one thing, and only a person can say which
-# part to keep.
+# part to keep. Redirects are taken out first, since `2>&1` and `&>` run one thing.
 COMPOUND = re.compile(r"[;&|\n`]|\$\(")
+REDIRECT = re.compile(r"\d*>&\d*|&>")
 
 
 class Prepared(NamedTuple):
@@ -86,11 +88,13 @@ def unwired(settings):
                 continue
             kept = []
             for hook in inner:
-                texts = list(legacy._strings(hook))
-                names = set().union(*(legacy.names_in(text) for text in texts))
+                # The command only. A name in any other field is no reason to drop the entry, and
+                # one left there is caught afterwards as a name still in the file.
+                command = hook.get("command") if isinstance(hook, dict) else None
+                names = legacy.names_in(command) if isinstance(command, str) else set()
                 if not names:
                     kept.append(hook)
-                elif any(COMPOUND.search(text) for text in texts):
+                elif COMPOUND.search(REDIRECT.sub(" ", command)):
                     kept.append(hook)
                     problems.append(
                         f"a {event} hook runs {', '.join(sorted(names))} among other commands;"
@@ -115,6 +119,10 @@ def prepare(root, hooks_dir=legacy.HOOKS_DIR, user_settings=legacy.USER_SETTINGS
     problems = list(state["problems"])
     edits = []
     for path in sorted({path for path, _ in state["scoped"]}):
+        # Replacing a link with a file would detach it from whatever it pointed into.
+        if path.is_symlink():
+            problems.append(f"{path} is a symlink; unwire it in the file it points to")
+            continue
         try:
             settings = json.loads(path.read_text("utf-8"))
         except (OSError, ValueError) as exc:
@@ -141,6 +149,35 @@ def stamp():
     return store.now().replace("-", "").replace(":", "")
 
 
+def _free(path):
+    """`path`, or the first free `path-N`, so a second run never overwrites the first."""
+    candidate, n = path, 1
+    while candidate.exists():
+        n += 1
+        candidate = path.with_name(f"{path.name}-{n}")
+    return candidate
+
+
+def _rewrite(path, obj):
+    """Atomically replace `path` with `obj`, keeping its mode. Returns a problem or None.
+
+    Not `store.write_json`, whose temp file takes the default mode: these files can hold tokens,
+    and one that was 0600 has to stay 0600 for the whole of the write, not after it.
+    """
+    tmp = path.with_name(f"{store.TMP_PREFIX}{os.getpid()}-{path.name}")
+    try:
+        mode = path.stat().st_mode & 0o777
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(json.dumps(obj, indent=2, ensure_ascii=False) + "\n")
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        return f"could not write {path}: {exc}"
+    return None
+
+
 def apply(prepared, hooks_dir=legacy.HOOKS_DIR, at=None):
     """Write the plan. Returns `(lines, problems)`. Refuses outright on a plan with problems."""
     if prepared.problems:
@@ -148,13 +185,13 @@ def apply(prepared, hooks_dir=legacy.HOOKS_DIR, at=None):
     at = at or stamp()
     lines, problems = [], []
     for path, new, removed in prepared.edits:
-        backup = path.with_name(f"{path.name}.bak-{at}")
+        backup = _free(path.with_name(f"{path.name}.bak-{at}"))
         try:
             shutil.copy2(path, backup)
         except OSError as exc:
             problems.append(f"could not back up {path}, so it was left as it was: {exc}")
             continue
-        problem = store.write_json(path, new)
+        problem = _rewrite(path, new)
         if problem:
             problems.append(problem)
         else:
@@ -162,9 +199,9 @@ def apply(prepared, hooks_dir=legacy.HOOKS_DIR, at=None):
     # Retiring a script that a failed edit above still wires is the window this order exists to
     # close, so a failed edit stops the moves.
     if not problems and prepared.retire:
-        retired = pathlib.Path(hooks_dir) / f"retired-{at}"
+        retired = _free(pathlib.Path(hooks_dir) / f"retired-{at}")
         try:
-            retired.mkdir(exist_ok=True)
+            retired.mkdir()
         except OSError as exc:
             problems.append(f"could not make {retired}: {exc}")
         for script in prepared.retire if retired.is_dir() else []:

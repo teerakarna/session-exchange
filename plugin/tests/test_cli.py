@@ -1197,6 +1197,12 @@ with tempfile.TemporaryDirectory() as tmp:
         ("DOUBLE FIRE:" in out, "CROSS ROOT" in out, "next      step 7" in out),
         (False, True, True),
     )
+    code, out = run(home, repo, "migrate", "--step", "7")
+    check(
+        "with only the machine-wide half left, it says that half is the rest of the step",
+        (code, "machine-wide wiring above is the rest of step 7" in out),
+        (0, True),
+    )
     (home / ".claude" / "settings.json").write_text("{}")
     code, out = run(home, repo, "migrate", "--step", "7", "--apply")
     code, out = run(home, repo, "doctor")

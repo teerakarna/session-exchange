@@ -22,6 +22,13 @@ from .shape import Mutation
 MUTATIONS = [
     Mutation(
         module="legacy",
+        rule="the user's settings are machine-wide even when they resolve under the root",
+        old="            if under(root, path) and pathlib.Path(path).resolve() != user",
+        new="            if under(root, path)",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="legacy",
         # The module's first documented rule, and the one a generalised tool has to keep: two of the
         # scripts carry one environment's project prefix, so matching literals would either ship
         # another workspace's name inside the plugin or stop matching the moment one is renamed.
@@ -175,21 +182,15 @@ MUTATIONS = [
         # been rendered twice - the one thing root resolution exists to prevent, described as
         # something else. Observed on the first real migration, not imagined.
         rule="a wiring outside this root is not this root's rendering doubled",
-        old=(
-            "    scoped = [(path, name) for path, name in wired "
-            "if under(root, path)] if root else []"
-        ),
-        new="    scoped = list(wired)",
+        old="            if under(root, path) and pathlib.Path(path).resolve() != user",
+        new="            if True",
         caught_by="test_legacy.py",
     ),
     Mutation(
         module="legacy",
         rule="and a wiring inside it is",
-        old=(
-            "    scoped = [(path, name) for path, name in wired "
-            "if under(root, path)] if root else []"
-        ),
-        new="    scoped = []",
+        old="            if under(root, path) and pathlib.Path(path).resolve() != user",
+        new="            if False",
         caught_by="test_legacy.py",
     ),
     Mutation(

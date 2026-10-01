@@ -10,6 +10,41 @@ from .shape import Mutation
 MUTATIONS = [
     Mutation(
         module="decommission",
+        rule="only the command says what an entry runs",
+        old="names = legacy.names_in(command) if isinstance(command, str) else set()",
+        new="names = set().union(*(legacy.names_in(t) for t in legacy._strings(hook)))",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
+        rule="a redirect is not another command",
+        old='                elif COMPOUND.search(REDIRECT.sub(" ", command)):',
+        new="                elif COMPOUND.search(command):",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
+        rule="a symlinked settings file is refused, not replaced by a file",
+        old="        if path.is_symlink():",
+        new="        if False:",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
+        rule="a rewritten file keeps its mode",
+        old="        os.chmod(tmp, mode)",
+        new="        os.chmod(tmp, 0o644)",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
+        rule="a second run never overwrites the first one's backup or retired scripts",
+        old="    while candidate.exists():",
+        new="    while False:",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
         rule="a hook entry with no legacy name in it is kept",
         old="                if not names:\n                    kept.append(hook)",
         new="                if False:\n                    kept.append(hook)",
@@ -18,7 +53,7 @@ MUTATIONS = [
     Mutation(
         module="decommission",
         rule="a legacy script run among other commands is left for a person",
-        old="                elif any(COMPOUND.search(text) for text in texts):",
+        old='                elif COMPOUND.search(REDIRECT.sub(" ", command)):',
         new="                elif False:",
         caught_by="test_decommission.py",
     ),
@@ -109,7 +144,7 @@ MUTATIONS = [
     Mutation(
         module="decommission",
         rule="the edit is written",
-        old="        problem = store.write_json(path, new)",
+        old="        problem = _rewrite(path, new)",
         new="        problem = None",
         caught_by="test_decommission.py",
     ),

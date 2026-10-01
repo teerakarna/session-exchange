@@ -145,7 +145,19 @@ def report(root, hooks_dir=HOOKS_DIR, user_settings=USER_SETTINGS):
     # prevent, arriving through the legacy half. Observed that way round on the first real
     # migration rather than guessed: the machine-wide wiring rendered another root's rows into a
     # session under this one.
-    scoped = [(path, name) for path, name in wired if under(root, path)] if root else []
+    #
+    # The user's settings are machine-wide whatever they resolve to. Stowed or symlinked into a tree
+    # under this root, `under` alone would file them here, and step 7 would edit them.
+    user = pathlib.Path(user_settings).resolve() if user_settings else None
+    scoped = (
+        [
+            (path, name)
+            for path, name in wired
+            if under(root, path) and pathlib.Path(path).resolve() != user
+        ]
+        if root
+        else []
+    )
     return {
         "on_disk": on_disk,
         "wired": wired,
