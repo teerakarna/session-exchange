@@ -643,8 +643,8 @@ jobs:
       # `python3`, not `python`: this step runs when the checkout failed and `setup-python` never did,
       # and the runner's own interpreter is what is left. The version does not matter here.
       #
-      # `urllib` rather than `gh` for the draft lookup, for the same reason: nothing installed, nothing
-      # that has to have succeeded first. Any failure to get an answer counts as "not a draft", which
+      # `urllib` rather than `gh` for the draft lookup: one GET, so a CLI and its auth setup would be a
+      # dependency bought for nothing. Any failure to get an answer counts as "not a draft", which
       # rejects the skip - the direction that costs a re-run rather than a merge nothing tested.
       - name: Fail unless every job succeeded
         if: ${{ !cancelled() }}
