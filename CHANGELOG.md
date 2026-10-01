@@ -1,38 +1,10 @@
 # Changelog
 
 Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
-[semver](https://semver.org/spec/v2.0.0.html). Nothing is released yet, so there is one section.
+[semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
+each section is generated from the commits it ships.
 
-## [0.1.0](https://github.com/teerakarna/session-exchange/compare/v0.0.1...v0.1.0) (2026-10-01)
-
-
-### Added
-
-* **ci:** automate versioning with release-please ([#84](https://github.com/teerakarna/session-exchange/issues/84)) ([b16e780](https://github.com/teerakarna/session-exchange/commit/b16e780b61c0d2370f2bc5647c9eab1ef19c088f))
-* **handoff:** the write path, with status derived from history ([#41](https://github.com/teerakarna/session-exchange/issues/41)) ([762ceee](https://github.com/teerakarna/session-exchange/commit/762ceee421977d3045d41e6e95ba534bf2289e24))
-* **hook:** match handoffs to the session they are for ([#81](https://github.com/teerakarna/session-exchange/issues/81)) ([cac92dd](https://github.com/teerakarna/session-exchange/commit/cac92ddef39f50c4da9671b0cc601844757dafbf))
-* **hook:** render presence at session start ([#80](https://github.com/teerakarna/session-exchange/issues/80)) ([41b7fc6](https://github.com/teerakarna/session-exchange/commit/41b7fc6a0b387dbcddc7ee699992a977d69cad9e))
-* **import:** key entries so a second import updates rather than duplicates ([#6](https://github.com/teerakarna/session-exchange/issues/6)) ([f2aa4a9](https://github.com/teerakarna/session-exchange/commit/f2aa4a9b7707d24b55bbb763634af10be5625986))
-* **ledger:** parse the live handoff shapes ([#5](https://github.com/teerakarna/session-exchange/issues/5)) ([06e87fc](https://github.com/teerakarna/session-exchange/commit/06e87fc9cda35acc8d2b729c527d4f212584e6fd))
-* plugin skeleton, hooks manifest, schemas and the exchange command ([#1](https://github.com/teerakarna/session-exchange/issues/1)) ([480a475](https://github.com/teerakarna/session-exchange/commit/480a4753aede0c28755c6e0fd9deae4781790f31))
-* root resolution, and the regression suite it inherits ([269b57d](https://github.com/teerakarna/session-exchange/commit/269b57dd2835e6d0adad0687373287cdb0dacf99))
-
-
-### Fixed
-
-* a stdout nobody is reading is silence, not a traceback on the way out ([#20](https://github.com/teerakarna/session-exchange/issues/20)) ([985e423](https://github.com/teerakarna/session-exchange/commit/985e423a254f59bcb7e9ea44083af071c8c9c492))
-* **cli:** refuse a claim from inside a background job ([#83](https://github.com/teerakarna/session-exchange/issues/83)) ([8b316a0](https://github.com/teerakarna/session-exchange/commit/8b316a0c7ff5a4f623399f7624de55b65e54d058))
-* **cli:** report what the files actually say, not what the defaults imply ([#29](https://github.com/teerakarna/session-exchange/issues/29)) ([d95b33f](https://github.com/teerakarna/session-exchange/commit/d95b33f12f07c7ba987ba27c4982dd12f7f72322))
-* **handoff:** a record one session writes is data to every other one ([#59](https://github.com/teerakarna/session-exchange/issues/59)) ([87611d0](https://github.com/teerakarna/session-exchange/commit/87611d0cc8511410a0eff5872ccb1df041cbd0a7))
-* **handoff:** a status change is its own file, so a concurrent move is not lost ([#50](https://github.com/teerakarna/session-exchange/issues/50)) ([bcae4fb](https://github.com/teerakarna/session-exchange/commit/bcae4fb239c26af39941fc0cfbf455aa1fbac32f))
-* **init:** an area directory can mark itself, and the merge-point refusal stays ([#37](https://github.com/teerakarna/session-exchange/issues/37)) ([6e766e9](https://github.com/teerakarna/session-exchange/commit/6e766e9651e884be897b6844c45be5f01106553a))
-* **legacy:** report a machine-wide wiring as what it is, not as this root doubling ([#35](https://github.com/teerakarna/session-exchange/issues/35)) ([4f477e3](https://github.com/teerakarna/session-exchange/commit/4f477e39b721758478d2e2cf26166cc749a4e705))
-* refuse to start a sweep from inside a sweep ([#19](https://github.com/teerakarna/session-exchange/issues/19)) ([e933215](https://github.com/teerakarna/session-exchange/commit/e9332150b1d0cc267db33ce362149b89319801a0))
-* **release:** move plugin.json's version with each release, and name it in doctor ([#85](https://github.com/teerakarna/session-exchange/issues/85)) ([75f3b30](https://github.com/teerakarna/session-exchange/commit/75f3b3016e0509609416b2cd20b6a3899d04989b))
-* **store:** every anchored pattern accepted a trailing newline ([#9](https://github.com/teerakarna/session-exchange/issues/9)) ([4639d70](https://github.com/teerakarna/session-exchange/commit/4639d70da3795d78fc7edc3252e447cd8f737f7a))
-* **store:** strip filenames in problem lines ([#82](https://github.com/teerakarna/session-exchange/issues/82)) ([0a96ccf](https://github.com/teerakarna/session-exchange/commit/0a96ccf3b49c2533f6eab5e32f904b4a649d063f))
-
-## [Unreleased]
+## [0.1.0] - 2026-10-01
 
 ### Added
 
