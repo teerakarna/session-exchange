@@ -51,6 +51,24 @@
           "type": "string",
           "minLength": 1,
           "description": "The ledger file. Absolute, or relative to the root."
+        },
+        "section": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The heading the handoffs sit under. Defaults to `Open questions / handoffs`, the heading the legacy hook read."
+        },
+        "routes": {
+          "type": "object",
+          "description": "Ledger recipient label to the scope its handoffs are addressed to. Labels compare case-folded and with the spacing around `/`, `&` and `+` ignored. An entry with several recipients needs every label to map to the same scope, or the whole recipient side mapped as one key, such as `Lane B + Lane C`. An entry whose recipient has no route stops the import before anything is written, because the ledger names lanes and the store addresses scopes, and only the owner knows which is which.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repo"],
+            "properties": {
+              "repo": { "type": "string", "minLength": 1 },
+              "paths": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
         }
       }
     }

@@ -19,6 +19,13 @@ import tempfile
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
 CLI = PLUGIN / "lib" / "cli.py"
 
+# One open entry and one closed, so a plan has something to create and something to skip.
+LEDGER = (
+    "## Open questions / handoffs\n\n"
+    "**[Lane A \u2192 Lane B]** 2026-01-02 - still open\n\nbody\n\n"
+    "**[Lane A \u2192 Lane B]** 2026-01-03 - finished **Status:** DONE\n\nbody\n"
+)
+
 failures = []
 
 
@@ -383,9 +390,16 @@ with tempfile.TemporaryDirectory() as tmp:
     marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "ledger.md"})))
     code, out = run(home, repo, "doctor")
     check(
-        "a root that names a ledger has an import outstanding",
-        ("  [ ] 4." in out, "next      step 4" in out),
+        "a ledger named and not there is unknown, not finished",
+        ("  [?] 4." in out, "the ledger is not at" in out),
         (True, True),
+    )
+    (area / "ledger.md").write_text(LEDGER)
+    code, out = run(home, repo, "doctor")
+    check(
+        "a root that names a ledger has an import outstanding",
+        ("  [ ] 4." in out, "next      step 4" in out, "outstanding: 1 problem(s)" in out),
+        (True, True, True),
     )
     # A broken marker hands back defaults, and the defaults have no `legacy_ledger`, so reading
     # them as the answer would call this root finished because its marker was unreadable.
@@ -1042,15 +1056,64 @@ with tempfile.TemporaryDirectory() as tmp:
         (1, 1, True),
     )
 
-print("what is not built yet says so, and does not look like a failure")
+print("migrate --step 4: a dry run first, nothing written on a problem, and a second run idle")
 
 with tempfile.TemporaryDirectory() as tmp:
     home, area, repo = fixture(tmp)
     run(home, repo, "init")
-    code, out = run(home, repo, "migrate")
+    code, out = run(home, repo, "migrate", "--step", "4")
     check(
-        "migrate exits 2 and names the step",
-        (code, "step 4" in out, "Nothing was changed" in out),
+        "a root with no ledger has nothing to import, and that is not a failure",
+        (code, "not applicable" in out),
+        (0, True),
+    )
+    marker = area / ".claude" / "exchange.json"
+    written = json.loads(marker.read_text())
+    (area / "ledger.md").write_text(LEDGER)
+    marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "ledger.md"})))
+    stored = area / ".claude" / "exchange" / "handoffs"
+
+    def count():
+        return len(list(stored.glob("*.json"))) if stored.is_dir() else 0
+
+    code, out = run(home, repo, "migrate", "--step", "4", "--apply")
+    check(
+        "an unrouted recipient refuses --apply and writes nothing",
+        (code, "no route for Lane B" in out, count()),
+        (1, True, 0),
+    )
+    block = {"path": "ledger.md", "routes": {"Lane B": {"repo": "repo"}}}
+    marker.write_text(json.dumps(dict(written, legacy_ledger=block)))
+    code, out = run(home, repo, "migrate", "--step", "4")
+    check(
+        "a dry run prints the counts and writes nothing",
+        (code, "1 to create" in out, "1 closed and skipped" in out, "dry run" in out, count()),
+        (0, True, True, True, 0),
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "a clean plan not yet applied is still outstanding in doctor",
+        ("  [ ] 4." in out, "outstanding: 1 write(s) waiting" in out),
+        (True, True),
+    )
+    code, out = run(home, repo, "migrate", "--step", "4", "--apply")
+    check("--apply posts it", (code, "posted" in out, count()), (0, True, 1))
+    code, out = run(home, repo, "migrate", "--step", "4", "--apply")
+    check(
+        "and a second --apply changes nothing",
+        (code, "0 to create, 0 to close, 1 unchanged" in out, "posted" in out, count()),
+        (0, True, False, 1),
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "and doctor then calls step 4 done",
+        ("  [x] 4." in out, "next      step 4" in out),
+        (True, False),
+    )
+    code, out = run(home, repo, "migrate", "--step", "7")
+    check(
+        "step 7 is not built yet, exits 2 and says nothing changed",
+        (code, "step 7" in out, "Nothing was changed" in out),
         (2, True, True),
     )
     # `handoff` is built now, but it has no default verb: guessing between posting and listing would

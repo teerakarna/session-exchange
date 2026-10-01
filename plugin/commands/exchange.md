@@ -38,8 +38,10 @@ With no arguments, run `show`.
   status. It settles the handoff by writing one more move past the tie, not by removing it, so the
   disagreement stays on disk and `handoff list` and `doctor` go on reporting it. `--note` is required:
   a judgement with no stated grounds is no use to the session that reads it next.
-- `migrate` exits 2 and says which step builds it. Exit 2 is not a failure; it means the command
-  does not exist yet.
+- `migrate --step 4 [--apply]` - import the open handoffs out of the markdown ledger the marker
+  names. A dry run unless `--apply`. Any problem means nothing is written, and a second run changes
+  nothing. Show the user the counts and the problem lines before suggesting `--apply`.
+- `migrate --step 7` exits 2. Exit 2 is not a failure; it means the step is not built yet.
 
 ## What to do with the output
 

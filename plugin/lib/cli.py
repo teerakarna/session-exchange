@@ -22,6 +22,7 @@ import claims
 import exchange_root
 import handoffs
 import legacy
+import migrate
 import registry
 import store
 import validate
@@ -272,9 +273,6 @@ def cmd_claim(args):
 # migration that can be wrong about it, and the half-done state is the dangerous one.
 def _steps(root):
     plugin = pathlib.Path(__file__).resolve().parents[1]
-    # Named `stored`, not `handoffs`: that would shadow the module for the rest of this function,
-    # which is a trap rather than a bug today only because nothing else in here calls it.
-    stored, _ = handoffs.load_all(root)
     state = legacy.report(root)
     return [
         (
@@ -293,7 +291,7 @@ def _steps(root):
             and (plugin / "commands" / "exchange.md").is_file(),
             None,
         ),
-        (4, "open handoffs imported out of the markdown ledger", *_step4(root, stored)),
+        (4, "open handoffs imported out of the markdown ledger", *_step4(root)),
         (5, "this root marked", store.marker_path(root).is_file(), None),
         (
             6,
@@ -313,7 +311,7 @@ def _steps(root):
 NOT_APPLICABLE = "n/a"
 
 
-def _step4(root, stored):
+def _step4(root):
     """`(done, why)` for the import. Three real states, which is why it has its own function.
 
     Whether a root ever had a markdown ledger cannot be derived: the plugin names no paths, so the
@@ -322,6 +320,11 @@ def _step4(root, stored):
     reads as finished when it may only be undeclared. Before this the evidence was pinned false on
     every root, so `doctor` pointed at step 4 forever and would have kept steps 5 to 7 unreachable
     once `migrate` gates on it.
+
+    Done is derived from the same plan `migrate` prints, never from a record existing: an import
+    that posted three of five reads as outstanding, and so does a closure in the ledger that has not
+    reached the store yet. A ledger that cannot be read is unknown, since it may be gone on purpose
+    or only moved.
 
     A missing or unreadable marker is unknown rather than not applicable. A missing one declares
     nothing, and `store.config` reads it as defaults with no problem. A broken one hands back
@@ -338,7 +341,18 @@ def _step4(root, stored):
             "no `legacy_ledger` in the marker, so there is nothing to import. If this root did keep"
             " a markdown ledger, name it there"
         )
-    return any("imported" in record for record, _ in stored), None
+    block = config["legacy_ledger"]
+    if not migrate.ledger_path(root, block).is_file():
+        return None, f"the ledger is not at {migrate.ledger_path(root, block)}"
+    prepared = migrate.prepare(root, block)
+    if prepared.problems:
+        return False, (
+            f"{len(prepared.problems)} problem(s), listed by `exchange migrate --step 4`"
+        )
+    pending = migrate.outstanding(prepared)
+    if pending:
+        return False, f"{pending} write(s) waiting; `exchange migrate --step 4` shows them"
+    return True, None
 
 
 def _running():
@@ -458,7 +472,12 @@ def cmd_doctor(args):
                 first_incomplete = number
         print(f"  [{mark}] {number}. {what}")
         if why:
-            label = "not applicable" if done == NOT_APPLICABLE else "not checkable here"
+            if done == NOT_APPLICABLE:
+                label = "not applicable"
+            elif done is None:
+                label = "not checkable here"
+            else:
+                label = "outstanding"
             print(f"        {label}: {why}")
     print(
         "  [?] means this check is not implemented or not answerable from here. It is printed "
@@ -645,12 +664,67 @@ def cmd_handoff_list(args):
     return 1 if problems else 0
 
 
-def cmd_not_built(args):
+def _cmd_migrate_step4(root, apply):
+    config, problem = store.config(root)
+    if problem:
+        print(
+            f"problem: the marker is unreadable, so the ledger it names cannot be found: {problem}"
+        )
+        return 1
+    if "legacy_ledger" not in config:
+        print(
+            "Step 4 is not applicable: the marker names no `legacy_ledger`, so there is nothing"
+            " to import. If this root did keep a markdown ledger, name it in"
+            f" {store.marker_path(root)}."
+        )
+        return 0
+    prepared = migrate.prepare(root, config["legacy_ledger"])
+    plan = prepared.plan
+    print(f"ledger    {prepared.path}")
     print(
-        f"`exchange {args.command}` is not built yet: it arrives with migration step "
-        f"{args.step}. Nothing was changed."
+        f"counts    {prepared.parsed} parsed, {len(plan.create)} to create, "
+        f"{len(prepared.closes)} to close, {len(plan.unchanged)} unchanged, "
+        f"{len(plan.skipped)} closed and skipped, {len(plan.orphan)} stored with no entry, "
+        f"{len(prepared.drift)} drifted, {len(prepared.problems)} problem(s)"
     )
-    return NOT_BUILT
+    for entry, to in zip(plan.create, prepared.routes):
+        where = handoffs.describe(to, config["max_focus_chars"]) if to else "(no route)"
+        dated = entry.date or "undated, so stamped with the time of the import"
+        print(f"create    {dated}  {where}  {store.printable(entry.headline[:60])}")
+    for change in prepared.closes:
+        print(f"close     {change.record['id']}  closed in the ledger")
+    for change, fields in prepared.drift:
+        print(
+            f"drift     {change.record['id']}  {', '.join(sorted(fields))}, reported, not written"
+        )
+    for record in plan.orphan:
+        print(f"orphan    {record['id']}  imported, and no longer in the ledger")
+    for problem in prepared.problems:
+        print(f"problem   {problem}")
+    if not apply:
+        if prepared.problems:
+            print(
+                "dry run   nothing was written, and `--apply` refuses until the problems are fixed"
+            )
+        else:
+            print("dry run   nothing was written; `--apply` writes it")
+        return 1 if prepared.problems else 0
+    lines, problems = migrate.apply(root, prepared)
+    for line in lines:
+        print(line)
+    for problem in problems:
+        print(f"problem   {problem}")
+    return 1 if problems else 0
+
+
+def cmd_migrate(args):
+    if args.step != 4:
+        print(f"`exchange migrate --step {args.step}` is not built yet. Nothing was changed.")
+        return NOT_BUILT
+    resolution = _resolved(args)
+    if resolution is None:
+        return 1
+    return _cmd_migrate_step4(resolution.root, args.apply)
 
 
 def build_parser():
@@ -729,8 +803,14 @@ def build_parser():
     hlist.add_argument("--all", action="store_true", help="include closed ones")
     hlist.set_defaults(func=cmd_handoff_list)
 
-    migrate = sub.add_parser("migrate", help="run a migration step (not built yet)")
-    migrate.set_defaults(func=cmd_not_built, step=4)
+    migrate_ = sub.add_parser("migrate", help="run a migration step; a dry run unless --apply")
+    # Required rather than defaulting to the next outstanding step. A command that writes into
+    # the store should not pick what it writes from state the typist has not looked at.
+    migrate_.add_argument("--step", type=int, choices=(4, 7), required=True)
+    migrate_.add_argument(
+        "--apply", action="store_true", help="write the plan; refused on any problem"
+    )
+    migrate_.set_defaults(func=cmd_migrate)
 
     return parser
 
