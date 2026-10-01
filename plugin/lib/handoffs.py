@@ -113,12 +113,15 @@ def to_scope(repo=None, paths=(), session_id=None):
     return None, "say who it is for: --repo (optionally with --path) or --session"
 
 
-def post(root, to, body, cwd, session_id=None, name=None, handoff_id=None, at=None):
+def post(root, to, body, cwd, session_id=None, name=None, handoff_id=None, at=None, imported=None):
     """Write a new handoff. Returns `(record, problem)`.
 
     `cwd` rather than nothing identifies the sender even when the session id could not be worked
     out, which is the case for an entry lifted out of a ledger and also for a terminal that is not
     inside a session the registry knows. The schema requires `cwd` for exactly that reason.
+
+    `imported` is the importer's key, and only `migrate` passes it. It goes in at creation because
+    a record is never rewritten, so a key added afterwards could only arrive as a second record.
     """
     if not (body or "").strip():
         return None, "a handoff with no body says nothing; give it one"
@@ -147,6 +150,8 @@ def post(root, to, body, cwd, session_id=None, name=None, handoff_id=None, at=No
         record["from"]["session_id"] = session_id
     if name:
         record["from"]["name"] = name
+    if imported:
+        record["imported"] = imported
 
     # `create_json`, so "never a replace" is the filesystem refusing a name that exists rather
     # than this function checking first and writing second. The check-then-write version was here,

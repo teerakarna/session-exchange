@@ -283,6 +283,18 @@ with tempfile.TemporaryDirectory() as tmp:
         (record["from"], "session_id" in record["from"]),
         ({"cwd": str(sender)}, False),
     )
+    key = {"route": "a>b", "headline": "x"}
+    record, problem = handoffs.post(root, to, "body", sender, imported=key)
+    check(
+        "an importer's key goes on the record, and passes the schema",
+        (problem, record and record.get("imported")),
+        (None, key),
+    )
+    check(
+        "and a normal post has none",
+        "imported" in handoffs.post(root, to, "body", sender)[0],
+        False,
+    )
 
     # One timestamp, used twice. The id has to sort where the handoff belongs chronologically, which
     # it only does if both come from the same clock reading rather than two calls to `now()`.

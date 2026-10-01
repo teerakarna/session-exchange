@@ -706,4 +706,11 @@ MUTATIONS = [
         new='f"{record.name} beside it',
         caught_by="test_handoffs.py",
     ),
+    Mutation(
+        module="handoffs",
+        rule="an importer's key is written at creation, the only time a record is written",
+        old='        record["imported"] = imported',
+        new="        pass",
+        caught_by="test_handoffs.py",
+    ),
 ]
