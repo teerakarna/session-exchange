@@ -520,6 +520,11 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Read-only, for asking whether the PR is a draft right now rather than when the event fired.
+      # See the last step.
+      pull-requests: read
     steps:
       # The list above is the one gate that guards every other gate: `ci` is the only check the
       # ruleset names, and it fails only if a job in its `needs` failed. A job left out of that list
@@ -557,6 +562,14 @@ jobs:
       # having been through it. That is the same "the PR gate is not weaker than the main gate" rule
       # the `test` comment records, kept rather than traded - what changed is when the gate runs, not
       # whether it does.
+      #
+      # That argument held only as long as "skipped because a draft" meant the PR was a draft when it
+      # merged, and the `if:` on `test-macos` cannot promise that. It reads the event payload, a
+      # snapshot from when the event was queued. A push and a `ready_for_review` a second apart put
+      # two runs in one concurrency group, the later cancels the earlier, and the survivor can be the
+      # push carrying `draft: true` - a green `ci` with macOS skipped on a PR that is open for merge
+      # (#86). So the last step asks the API for the draft state as it is now, and only accepts the
+      # skip from a PR that is still a draft.
       # Same independent-reporting pattern as `checks`, and the same reasoning, but written out rather
       # than sharing that job's anchor: the aggregate step below must report whatever else in here
       # went wrong, or a failed checkout would skip it and leave `ci` green having checked nothing.
@@ -629,16 +642,54 @@ jobs:
       #
       # `python3`, not `python`: this step runs when the checkout failed and `setup-python` never did,
       # and the runner's own interpreter is what is left. The version does not matter here.
+      #
+      # `urllib` rather than `gh` for the draft lookup, for the same reason: nothing installed, nothing
+      # that has to have succeeded first. Any failure to get an answer counts as "not a draft", which
+      # rejects the skip - the direction that costs a re-run rather than a merge nothing tested.
       - name: Fail unless every job succeeded
         if: ${{ !cancelled() }}
         env:
           NEEDS: ${{ toJSON(needs) }}
           MAY_SKIP: ${{ steps.needs.outputs.may_skip }}
+          EVENT: ${{ github.event_name }}
+          PULL: ${{ github.event.pull_request.url }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'EOF'
           import json
           import os
           import sys
+          import urllib.request
+
+          def draft_now():
+              request = urllib.request.Request(
+                  os.environ["PULL"],
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      return json.load(response)["draft"] is True
+              except Exception as exc:
+                  print(f"::warning::could not read the PR's draft state ({type(exc).__name__})")
+                  return False
+
+          def skip_ok(name):
+              if name not in allowed:
+                  return False
+              if name != "test-macos" or os.environ.get("EVENT") != "pull_request":
+                  return True
+              if draft_now():
+                  return True
+              print(
+                  "::error::test-macos skipped because the event said draft, but the PR is not a "
+                  "draft now (or could not be read), so macOS never ran on what would merge. "
+                  "Re-running this run replays the same payload and fails again: re-run the "
+                  "cancelled ready_for_review run, or push."
+              )
+              return False
 
           results = json.loads(os.environ["NEEDS"])
           allowed = set(os.environ.get("MAY_SKIP", "").split())
@@ -650,7 +701,7 @@ jobs:
           bad = []
           for name, upstream in sorted(results.items()):
               result = upstream["result"]
-              if result == "success" or (result == "skipped" and name in allowed):
+              if result == "success" or (result == "skipped" and skip_ok(name)):
                   print(f"  {name}: {result}")
               else:
                   print(f"  {name}: {result}  <- not acceptable")
