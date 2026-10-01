@@ -43,6 +43,24 @@ check("the plugin manifest parses", problem, None)
 check("the marketplace lists exactly one plugin", len(marketplace["plugins"]), 1)
 listed = marketplace["plugins"][0]
 check("and its name matches the manifest", listed["name"], manifest["name"])
+# #49. The host caches an install by this version, so a release that does not move it never reaches
+# anyone. release-please is what moves it, and only if its config names the file and its manifest
+# agrees with what the file says now.
+release, problem = load(REPO / "release-please-config.json")
+check("the release-please config parses", problem, None)
+extra = (release or {}).get("packages", {}).get(".", {}).get("extra-files", [])
+check(
+    "a release moves the version the host caches by",
+    {"type": "json", "path": "plugin/.claude-plugin/plugin.json", "jsonpath": "$.version"} in extra,
+    True,
+)
+released, problem = load(REPO / ".release-please-manifest.json")
+check("the release-please manifest parses", problem, None)
+check(
+    "and the last release it recorded is the version the plugin declares",
+    (released or {}).get("."),
+    manifest.get("version"),
+)
 source = (REPO / listed["source"]).resolve()
 check("and its source points at the plugin directory", source, PLUGIN)
 
