@@ -118,7 +118,12 @@ def prepare(root, hooks_dir=legacy.HOOKS_DIR, user_settings=legacy.USER_SETTINGS
     state = legacy.report(root, hooks_dir, user_settings)
     problems = list(state["problems"])
     edits = []
-    for path in sorted({path for path, _ in state["scoped"]}):
+    paths = sorted({path for path, _ in state["scoped"]})
+    targets = {path.resolve() for path in paths if not path.is_symlink()}
+    for path in paths:
+        # A link to a file this run edits anyway is that file, and needs nothing of its own.
+        if path.is_symlink() and path.resolve() in targets:
+            continue
         # Replacing a link with a file would detach it from whatever it pointed into.
         if path.is_symlink():
             problems.append(f"{path} is a symlink; unwire it in the file it points to")
@@ -187,7 +192,10 @@ def apply(prepared, hooks_dir=legacy.HOOKS_DIR, at=None):
     for path, new, removed in prepared.edits:
         backup = _free(path.with_name(f"{path.name}.bak-{at}"))
         try:
-            shutil.copy2(path, backup)
+            # Exclusive, so a run racing this one cannot have its backup overwritten.
+            with open(path, "rb") as src, open(backup, "xb") as dst:
+                shutil.copyfileobj(src, dst)
+            shutil.copystat(path, backup)
         except OSError as exc:
             problems.append(f"could not back up {path}, so it was left as it was: {exc}")
             continue
@@ -200,11 +208,14 @@ def apply(prepared, hooks_dir=legacy.HOOKS_DIR, at=None):
     # close, so a failed edit stops the moves.
     if not problems and prepared.retire:
         retired = _free(pathlib.Path(hooks_dir) / f"retired-{at}")
+        made = True
         try:
             retired.mkdir()
         except OSError as exc:
+            made = False
             problems.append(f"could not make {retired}: {exc}")
-        for script in prepared.retire if retired.is_dir() else []:
+        # Only into a directory this run made, never into one a concurrent run made a moment ago.
+        for script in prepared.retire if made else []:
             try:
                 script.rename(retired / script.name)
             except OSError as exc:

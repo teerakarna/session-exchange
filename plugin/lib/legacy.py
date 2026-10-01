@@ -118,18 +118,6 @@ def wirings(settings_paths):
     return found, problems
 
 
-def under(root, path):
-    """Is `path` inside `root`?
-
-    Both sides resolved, because they arrive from different places - the root from
-    `exchange_root.resolve`, which has already resolved it, and the settings path from a glob under
-    the root or from `$HOME` - and comparing a real path against a symlinked one answers no in
-    silence. A wrong no here files a wiring under the wrong fault, which is the thing this function
-    was added to stop.
-    """
-    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())
-
-
 def report(root, hooks_dir=HOOKS_DIR, user_settings=USER_SETTINGS):
     """Everything known about the legacy half, from live state only.
 
@@ -146,18 +134,12 @@ def report(root, hooks_dir=HOOKS_DIR, user_settings=USER_SETTINGS):
     # migration rather than guessed: the machine-wide wiring rendered another root's rows into a
     # session under this one.
     #
-    # The user's settings are machine-wide whatever they resolve to. Stowed or symlinked into a tree
-    # under this root, `under` alone would file them here, and step 7 would edit them.
-    user = pathlib.Path(user_settings).resolve() if user_settings else None
-    scoped = (
-        [
-            (path, name)
-            for path, name in wired
-            if under(root, path) and pathlib.Path(path).resolve() != user
-        ]
-        if root
-        else []
-    )
+    # Every other file searched was found under this root, so the user's settings are the only
+    # machine-wide one, by the path they were searched at. Not by where they resolve: stowed into a
+    # tree under this root they are still the user's, and a `settings.local.json` linked to a
+    # checkout elsewhere still fires for this root.
+    user = pathlib.Path(user_settings) if user_settings else None
+    scoped = [(path, name) for path, name in wired if pathlib.Path(path) != user]
     return {
         "on_disk": on_disk,
         "wired": wired,

@@ -119,6 +119,14 @@ print()
 print("planning: under this root edited, machine-wide reported, scripts retired only when unwired")
 
 
+def guarded(plan, hooks):
+    """`apply`, with a raise turned into a failed check rather than the end of the file."""
+    try:
+        return decommission.apply(plan, hooks, at="t")
+    except Exception as exc:
+        return [], [f"raised {type(exc).__name__}"]
+
+
 def layout(tmp):
     tmp = pathlib.Path(tmp).resolve()
     root, home = tmp / "area", tmp / "home"
@@ -163,9 +171,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("applying makes both changes", (len(lines), problems), (2, []))
     check("the settings under the root no longer wire it", json.loads(local.read_text()), {})
     backup = local.with_name("settings.local.json.bak-20261001T000000Z")
+    try:
+        kept = json.loads(backup.read_text())
+    except (OSError, ValueError) as exc:
+        kept = f"raised {type(exc).__name__}"
     check(
         "and the old copy is kept beside it",
-        json.loads(backup.read_text()) if backup.is_file() else None,
+        kept,
         {"hooks": {"SessionStart": [{"hooks": [hook(LEGACY)]}]}},
     )
     retired = hooks / "retired-20261001T000000Z"
@@ -216,6 +228,73 @@ with tempfile.TemporaryDirectory() as tmp:
         "a symlinked settings file is a problem, not replaced by a file",
         [p.split("; ")[-1] for p in plan.problems],
         ["unwire it in the file it points to"],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root, hooks, local, user = layout(tmp)
+    dots = pathlib.Path(tmp).resolve() / "dots" / "settings.local.json"
+    dots.parent.mkdir()
+    linked = root / "repo" / ".claude" / "settings.local.json"
+    linked.parent.mkdir(parents=True)
+    dots.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [hook(LEGACY)]}]}}))
+    linked.symlink_to(dots)
+    plan = decommission.prepare(root, hooks, user)
+    # The usual dotfiles shape. It fires for this root, so it is this root's to unwire, and calling
+    # it machine-wide would leave the double fire it causes reported as something else.
+    check(
+        "a file under the root linked to one outside it is this root's, not machine-wide",
+        (
+            [p.split("; ")[-1] for p in plan.problems],
+            [n for _, n in plan.machine_wide],
+            [p.name for p in plan.keep],
+        ),
+        (
+            ["unwire it in the file it points to"],
+            ["session_exchange_handoffs.py"],
+            ["session_exchange_handoffs.py"],
+        ),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root, hooks, local, user = layout(tmp)
+    twin = root / "repo" / ".claude" / "settings.local.json"
+    twin.parent.mkdir(parents=True)
+    twin.symlink_to(local)
+    plan = decommission.prepare(root, hooks, user)
+    check(
+        "a link to a file the run edits anyway is no problem and no second edit",
+        (plan.problems, [p for p, _, _ in plan.edits]),
+        ([], [local]),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root, hooks, local, user = layout(tmp)
+    plan = decommission.prepare(root, hooks, user)
+    backup = local.with_name("settings.local.json.bak-t")
+    backup.write_text("theirs")
+    (hooks / "retired-t").mkdir()
+    free = decommission._free
+    # What a run racing this one leaves between the free name being picked and it being taken.
+    decommission._free = lambda path: path
+    try:
+        lines, problems = guarded(plan, hooks)
+    finally:
+        decommission._free = free
+    check("a backup taken in the meantime is never overwritten", backup.read_text(), "theirs")
+    check("and the file it was for is left as it was", local.read_text() != "{}\n", True)
+    (hooks / "retired-t").rmdir()
+    backup.unlink()
+    (hooks / "retired-t").mkdir()
+    (hooks / "retired-t" / "theirs").write_text("")
+    decommission._free = lambda path: path
+    try:
+        lines, problems = guarded(plan, hooks)
+    finally:
+        decommission._free = free
+    check(
+        "a retired directory made in the meantime is not moved into",
+        sorted(p.name for p in (hooks / "retired-t").iterdir()),
+        ["theirs"],
     )
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -285,14 +364,6 @@ with tempfile.TemporaryDirectory() as tmp:
     local.write_text("{")
     plan = decommission.prepare(root, hooks, user)
     check("an unreadable settings file is a problem", len(plan.problems), 1)
-
-
-def guarded(plan, hooks):
-    """`apply`, with a raise turned into a failed check rather than the end of the file."""
-    try:
-        return decommission.apply(plan, hooks, at="t")
-    except Exception as exc:
-        return [], [f"raised {type(exc).__name__}"]
 
 
 print()

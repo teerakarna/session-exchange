@@ -10,6 +10,27 @@ from .shape import Mutation
 MUTATIONS = [
     Mutation(
         module="decommission",
+        rule="a link to a file this run edits anyway needs nothing of its own",
+        old="        if path.is_symlink() and path.resolve() in targets:",
+        new="        if False:",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
+        rule="a backup never overwrites one already there",
+        old='open(backup, "xb")',
+        new='open(backup, "wb")',
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
+        rule="scripts move only into a directory this run made",
+        old="        for script in prepared.retire if made else []:",
+        new="        for script in prepared.retire:",
+        caught_by="test_decommission.py",
+    ),
+    Mutation(
+        module="decommission",
         rule="only the command says what an entry runs",
         old="names = legacy.names_in(command) if isinstance(command, str) else set()",
         new="names = set().union(*(legacy.names_in(t) for t in legacy._strings(hook)))",
@@ -102,8 +123,8 @@ MUTATIONS = [
     Mutation(
         module="decommission",
         rule="only settings files under this root are edited",
-        old='    for path in sorted({path for path, _ in state["scoped"]}):',
-        new='    for path in sorted({path for path, _ in state["wired"]}):',
+        old='    paths = sorted({path for path, _ in state["scoped"]})',
+        new='    paths = sorted({path for path, _ in state["wired"]})',
         caught_by="test_decommission.py",
     ),
     Mutation(
@@ -137,8 +158,8 @@ MUTATIONS = [
     Mutation(
         module="decommission",
         rule="the old copy is kept before the file is rewritten",
-        old="            shutil.copy2(path, backup)",
-        new="            pass",
+        old="                shutil.copyfileobj(src, dst)",
+        new="                pass",
         caught_by="test_decommission.py",
     ),
     Mutation(
