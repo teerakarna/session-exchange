@@ -84,7 +84,9 @@ What to read in the output:
   somewhere you did not expect, resolution walked further up than you thought.
 - `steps` lists all seven migration steps derived from live state. `[?]` means the check is not
   answerable from here and prints why, rather than being omitted: a diagnostic that quietly skips a
-  check reads exactly like one that passed it.
+  check reads exactly like one that passed it. `[-]` means there is nothing to do: step 4 shows it
+  on a root whose marker names no `legacy_ledger`. If that root did keep a markdown ledger, add the
+  key, or the import reads as not needed when it was only never declared.
 - `DOUBLE FIRE` means a legacy hook is still wired alongside the plugin. Presence and handoffs will
   render twice, and a stalled migration becomes indistinguishable from a finished one. This also
   appears in every session's injected context until it is gone.

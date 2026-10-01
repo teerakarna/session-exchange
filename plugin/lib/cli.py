@@ -293,12 +293,7 @@ def _steps(root):
             and (plugin / "commands" / "exchange.md").is_file(),
             None,
         ),
-        (
-            4,
-            "open handoffs imported out of the markdown ledger",
-            any("imported" in record for record, _ in stored) if stored else False,
-            None,
-        ),
+        (4, "open handoffs imported out of the markdown ledger", *_step4(root, stored)),
         (5, "this root marked", store.marker_path(root).is_file(), None),
         (
             6,
@@ -308,6 +303,42 @@ def _steps(root):
         ),
         (7, "legacy hooks unwired and deleted", not state["on_disk"] and not state["wired"], None),
     ]
+
+
+# The fourth answer a step can give, beside done, outstanding and unknown: there is nothing to do
+# here, and that is a finished answer. Not `None`, which is "not checkable from here" and is the
+# wrong reading for a root that is perfectly checkable and simply never had a ledger (#38). Not
+# `True` either, because "done" would claim an import happened. Excluded from `next` on purpose
+# rather than by falling through a branch meant for something else.
+NOT_APPLICABLE = "n/a"
+
+
+def _step4(root, stored):
+    """`(done, why)` for the import. Three real states, which is why it has its own function.
+
+    Whether a root ever had a markdown ledger cannot be derived: the plugin names no paths, so the
+    marker has to say. Absent means none. `init` never writes it, so on a root that did have a
+    ledger the owner has to add it, and the reason line says how, since this is the one answer that
+    reads as finished when it may only be undeclared. Before this the evidence was pinned false on
+    every root, so `doctor` pointed at step 4 forever and would have kept steps 5 to 7 unreachable
+    once `migrate` gates on it.
+
+    A missing or unreadable marker is unknown rather than not applicable. A missing one declares
+    nothing, and `store.config` reads it as defaults with no problem. A broken one hands back
+    defaults with the problem. Neither set of defaults has a `legacy_ledger`, so reading them as an
+    answer would call a root finished because its marker was absent or broken.
+    """
+    if not store.marker_path(root).is_file():
+        return None, "there is no marker yet, so whether this root had a ledger cannot be told"
+    config, problem = store.config(root)
+    if problem:
+        return None, "the marker is unreadable, so whether this root had a ledger cannot be told"
+    if "legacy_ledger" not in config:
+        return NOT_APPLICABLE, (
+            "no `legacy_ledger` in the marker, so there is nothing to import. If this root did keep"
+            " a markdown ledger, name it there"
+        )
+    return any("imported" in record for record, _ in stored), None
 
 
 def _running():
@@ -414,9 +445,11 @@ def cmd_doctor(args):
 
     print("steps")
     first_incomplete = None
-    for number, what, done, why_unknown in _steps(root):
+    for number, what, done, why in _steps(root):
         if done is None:
             mark = "?"
+        elif done == NOT_APPLICABLE:
+            mark = "-"
         elif done:
             mark = "x"
         else:
@@ -424,12 +457,13 @@ def cmd_doctor(args):
             if first_incomplete is None:
                 first_incomplete = number
         print(f"  [{mark}] {number}. {what}")
-        if why_unknown:
-            print(f"        not checkable here: {why_unknown}")
+        if why:
+            label = "not applicable" if done == NOT_APPLICABLE else "not checkable here"
+            print(f"        {label}: {why}")
     print(
         "  [?] means this check is not implemented or not answerable from here. It is printed "
         "rather than skipped: a diagnostic that quietly omits a check reads exactly like one "
-        "that passed it."
+        "that passed it. [-] means there is nothing to do here, which is an answer, not a gap."
     )
     if first_incomplete:
         print(f"next      step {first_incomplete}")

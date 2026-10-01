@@ -367,7 +367,37 @@ with tempfile.TemporaryDirectory() as tmp:
     run(home, repo, "init")
     code, out = run(home, repo, "doctor")
     check("reports the root and the rule that found it", (code, "by marker" in out), (0, True))
-    check("names the first outstanding step", "next      step 4" in out, True)
+    # #38, both halves. A root with no `legacy_ledger` has nothing to import, so step 4 is not
+    # applicable and `next` moves past it. Asserting only that half would pass for a build that
+    # hardcoded step 4 as never applicable, so the same root is then given a ledger and has to go
+    # back to outstanding.
+    check(
+        "a root that never had a ledger has nothing to import, and says so",
+        ("  [-] 4." in out, "not applicable: no `legacy_ledger`" in out),
+        (True, True),
+    )
+    check("and step 4 is not what comes next", "next      step 4" in out, False)
+    check("and says how to declare one that was missed", "name it there" in out, True)
+    marker = area / ".claude" / "exchange.json"
+    written = json.loads(marker.read_text())
+    marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "ledger.md"})))
+    code, out = run(home, repo, "doctor")
+    check(
+        "a root that names a ledger has an import outstanding",
+        ("  [ ] 4." in out, "next      step 4" in out),
+        (True, True),
+    )
+    # A broken marker hands back defaults, and the defaults have no `legacy_ledger`, so reading
+    # them as the answer would call this root finished because its marker was unreadable.
+    marker.write_text(json.dumps(dict(written, legacy_ledger={})))
+    code, out = run(home, repo, "doctor")
+    check(
+        "an unreadable marker leaves step 4 unknown, not finished",
+        ("  [?] 4." in out, "  [-] 4." in out, code),
+        (True, False, 1),
+    )
+    marker.write_text(json.dumps(written))
+    code, out = run(home, repo, "doctor")
     # A diagnostic that quietly omits a check reads exactly like one that passed it.
     check("prints the checks it cannot answer rather than skipping them", "[?]" in out, True)
     check("says why each one is unanswerable", "not checkable here" in out, True)
@@ -428,6 +458,13 @@ with tempfile.TemporaryDirectory() as tmp:
         (True, False),
     )
     check("and it agrees with step 5 instead of contradicting it", "[ ] 5." in out, True)
+    # Defaults with no problem have no `legacy_ledger` either, so without its own guard step 4
+    # would read as not applicable on a root that has declared nothing yet.
+    check(
+        "and step 4 is unknown there, not not applicable",
+        ("  [?] 4." in out, "  [-] 4." in out),
+        (True, False),
+    )
     check("an unconfigured root is not a fault on its own", code, 0)
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -474,7 +511,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "machine-wide",
     )
     check("the unrelated hook is left out of it", "review-requests" in out, False)
-    check("step 7 is outstanding while it is wired", "next      step 4" in out, True)
+    check("step 7 is outstanding while it is wired", "next      step 7" in out, True)
 
     # The same script, wired again in a settings file under the root. Now both faults are live, and
     # each warning has to name only the wiring that is its own - a DOUBLE FIRE naming the user's
