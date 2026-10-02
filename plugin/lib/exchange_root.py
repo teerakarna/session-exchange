@@ -105,7 +105,7 @@ def git_root(start):
     return None
 
 
-def _outermost_git_root(start):
+def outermost_git_root(start):
     """Like `git_root`, but keeps climbing while a repo's own parent is directly another repo.
 
     A repo nested straight inside another - a submodule, an in-tree worktree, a clone inside a
@@ -135,7 +135,7 @@ def init_candidates(cwd):
     sensible to mark and `init` should say so rather than pick something.
     """
     start = pathlib.Path(cwd).expanduser().resolve()
-    repo = _outermost_git_root(start)
+    repo = outermost_git_root(start)
     # Inside a repo, `parents` is strict and that is the whole point: never the git root itself, and
     # never a directory below it. With no enclosing repo there is no repo-scoped exchange to stop,
     # so `cwd` is looked at like any ancestor - and that is the case that matters, because launching
