@@ -4,6 +4,15 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 [semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
 each section is generated from the commits it ships.
 
+## [0.2.0](https://github.com/teerakarna/session-exchange/compare/v0.1.0...v0.2.0) (2026-10-02)
+
+
+### Added
+
+* migrate --step 4 imports the ledger's open handoffs ([#92](https://github.com/teerakarna/session-exchange/issues/92)) ([adb4d38](https://github.com/teerakarna/session-exchange/commit/adb4d383ae91e0a15678031adc3f0a111305f76b))
+* migrate --step 7 unwires this root's legacy hooks and retires their scripts ([#95](https://github.com/teerakarna/session-exchange/issues/95)) ([040982e](https://github.com/teerakarna/session-exchange/commit/040982eaad399ca2136e42bf9865008250809bdf))
+* step 4 is not applicable on a root that never had a ledger ([#90](https://github.com/teerakarna/session-exchange/issues/90)) ([fe06b20](https://github.com/teerakarna/session-exchange/commit/fe06b20543aff85b6d9a656a74eb47c33066eff4))
+
 ## [0.1.0] - 2026-10-01
 
 ### Added

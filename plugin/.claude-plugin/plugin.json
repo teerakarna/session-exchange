@@ -3,7 +3,7 @@
   "name": "session-exchange",
   "displayName": "session-exchange",
   "description": "Presence and handoffs between concurrent Claude Code sessions. Presence is rendered from the native session registry rather than maintained by hand. State lives under an environment root the plugin never names, so the same plugin serves several workspaces without any of them seeing another's.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Bertie",
     "url": "https://github.com/teerakarna"
