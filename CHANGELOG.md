@@ -4,6 +4,13 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 [semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
 each section is generated from the commits it ships.
 
+## [0.2.1](https://github.com/teerakarna/session-exchange/compare/v0.2.0...v0.2.1) (2026-10-02)
+
+
+### Fixed
+
+* init's git-root ceiling climbs past a repo nested in another ([#96](https://github.com/teerakarna/session-exchange/issues/96)) ([5d05417](https://github.com/teerakarna/session-exchange/commit/5d05417c1e2f2e0359a93fc17f7df4e57154723c))
+
 ## [0.2.0](https://github.com/teerakarna/session-exchange/compare/v0.1.0...v0.2.0) (2026-10-02)
 
 
