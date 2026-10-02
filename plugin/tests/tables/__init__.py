@@ -21,6 +21,7 @@ second decides which tables exist, so a change to either can invalidate any verd
 
 from . import (
     claims,
+    decommission,
     exchange_root,
     handoffs,
     hook,
@@ -37,6 +38,7 @@ from .shape import Mutation  # noqa: F401  - re-exported; the tables and `mutate
 
 TABLES = {
     "claims": claims.MUTATIONS,
+    "decommission": decommission.MUTATIONS,
     "exchange_root": exchange_root.MUTATIONS,
     "handoffs": handoffs.MUTATIONS,
     "hook": hook.MUTATIONS,

@@ -36,6 +36,16 @@ def looks_legacy(name):
     return any(fnmatch.fnmatch(name, pattern) for pattern in LEGACY_GLOBS)
 
 
+def names_in(text):
+    """The legacy scripts one string mentions, by bare name. Step 7 removes by the same rule."""
+    names = set()
+    for token in text.replace('"', " ").replace("'", " ").split():
+        name = pathlib.PurePath(token).name
+        if looks_legacy(name):
+            names.add(name)
+    return names
+
+
 def scripts_on_disk(hooks_dir=HOOKS_DIR):
     """Legacy scripts present in the hooks directory, sorted.
 
@@ -103,24 +113,9 @@ def wirings(settings_paths):
             continue
         names = set()
         for text in _strings(settings):
-            for token in text.replace('"', " ").replace("'", " ").split():
-                name = pathlib.PurePath(token).name
-                if looks_legacy(name):
-                    names.add(name)
+            names |= names_in(text)
         found += [(path, name) for name in sorted(names)]
     return found, problems
-
-
-def under(root, path):
-    """Is `path` inside `root`?
-
-    Both sides resolved, because they arrive from different places - the root from
-    `exchange_root.resolve`, which has already resolved it, and the settings path from a glob under
-    the root or from `$HOME` - and comparing a real path against a symlinked one answers no in
-    silence. A wrong no here files a wiring under the wrong fault, which is the thing this function
-    was added to stop.
-    """
-    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())
 
 
 def report(root, hooks_dir=HOOKS_DIR, user_settings=USER_SETTINGS):
@@ -138,7 +133,13 @@ def report(root, hooks_dir=HOOKS_DIR, user_settings=USER_SETTINGS):
     # prevent, arriving through the legacy half. Observed that way round on the first real
     # migration rather than guessed: the machine-wide wiring rendered another root's rows into a
     # session under this one.
-    scoped = [(path, name) for path, name in wired if under(root, path)] if root else []
+    #
+    # Every other file searched was found under this root, so the user's settings are the only
+    # machine-wide one, by the path they were searched at. Not by where they resolve: stowed into a
+    # tree under this root they are still the user's, and a `settings.local.json` linked to a
+    # checkout elsewhere still fires for this root.
+    user = pathlib.Path(user_settings) if user_settings else None
+    scoped = [(path, name) for path, name in wired if pathlib.Path(path) != user]
     return {
         "on_disk": on_disk,
         "wired": wired,

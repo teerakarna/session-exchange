@@ -1121,17 +1121,95 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     code, out = run(home, repo, "migrate", "--step", "7")
     check(
-        "step 7 is not built yet, exits 2 and says nothing changed",
-        (code, "step 7" in out, "Nothing was changed" in out),
-        (2, True, True),
+        "step 7 with no legacy half has nothing to do, and says so",
+        (code, "nothing   to do here" in out),
+        (0, True),
     )
-    # `handoff` is built now, but it has no default verb: guessing between posting and listing would
-    # make a typo do something. Argparse's own exit 2, not the not-built one.
+    # `handoff` has no default verb: guessing between posting and listing would make a typo do
+    # something. Argparse's own exit 2, the only thing exit 2 means now.
     code, out = run(home, repo, "handoff")
     check(
         "handoff with no verb is a usage error naming the verbs",
         (code, "post" in out, "not built yet" in out),
         (2, True, False),
+    )
+
+print("migrate --step 7: this root's wiring removed, the machine-wide half left and named")
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, area, repo = fixture(tmp)
+    hooks = home / ".claude" / "hooks"
+    for name in ("alpha-session-lane.sh", "session_exchange_handoffs.py"):
+        (hooks / name).write_text("# legacy\n")
+
+    def wiring(script):
+        command = f'bash "$HOME/.claude/hooks/{script}"'
+        return {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}
+
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps(wiring("session_exchange_handoffs.py"))
+    )
+    local = area / ".claude" / "settings.local.json"
+    local.parent.mkdir()
+    local.write_text(json.dumps(wiring("alpha-session-lane.sh")))
+    code, out = run(home, repo, "migrate", "--step", "7", "--apply", exchange_root=area)
+    check(
+        "an unmarked root is refused, as step 5 not done, and nothing is touched",
+        (code, "step 5 is not done" in out, "alpha-session-lane.sh" in local.read_text()),
+        (1, True, True),
+    )
+    run(home, repo, "init")
+    marker = area / ".claude" / "exchange.json"
+    written = json.loads(marker.read_text())
+    marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "gone.md"})))
+    code, out = run(home, repo, "migrate", "--step", "7", "--apply")
+    # Unwiring the ledger's hooks before its handoffs are in the store loses the only thing that
+    # was surfacing them.
+    check(
+        "a root whose step 4 is not done is refused too",
+        (code, "step 4 is not done" in out, (hooks / "alpha-session-lane.sh").is_file()),
+        (1, True, True),
+    )
+    code, out = run(home, repo, "migrate", "--step", "7")
+    check("and its dry run exits 1 as well", (code, "dry run" in out), (1, True))
+    marker.write_text(json.dumps(written))
+    code, out = run(home, repo, "migrate", "--step", "7")
+    check(
+        "a dry run names what it would remove, keep and leave, and writes nothing",
+        (
+            code,
+            "unwire    alpha-session-lane.sh" in out,
+            "machine   session_exchange_handoffs.py" in out,
+            "keep      session_exchange_handoffs.py" in out,
+            "alpha-session-lane.sh" in local.read_text(),
+        ),
+        (0, True, True, True, True),
+    )
+    code, out = run(home, repo, "migrate", "--step", "7", "--apply")
+    check(
+        "--apply unwires this root and retires the script it freed",
+        (code, json.loads(local.read_text()), (hooks / "alpha-session-lane.sh").exists()),
+        (0, {}, False),
+    )
+    code, out = run(home, repo, "doctor")
+    check(
+        "doctor then has no doubled fire, still the machine-wide one, and step 7 outstanding",
+        ("DOUBLE FIRE:" in out, "CROSS ROOT" in out, "next      step 7" in out),
+        (False, True, True),
+    )
+    code, out = run(home, repo, "migrate", "--step", "7")
+    check(
+        "with only the machine-wide half left, it says that half is the rest of the step",
+        (code, "machine-wide wiring above is the rest of step 7" in out),
+        (0, True),
+    )
+    (home / ".claude" / "settings.json").write_text("{}")
+    code, out = run(home, repo, "migrate", "--step", "7", "--apply")
+    code, out = run(home, repo, "doctor")
+    check(
+        "and once the user's own settings are clean, a second run finishes it",
+        ("  [x] 7." in out, list(hooks.glob("*.py")), "CROSS ROOT" in out),
+        (True, [], False),
     )
 
 print("a claim from inside a background job (#68)")

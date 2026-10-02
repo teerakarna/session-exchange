@@ -14,12 +14,21 @@ from .shape import Mutation
 # two inputs that agree cannot say which one was read. The distinction is the entire point of the
 # field: an unwired script is inert, a wired one doubles the SessionStart injection.
 #
-# The last five came with the scope split, and the same shape produced the bug they cover: with
+# The scope split's rules cover a bug of the same shape: with
 # the only wired fixture being the machine-wide one, `wired` and "wired under this root" agreed, and
 # `double_fire` off `bool(wired)` looked right for the same reason - until the first real migration,
 # where the machine-wide wiring rendered another root's rows and the warning called it a doubling.
-# Two of the five only fail against `under` called directly, which is why that helper is public.
 MUTATIONS = [
+    Mutation(
+        module="legacy",
+        # What it did before: a file found under the root, filed by where it points. The usual
+        # dotfiles link then reads as machine-wide, and its double fire as some other fault.
+        rule="a settings file found under the root is the root's, wherever it links to",
+        old="if pathlib.Path(path) != user]",
+        new="if pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())"
+        " and pathlib.Path(path) != user]",
+        caught_by="test_decommission.py",
+    ),
     Mutation(
         module="legacy",
         # The module's first documented rule, and the one a generalised tool has to keep: two of the
@@ -125,15 +134,15 @@ MUTATIONS = [
     Mutation(
         module="legacy",
         rule="a command in quotes is still split into tokens",
-        old='            for token in text.replace(\'"\', " ").replace("\'", " ").split():',
-        new="            for token in text.split():",
+        old='    for token in text.replace(\'"\', " ").replace("\'", " ").split():',
+        new="    for token in text.split():",
         caught_by="test_legacy.py",
     ),
     Mutation(
         module="legacy",
         rule="a token is reduced to its basename, or a path never matches a glob",
-        old="                name = pathlib.PurePath(token).name",
-        new="                name = token",
+        old="        name = pathlib.PurePath(token).name",
+        new="        name = token",
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -141,15 +150,15 @@ MUTATIONS = [
         # The privacy rule, and the only one here whose failure is a diagnostic quoting another
         # environment's arguments back at a log to establish a fact the basename already makes.
         rule="only the script's name is reported, never the command string it sat in",
-        old="                    names.add(name)",
-        new="                    names.add(text)",
+        old="            names.add(name)",
+        new="            names.add(text)",
         caught_by="test_legacy.py",
     ),
     Mutation(
         module="legacy",
         rule="something that is not a legacy script is not a wiring",
-        old="                if looks_legacy(name):",
-        new="                if True:",
+        old="        if looks_legacy(name):",
+        new="        if True:",
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -175,38 +184,16 @@ MUTATIONS = [
         # been rendered twice - the one thing root resolution exists to prevent, described as
         # something else. Observed on the first real migration, not imagined.
         rule="a wiring outside this root is not this root's rendering doubled",
-        old=(
-            "    scoped = [(path, name) for path, name in wired "
-            "if under(root, path)] if root else []"
-        ),
-        new="    scoped = list(wired)",
+        # Stowed under the root, the user's settings would also be edited by step 7 from here.
+        old="if pathlib.Path(path) != user]",
+        new="if True]",
         caught_by="test_legacy.py",
     ),
     Mutation(
         module="legacy",
         rule="and a wiring inside it is",
-        old=(
-            "    scoped = [(path, name) for path, name in wired "
-            "if under(root, path)] if root else []"
-        ),
-        new="    scoped = []",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        # `under` is compared against a root that arrives resolved and paths globbed from it, so the
-        # two sides agree in the ordinary case and neither of these shows up end to end. Unresolved,
-        # both answer no, and a no here puts a root's own wiring in the machine-wide bucket.
-        rule="a path is resolved before it is compared, so a symlinked route is the same file",
-        old="    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())",
-        new="    return pathlib.Path(path).is_relative_to(pathlib.Path(root).resolve())",
-        caught_by="test_legacy.py",
-    ),
-    Mutation(
-        module="legacy",
-        rule="and so is the root, so a symlinked root is still that root",
-        old="    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root).resolve())",
-        new="    return pathlib.Path(path).resolve().is_relative_to(pathlib.Path(root))",
+        old="if pathlib.Path(path) != user]",
+        new="if False]",
         caught_by="test_legacy.py",
     ),
     Mutation(

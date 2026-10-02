@@ -10,11 +10,11 @@ registry Claude Code already maintains, and the only files it writes are its own
 deliberately.
 
 **Status: early, installable, not yet load-bearing.** Root resolution, both hooks, and
-`init | show | claim | doctor | handoff | migrate --step 4` all work. Presence and handoffs are both
+`init | show | claim | doctor | handoff | migrate` all work. Presence and handoffs are both
 delivered at session start: a handoff reaches the sessions working in the scope it was addressed to.
 One posted mid-session waits for the recipient's next start, because `Stop` is not wired yet.
-Seven migration steps; the import out of an existing markdown ledger is built, and decommissioning
-the legacy hooks is not. `doctor` prints all seven derived from live state.
+Seven migration steps, and the two that write are built: the import out of an existing markdown
+ledger, and unwiring the legacy hooks. `doctor` prints all seven derived from live state.
 
 ## Why
 
@@ -155,8 +155,7 @@ survives a version bump.
 
 **Look** `show` `doctor` `handoff list`
 **Say** `claim` `handoff post` `handoff accept` `handoff close` `handoff resolve`
-**Set up** `init` `migrate --step 4`
-**Not built yet** `migrate --step 7`
+**Set up** `init` `migrate --step 4` `migrate --step 7`
 
 `migrate --step 4` imports the open handoffs out of the markdown ledger named by `legacy_ledger` in
 the marker. It is a dry run unless given `--apply`: it prints what it would create, close and leave
@@ -175,8 +174,14 @@ ledger afterwards is reported and left, since a record is written once.
 }
 ```
 
-`migrate --step 7` exits 2. Exit 2 is not a failure: a command that does not exist yet must not
-report success, and must not look like a fault either.
+`migrate --step 7` unwires the legacy hooks, and is a dry run unless given `--apply` too. It edits
+only the `settings.local.json` files under this root, keeping the old copy beside each as
+`.bak-<time>`. A legacy hook in `~/.claude/settings.json` fires for every root on the machine, and
+another root may still depend on it, so that one is named and left for you to remove there, or in
+whatever generates that file. Scripts in `~/.claude/hooks` are moved into a dated `retired-`
+directory rather than deleted, and only once nothing visible still wires them. It refuses to write
+until step 4 is done and this root is marked, and a hook entry that runs a legacy script alongside
+other commands is left for you to split by hand.
 
 `handoff` has no default verb, so `exchange handoff` on its own is a usage error rather than a guess
 between posting and listing. `--body -` reads the body from stdin, which is what you want for

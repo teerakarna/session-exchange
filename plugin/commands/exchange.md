@@ -41,7 +41,10 @@ With no arguments, run `show`.
 - `migrate --step 4 [--apply]` - import the open handoffs out of the markdown ledger the marker
   names. A dry run unless `--apply`. Any problem means nothing is written, and a second run changes
   nothing. Show the user the counts and the problem lines before suggesting `--apply`.
-- `migrate --step 7` exits 2. Exit 2 is not a failure; it means the step is not built yet.
+- `migrate --step 7 [--apply]` - unwire the legacy hooks under this root and retire the scripts
+  nothing visible still wires. A dry run unless `--apply`. It never edits the user's own settings:
+  a `machine` line names a wiring there for the user to remove themselves. Show the user every
+  `unwire`, `retire`, `machine` and `problem` line before suggesting `--apply`.
 
 ## What to do with the output
 

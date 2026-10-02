@@ -4,8 +4,8 @@ Writes stay at the terminal rather than behind a tool the model can call, which 
 decision landed on the last tool built here. Reads are pushed by hooks, because a read surface that
 has to be asked would reintroduce the exact failure this replaces: nobody thought to look.
 
-Exit codes: 0 fine, 1 something is wrong, 2 not built yet. The third is not the second - a command
-that does not exist must not report success, and it must not look like a fault either.
+Exit codes: 0 fine, 1 something is wrong, 2 a usage error from argparse. Exit 2 used to mean "not
+built yet" as well, and with every migration step built it means one thing again.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import claims
+import decommission
 import exchange_root
 import handoffs
 import legacy
@@ -26,8 +27,6 @@ import migrate
 import registry
 import store
 import validate
-
-NOT_BUILT = 2
 
 
 def _resolved(args):
@@ -299,7 +298,7 @@ def _steps(root):
             None,
             "one root cannot see another, by design; run `doctor` there",
         ),
-        (7, "legacy hooks unwired and deleted", not state["on_disk"] and not state["wired"], None),
+        (7, "legacy hooks unwired and retired", not state["on_disk"] and not state["wired"], None),
     ]
 
 
@@ -733,13 +732,73 @@ def _cmd_migrate_step4(root, apply):
     return 1 if problems else 0
 
 
+def _cmd_migrate_step7(root, apply):
+    prepared = decommission.prepare(root)
+    # Checked here rather than in `decommission`, since done for step 4 is `doctor`'s reading and
+    # one reading is the point. The plan still prints, so the gate does not hide what is waiting,
+    # and it only applies when there is something to write: it guards the writes, not the report.
+    gate = []
+    if prepared.edits or prepared.retire:
+        done, why = _step4(root)
+        if not store.marker_path(root).is_file():
+            gate.append("step 5 is not done: this root has no marker; `exchange init` writes one")
+        elif done not in (True, NOT_APPLICABLE):
+            gate.append(f"step 4 is not done, and its hooks are what surface the ledger: {why}")
+    prepared = prepared._replace(problems=[*gate, *prepared.problems])
+    print(
+        f"counts    {sum(len(names) for _, _, names in prepared.edits)} wiring(s) to remove in "
+        f"{len(prepared.edits)} file(s), {len(prepared.retire)} script(s) to retire, "
+        f"{len(prepared.keep)} kept, {len(prepared.problems)} problem(s)"
+    )
+    for path, _, names in prepared.edits:
+        print(f"unwire    {', '.join(names)} in {path}")
+    for path, name in prepared.machine_wide:
+        print(
+            f"machine   {name} in {path} fires for every root on this machine, so it is not edited"
+            " from here; remove it there, or wherever that file is generated from"
+        )
+    for script in prepared.retire:
+        print(f"retire    {script.name}, moved aside rather than deleted")
+    for script in prepared.keep:
+        print(f"keep      {script.name}, still wired machine-wide")
+    if prepared.retire:
+        print(
+            "note      another root's settings cannot be read from here. One still wiring a retired"
+            " script fails at its next session start; moving the file back undoes it"
+        )
+    for problem in prepared.problems:
+        print(f"problem   {problem}")
+    if not (prepared.edits or prepared.retire or prepared.problems):
+        if prepared.machine_wide:
+            print(
+                "nothing   to do here. The machine-wide wiring above is the rest of step 7, and"
+                " `doctor` reads it done once that and every script it keeps are gone"
+            )
+        else:
+            print("nothing   to do here")
+        return 0
+    if not apply:
+        if prepared.problems:
+            print(
+                "dry run   nothing was written, and `--apply` refuses until the problems are fixed"
+            )
+        else:
+            print("dry run   nothing was written; `--apply` writes it")
+        return 1 if prepared.problems else 0
+    lines, problems = decommission.apply(prepared)
+    for line in lines:
+        print(line)
+    for problem in problems:
+        print(f"problem   {problem}")
+    return 1 if problems else 0
+
+
 def cmd_migrate(args):
-    if args.step != 4:
-        print(f"`exchange migrate --step {args.step}` is not built yet. Nothing was changed.")
-        return NOT_BUILT
     resolution = _resolved(args)
     if resolution is None:
         return 1
+    if args.step == 7:
+        return _cmd_migrate_step7(resolution.root, args.apply)
     return _cmd_migrate_step4(resolution.root, args.apply)
 
 

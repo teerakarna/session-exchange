@@ -89,7 +89,7 @@ What to read in the output:
   key, or the import reads as not needed when it was only never declared.
 - `DOUBLE FIRE` means a legacy hook is still wired alongside the plugin. Presence and handoffs will
   render twice, and a stalled migration becomes indistinguishable from a finished one. This also
-  appears in every session's injected context until it is gone.
+  appears in every session's injected context until it is gone. `migrate --step 7` removes it.
 
 Then start a new session in the tree and confirm a claim appeared:
 
