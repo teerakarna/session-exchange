@@ -105,10 +105,28 @@ def git_root(start):
     return None
 
 
+def _outermost_git_root(start):
+    """Like `git_root`, but keeps climbing while a repo's own parent is directly another repo.
+
+    A repo nested straight inside another - a submodule, an in-tree worktree, a clone inside a
+    clone - has two enclosing git roots, not one, and `init_candidates`' ceiling has to be the
+    outer one: the nearest alone would land on the outer repo itself, which is exactly the
+    repo-scoped exchange the ceiling exists to skip (#39).
+
+    Deliberately only the *immediate* parent, not a full `git_root` search above it: a repo sitting
+    inside an area that itself sits inside some further-out repo is the ordinary case this module is
+    built around, and the area in between is the right answer, not something to climb past.
+    """
+    found = git_root(start)
+    while found is not None and (found.parent / ".git").exists():
+        found = found.parent
+    return found
+
+
 def init_candidates(cwd):
     """Where `exchange init` would mark, and what else it could have.
 
-    The default is the nearest directory holding a `CLAUDE.md`, *strictly above* the enclosing git
+    The default is the nearest directory holding a `CLAUDE.md`, *strictly above* every enclosing git
     root. Skipping the git root is deliberate: a repo-scoped exchange coordinates nothing, because
     the sessions that need to see each other are in sibling repos. With no enclosing repo there is
     no repo-scoped exchange to skip, and `cwd` itself is considered like any other directory.
@@ -117,7 +135,7 @@ def init_candidates(cwd):
     sensible to mark and `init` should say so rather than pick something.
     """
     start = pathlib.Path(cwd).expanduser().resolve()
-    repo = git_root(start)
+    repo = _outermost_git_root(start)
     # Inside a repo, `parents` is strict and that is the whole point: never the git root itself, and
     # never a directory below it. With no enclosing repo there is no repo-scoped exchange to stop,
     # so `cwd` is looked at like any ancestor - and that is the case that matters, because launching
