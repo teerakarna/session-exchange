@@ -185,6 +185,23 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("still nothing in the container", (container / ".claude").exists(), False)
 
+with tempfile.TemporaryDirectory() as tmp:
+    # A repo directly inside another, with nothing above either (#39). `init_candidates` and the
+    # "nothing found" message have to agree on which repo is the ceiling, or the message can name
+    # the inner one while the search it is explaining actually started above the outer one.
+    base = pathlib.Path(tmp).resolve()
+    home = base / "home"
+    home.mkdir()
+    outer = base / "outer"
+    inner = outer / "nested"
+    (inner / ".git").mkdir(parents=True)
+    (outer / ".git").mkdir()
+
+    code, out = run(home, inner, "init")
+    check("nothing to mark, with neither repo offered", code, 1)
+    check("names the outer repo, not the inner one", f"above {outer}" in out, True)
+    check("not the repo init was run from", f"above {inner}" in out, False)
+
 print("claim")
 
 with tempfile.TemporaryDirectory() as tmp:

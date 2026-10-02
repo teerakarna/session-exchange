@@ -59,7 +59,10 @@ def cmd_init(args):
             # to say the one that ran. Inside a repo the search starts strictly above it and cwd is
             # never considered, so "here" would send someone hunting in a directory the tool did not
             # look at; with no enclosing repo cwd does count, so "above" would do the reverse.
-            repo = exchange_root.git_root(args.cwd)
+            # `init_candidates` uses `outermost_git_root` as its real ceiling (#39: a repo directly
+            # nested in another has two), so the explanation has to use the same one, or it can name
+            # the inner repo while the search actually started above the outer one.
+            repo = exchange_root.outermost_git_root(args.cwd)
             looked = f"above {repo}" if repo else "here or above"
             print(f"Nothing {looked} looks like an environment root.")
             if candidates:

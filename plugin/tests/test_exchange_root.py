@@ -164,6 +164,25 @@ with tempfile.TemporaryDirectory() as tmp:
     default, candidates = exchange_root.init_candidates(base / "orphan")
     check("nothing to mark returns None rather than guessing", (default, candidates), (None, []))
 
+with tempfile.TemporaryDirectory() as tmp:
+    # A repo nested inside another - a submodule, an in-tree worktree, a clone inside a clone (#39).
+    # The ceiling has to be `outer`, the outermost enclosing repo, not `outer/nested`: the nearest
+    # one alone lands the search on `outer` itself and defaults to it, which is the repo-scoped
+    # exchange the ceiling exists to skip in the first place.
+    base = tree(tmp, areas=["area"], repos_in=["area/outer", "area/outer/nested"])
+    check(
+        "the nearest enclosing repo is the inner one",
+        exchange_root.git_root(base / "area/outer/nested"),
+        base / "area/outer/nested",
+    )
+    default, candidates = exchange_root.init_candidates(base / "area/outer/nested")
+    check("the outer repo is skipped too, not just the inner one", default, base / "area")
+    check(
+        "neither repo is offered as a candidate",
+        (base / "area/outer" in candidates, base / "area/outer/nested" in candidates),
+        (False, False),
+    )
+
 print("init from an area directory, which is the documented way to launch")
 
 with tempfile.TemporaryDirectory() as tmp:

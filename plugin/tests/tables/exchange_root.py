@@ -193,4 +193,18 @@ MUTATIONS = [
         new="    except OSError:\n        raise",
         caught_by="test_exchange_root.py",
     ),
+    Mutation(
+        module="exchange_root",
+        rule="the ceiling climbs past a repo directly nested in another, not just the nearest one",
+        old='    while found is not None and (found.parent / ".git").exists():',
+        new="    while False:",
+        caught_by="test_exchange_root.py",
+    ),
+    Mutation(
+        module="exchange_root",
+        rule="but not past an area sitting between two repos",
+        old='    while found is not None and (found.parent / ".git").exists():',
+        new="    while found is not None and git_root(found.parent) is not None:",
+        caught_by="test_cli.py",
+    ),
 ]
