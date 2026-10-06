@@ -224,13 +224,24 @@ def apply(root, prepared):
         return [], ["the plan has problems, so nothing was written"]
     lines, problems = [], []
     for entry, to in zip(prepared.plan.create, prepared.routes):
+        handoff_id = id_of(entry)
+        moves = store.transitions_dir(root, handoff_id)
+        if moves.exists():
+            # Left behind when a closed import's record was removed by hand. The id is derived from
+            # the ledger entry, so every run would post under it again and be refused the same way,
+            # and "run it again" never ends. Only the person can say the directory is stale.
+            problems.append(
+                f"{handoff_id} has moves recorded at {moves}, left behind after its record was "
+                f"removed; move that directory aside, then run it again"
+            )
+            continue
         record, problem = handoffs.post(
             root,
             to,
             reconcile.body_of(entry),
             cwd=str(root),
             name=entry.sender,
-            handoff_id=id_of(entry),
+            handoff_id=handoff_id,
             at=created_of(entry),
             imported=reconcile.imported_of(entry),
         )

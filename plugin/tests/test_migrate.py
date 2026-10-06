@@ -401,6 +401,29 @@ check(
 )
 
 print()
+print("a stale moves directory is named, with what to do about it")
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp, CENSUS)
+    block = {"path": "ledger.md", "routes": CENSUS_ROUTES}
+    migrate.apply(root, migrate.prepare(root, block))
+    record = held(root)[0][0]
+    # The #94 shape: an imported handoff closed, its record removed by hand, the ledger still open.
+    handoffs.set_status(root, record["id"], handoffs.CLOSED, by="test")
+    (store.handoffs_dir(root) / f"{record['id']}.json").unlink()
+    lines, problems = migrate.apply(root, migrate.prepare(root, block))
+    moves = store.transitions_dir(root, record["id"])
+    check("it writes nothing for that entry", any(record["id"] in l for l in lines), False)
+    check(
+        "and names the directory to move aside, not just 'run it again'",
+        problems[:1],
+        [
+            f"{record['id']} has moves recorded at {moves}, left behind after its record was "
+            "removed; move that directory aside, then run it again"
+        ],
+    )
+
+print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
     raise SystemExit(1)

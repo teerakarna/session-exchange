@@ -239,7 +239,7 @@ MUTATIONS = [
     Mutation(
         module="migrate",
         rule="the id comes from the key, so a concurrent second run is refused at the filesystem",
-        old="            handoff_id=id_of(entry),",
+        old="            handoff_id=handoff_id,",
         new="            handoff_id=None,",
         caught_by="test_migrate.py",
     ),
