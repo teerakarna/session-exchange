@@ -413,7 +413,8 @@ with tempfile.TemporaryDirectory() as tmp:
     (store.handoffs_dir(root) / f"{record['id']}.json").unlink()
     lines, problems = migrate.apply(root, migrate.prepare(root, block))
     moves = store.transitions_dir(root, record["id"])
-    check("it writes nothing for that entry", any(record["id"] in l for l in lines), False)
+    written = any(record["id"] in line for line in lines)
+    check("it writes nothing for that entry", written, False)
     check(
         "and names the directory to move aside, not just 'run it again'",
         problems[:1],
