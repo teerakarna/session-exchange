@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 
+import store
 import validate
 
 failures = []
@@ -229,6 +230,43 @@ used = set()
 for name in ("exchange", "claim", "handoff", "transition"):
     keywords(validate.load(name), used)
 check("every keyword the schemas use is implemented", sorted(used - validate.IMPLEMENTED), [])
+
+print("the id rule is written in five places, and they agree")
+
+# Every id-shaped field in the schemas, by path. A schema that grows a sixth must be added here on
+# purpose, so a copy of the rule cannot appear, or drift, without a check naming it.
+ID_FIELDS = {
+    ("claim", "properties", "session_id"),
+    ("handoff", "properties", "id"),
+    ("handoff", "properties", "to", "oneOf", 1, "properties", "session_id"),
+    ("handoff", "properties", "from", "properties", "session_id"),
+}
+
+
+def id_patterns(name, node, path=()):
+    found = {}
+    if isinstance(node, dict):
+        for key, value in node.items():
+            here = path + (key,)
+            if key in ("session_id", "id") and isinstance(value, dict) and "pattern" in value:
+                found[(name, *here)] = value["pattern"]
+            found.update(id_patterns(name, value, here))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            found.update(id_patterns(name, value, path + (i,)))
+    return found
+
+
+found = {}
+for schema in ("claim", "handoff"):
+    found.update(id_patterns(schema, validate.load(schema)))
+
+check("the id-shaped fields are the four on the list", set(found), ID_FIELDS)
+check(
+    "and every one is the id rule, store.SAFE_ID",
+    {path: pattern for path, pattern in found.items() if pattern != store.SAFE_ID.pattern},
+    {},
+)
 
 print()
 if failures:
