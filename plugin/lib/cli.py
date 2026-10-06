@@ -160,8 +160,8 @@ def cmd_show(args):
             print(f"     {field}: {shown_list}")
     if any(claim["session_id"] not in live for claim in held):
         print("  ! marks a claim whose session is no longer running: stale, not current.")
-    for problem in problems:
-        print(f"problem   {problem}")
+    for claim_problem in problems:
+        print(f"problem   {claim_problem}")
 
     # `handoffs.load_all` rather than `store.read_all`, so an unreadable or contested status move is
     # reported here too. `show` is the command people actually run, and a check that only one reader
@@ -169,8 +169,8 @@ def cmd_show(args):
     stored, handoff_problems = handoffs.load_all(root)
     open_count = sum(1 for _, status in stored if status != handoffs.CLOSED)
     print(f"handoffs  {len(stored)} stored, {open_count} not closed")
-    for problem in handoff_problems:
-        print(f"problem   {problem}")
+    for handoff_problem in handoff_problems:
+        print(f"problem   {handoff_problem}")
     return 1 if problem or problems or handoff_problems else 0
 
 
@@ -507,15 +507,18 @@ def _body(args):
     `-` reads stdin, because a handoff body is markdown and the useful ones are several paragraphs
     with backticks in them. Passing that through a shell argument is a quoting exercise nobody
     completes correctly on the first try, and a body mangled in transit is a handoff that says
-    something its sender did not.
+    something its sender did not. A body that is literally the one character `-` cannot be passed.
+
+    Whether the text is empty is `handoffs.post`'s call, not this function's: two checks for one
+    refusal gave the same mistake two different messages depending on which route carried it (#48).
     """
     if args.body != "-":
         return args.body
-    text = sys.stdin.read()
-    if not text.strip():
-        print("problem: nothing arrived on stdin, so there is no body to post")
+    if sys.stdin.isatty():
+        # A forgotten pipe would otherwise hang on `read()` with no output at all.
+        print("problem: --body - reads stdin, and stdin is a terminal here; pipe something in")
         return None
-    return text
+    return sys.stdin.read()
 
 
 def cmd_handoff_post(args):

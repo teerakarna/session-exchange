@@ -563,6 +563,20 @@ with tempfile.TemporaryDirectory() as tmp:
         [(False, "sessions/.tmp-1-x[2K.json"), (False, "y[2K.d/.tmp-1-z.json")],
     )
 
+with tempfile.TemporaryDirectory() as tmp:
+    # A directory where a file was expected: `unlink` raises `IsADirectoryError`, an `OSError`
+    # subclass, which is the shape a cleanup-after-failure call must survive (#48) - the write
+    # already failed or is already done, and a second, unrelated OSError from tidying up the temp
+    # file must not replace or escape past whatever the caller is already returning.
+    not_a_file = pathlib.Path(tmp) / "dir"
+    not_a_file.mkdir()
+    try:
+        got = store._unlink_best_effort(not_a_file)
+    except OSError as exc:
+        got = f"raised {type(exc).__name__}"
+    check("a cleanup failure is swallowed, not raised", got, None)
+    check("and the directory it could not remove is still there", not_a_file.is_dir(), True)
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")

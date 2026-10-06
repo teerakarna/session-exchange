@@ -613,6 +613,16 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "handoff", "post", "--repo", "one", "--body", "   ")
     check("an empty body is refused", (code, "says nothing" in out), (1, True))
 
+    # The same refusal, by the other route a body can arrive by. Two different messages for the
+    # same mistake would mean a script could not tell "no body" from a second kind of problem by
+    # text alone (#48) - asserted as the same message, not just the same exit code.
+    code, out = run(home, repo, "handoff", "post", "--repo", "one", "--body", "-", stdin="   \n")
+    check(
+        "the same refusal, with the empty body on stdin instead",
+        (code, "says nothing" in out),
+        (1, True),
+    )
+
     code, out = run(
         home,
         repo,
@@ -635,7 +645,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "recorded whole, as the caller, with no state in the record and no moves beside it",
         (
-            written["from"]["name"],
+            written["from"].get("name"),
             written["to"],
             "status" in written,
             "history" in written,
