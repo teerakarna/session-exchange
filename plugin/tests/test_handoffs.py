@@ -39,6 +39,23 @@ def check(name, got, want):
         failures.append(name)
 
 
+def read(obj, key):
+    """`obj[key]`, or the name of what it raised. A mutation that breaks the lookup then fails
+    the check it belongs to by name, instead of ending the whole file on a traceback."""
+    try:
+        return obj[key]
+    except Exception as exc:
+        return type(exc).__name__
+
+
+def attempt(call, *args):
+    """`call(*args)`, or the name of what it raised, for the same reason as `read`."""
+    try:
+        return call(*args)
+    except Exception as exc:
+        return type(exc).__name__
+
+
 def rooted(tmp):
     """A root with the store laid out, which `post` expects rather than creates."""
     root = pathlib.Path(tmp).resolve()
@@ -232,7 +249,7 @@ with tempfile.TemporaryDirectory() as tmp:
     record, problem = handoffs.post(root, to, "first", sender, handoff_id="fixed-id")
     check(
         "a handoff is written and handed back, and reads as open",
-        (problem, handoffs.state_of(root, "fixed-id")),
+        (problem, attempt(handoffs.state_of, root, "fixed-id")),
         (None, ("open", [])),
     )
     # Not a field on the record, and not a first move restating `created` and `open` either. An
@@ -323,12 +340,12 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "accepting writes one move, at position zero, and hands it back",
-        (problem, move["status"], move["after"]),
+        (problem, read(move, "status"), read(move, "after")),
         (None, "accepted", 0),
     )
     check(
         "keeping who and why, which is the whole reason the moves are kept at all",
-        (move["by"], move["note"]),
+        (read(move, "by"), read(move, "note")),
         ("me", "mine now"),
     )
     check("and the handoff reads as accepted", handoffs.state_of(root, "h1"), ("accepted", []))
