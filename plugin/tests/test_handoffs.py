@@ -61,6 +61,9 @@ late = handoffs.new_id("2026-09-01T10:00:01Z")
 check("and sorts chronologically, since nothing else orders them", early < late, True)
 
 pair = {handoffs.new_id("2026-09-01T10:00:00Z") for _ in range(2)}
+# Nondeterministic, unlike the rest of this file: SUFFIX_BYTES is 3, so this collides and fails on
+# its own by chance about 1 in 16.7M runs. Named here so a flake is diagnosed in seconds rather than
+# chased as a real regression (#48).
 check("two ids in the same second differ, so a collision is a bug not contention", len(pair), 2)
 
 print("addressing")

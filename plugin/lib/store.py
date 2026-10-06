@@ -232,6 +232,20 @@ def scope_fault(flag, value):
     return None
 
 
+def _unlink_best_effort(path):
+    """`path.unlink(missing_ok=True)`, swallowing a failure instead of letting it escape.
+
+    Always called from inside a handler that is already reporting a problem, or cleaning up after
+    one. A second failure here - the directory itself unreadable, a permissions change mid-write -
+    must not replace the real problem with an unrelated traceback, or mask a successful write by
+    crashing on the cleanup after it.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _staged(path, obj, schema):
     """Validate, then write a temp file beside the target. Returns `(tmp, problem)`.
 
@@ -252,7 +266,7 @@ def _staged(path, obj, schema):
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as exc:
-        tmp.unlink(missing_ok=True)
+        _unlink_best_effort(tmp)
         return None, f"could not write {path}: {exc}"
     return tmp, None
 
@@ -270,7 +284,7 @@ def write_json(path, obj, schema=None):
     try:
         os.replace(tmp, path)
     except OSError as exc:
-        tmp.unlink(missing_ok=True)
+        _unlink_best_effort(tmp)
         return f"could not write {path}: {exc}"
     return None
 
@@ -298,7 +312,7 @@ def create_json(path, obj, schema=None):
     except OSError as exc:
         return f"could not write {path}: {exc}"
     finally:
-        tmp.unlink(missing_ok=True)
+        _unlink_best_effort(tmp)
     return None
 
 

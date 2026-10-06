@@ -178,7 +178,7 @@ def _rewrite(path, obj):
         os.chmod(tmp, mode)
         os.replace(tmp, path)
     except OSError as exc:
-        tmp.unlink(missing_ok=True)
+        store._unlink_best_effort(tmp)
         return f"could not write {path}: {exc}"
     return None
 

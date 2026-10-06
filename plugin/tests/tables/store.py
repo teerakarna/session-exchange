@@ -248,4 +248,11 @@ MUTATIONS = [
         new="{directory.name}/{printable(path.name)} is a half-written",
         caught_by="test_store_claims.py",
     ),
+    Mutation(
+        module="store",
+        rule="a failed cleanup is swallowed, not raised past the problem already being reported",
+        old="    except OSError:\n        pass",
+        new="    except OSError:\n        raise",
+        caught_by="test_store_claims.py",
+    ),
 ]
