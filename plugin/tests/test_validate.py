@@ -247,13 +247,13 @@ def id_patterns(name, node, path=()):
     found = {}
     if isinstance(node, dict):
         for key, value in node.items():
-            here = path + (key,)
+            here = (*path, key)
             if key in ("session_id", "id") and isinstance(value, dict) and "pattern" in value:
                 found[(name, *here)] = value["pattern"]
             found.update(id_patterns(name, value, here))
     elif isinstance(node, list):
         for i, value in enumerate(node):
-            found.update(id_patterns(name, value, path + (i,)))
+            found.update(id_patterns(name, value, (*path, i)))
     return found
 
 
