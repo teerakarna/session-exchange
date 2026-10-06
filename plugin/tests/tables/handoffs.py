@@ -228,9 +228,11 @@ MUTATIONS = [
     ),
     Mutation(
         module="handoffs",
+        # `_move` has no view of the status it is leaving, so the mutant writes the one a first
+        # move always leaves behind, `open`. Accepting from open then records the wrong status.
         rule="the move records the status moved to, not the one left behind",
         old='    entry = {"at": at or store.now(), "status": status, "after": after}',
-        new='    entry = {"at": at or store.now(), "status": current, "after": after}',
+        new='    entry = {"at": at or store.now(), "status": OPEN, "after": after}',
         caught_by="test_handoffs.py",
     ),
     Mutation(
