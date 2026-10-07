@@ -503,6 +503,23 @@ def failed_a_check(out, name):
     return any(CHECK_FAILED.match(line) for line in sections(out).get(name, "").splitlines())
 
 
+TRACEBACK = re.compile(r"^Traceback \(most recent call last\):$", re.MULTILINE)
+
+
+def died_after_a_check(out, name):
+    """Whether the named file both failed a named check and then raised - #57.
+
+    `failed_a_check` alone cannot tell "asserted everything, one rule wrong" from "asserted one
+    rule wrong, then crashed, and asserted nothing else" - both print a FAIL line in the section and
+    both exit non-zero. This does not count checks either; it only reads whether a traceback appears
+    in the same section as a FAIL, which is a claim about the shape of the output, not about how
+    much of the file actually ran. A mutation flagged this way is still caught - the checks after
+    the crash point are just not vouched for on this run, the same way `crashed` already says a
+    whole file's worth of rules are not vouched for when nothing failed first.
+    """
+    return failed_a_check(out, name) and bool(TRACEBACK.search(sections(out).get(name, "")))
+
+
 def last_line(out):
     """The last line of runner output, for the cases where no test file was named.
 
@@ -554,7 +571,14 @@ def verdict(returncode, out, mutation):
 
 
 def sweep_one(mutation):
-    """Returns `(ok, detail, crashed)`. `ok` is False when the suite did not object.
+    """Returns `(ok, detail, crashed, partial)`. `ok` is False when the suite did not object.
+
+    `partial` is `died_after_a_check` on whichever run produced the final verdict - a caught
+    mutation whose named file also raised after the check that caught it, so the file's remaining
+    rules went unasserted for this run too. Not `crashed`: that bucket is for a file that objected
+    nowhere at all (#41); this one objected once and then stopped (#57), which still counts as a
+    catch but is worth printing separately rather than silently, the same reasoning #42 and #41 both
+    made for their own buckets.
 
     `crashed` is a caught mutation whose named file exited non-zero without a single check failing,
     which means it died part way through - and everything it would have asserted after that point
@@ -590,7 +614,7 @@ def sweep_one(mutation):
     returncode, out = run_suite(mutation, only=mutation.caught_by)
     ok, detail = verdict(returncode, out, mutation)
     if ok and failed_a_check(out, mutation.caught_by):
-        return True, detail, False
+        return True, detail, False, died_after_a_check(out, mutation.caught_by)
 
     # A run that did not happen at all is the one non-catch that is not a question about the other
     # files, so it does not fall through. A mutation that does not apply fails to apply identically
@@ -598,13 +622,14 @@ def sweep_one(mutation):
     # contains it - so the second run would spend another 120 seconds to print the same sentence,
     # and the arithmetic in `run_suite`'s timeout comment is written for one cap per mutation.
     if returncode is None:
-        return ok, detail, False
+        return ok, detail, False, False
 
     returncode, out = run_suite(mutation)
     ok, detail = verdict(returncode, out, mutation)
     if ok and not failed_a_check(out, mutation.caught_by):
-        return True, f"{detail}, but no check in it failed, so it died rather than objecting", True
-    return ok, detail, False
+        detail = f"{detail}, but no check in it failed, so it died rather than objecting"
+        return True, detail, True, False
+    return ok, detail, False, (ok and died_after_a_check(out, mutation.caught_by))
 
 
 def main(argv):
@@ -687,6 +712,7 @@ def main(argv):
 
     survivors = []
     crashes = []
+    partials = []
     # Counted as the loop goes, not from `sum(len(TABLES[name]) for name in wanted)`, which is what
     # this did and which is a claim about the table rather than about work done. Both directions
     # were probed and both green: slicing the inner loop to `TABLES[name][:1]` ran 3 of 16 and still
@@ -698,9 +724,10 @@ def main(argv):
     for name in wanted:
         print(f"=== {name}.py")
         for mutation in TABLES[name]:
-            ok, detail, crashed = sweep_one(mutation)
+            ok, detail, crashed, partial = sweep_one(mutation)
             scored += 1
-            print(f"  {'crash' if crashed else 'ok   ' if ok else 'ALIVE'} {mutation.rule}")
+            marker = "crash" if crashed else "part " if partial else "ok   " if ok else "ALIVE"
+            print(f"  {marker} {mutation.rule}")
             # On a pass as well as on a survivor. `verdict` returns the files that objected and
             # nothing read the value, so it could have returned "" with the suite green - and it is
             # worth reading: a survivor names the file that should have objected, a crash says what
@@ -712,6 +739,8 @@ def main(argv):
                 survivors.append((mutation, detail))
             elif crashed:
                 crashes.append((mutation, detail))
+            elif partial:
+                partials.append((mutation, detail))
 
     print()
     # The unit cost, which is the figure the job's timeout is actually sized against and which two
@@ -731,6 +760,16 @@ def main(argv):
     if crashes:
         print(f"{len(crashes)} mutation(s) were caught by a file dying rather than by a check:")
         for mutation, detail in crashes:
+            print(f"  {mutation.module}: {mutation.rule}")
+            print(f"    {detail}")
+        print()
+    if partials:
+        # After the crashes and ahead of the survivors, for the same reason as the crashes comment:
+        # a flagged mutation is a caught one, so it costs nothing to trust, but everything after the
+        # traceback in that file went unasserted for this run, which is worth seeing before "every
+        # one of N was caught" reads as more coverage than this run actually produced.
+        print(f"{len(partials)} mutation(s) were caught, but the file also raised afterward:")
+        for mutation, detail in partials:
             print(f"  {mutation.module}: {mutation.rule}")
             print(f"    {detail}")
         print()
