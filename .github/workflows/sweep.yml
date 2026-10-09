@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   sweep:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     # The same number as `ci`'s `mutate`, by construction rather than by coincidence: that job runs
     # this sweep several times a quarter, so a limit it cannot finish under makes a harness change
     # unmergeable. `ci` carries the reasoning and the readings; both move together and this one
