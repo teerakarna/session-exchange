@@ -34,19 +34,23 @@ jobs:
   # on. Until this existed, "156 checks green" meant one machine, one interpreter, once, at whatever
   # moment someone remembered to type it.
   #
-  # Three interpreters in one job rather than three legs of a matrix, and the reason is the one the
+  # Interpreters in one job rather than one leg of a matrix each, and the reason is the one the
   # `checks` comment below gives for its own shape: a job bills a whole minute however little it runs.
-  # These three took 17, 16 and 27 seconds, so three jobs billed three minutes to do one minute of
-  # work. Run in sequence here they come to around forty seconds and bill one. Nothing about what is
-  # checked changed - same three interpreters, same suite - and the step conditions keep them
-  # reporting independently of each other, which is the whole of what `fail-fast: false` was doing
-  # when they were legs. #73 has the measurement this came off.
+  # The three took 17, 16 and 27 seconds, so three jobs billed three minutes to do one minute of
+  # work. Run in sequence they came to around forty seconds and billed one, and the step conditions
+  # keep them reporting independently of each other, which is the whole of what `fail-fast: false`
+  # was doing when they were legs. #73 has the measurement. 3.9 has since been split out (below), so
+  # this job runs two of them.
   #
   # The versions are three deliberate choices, not a range:
   #
   # - 3.9 is the floor. The hooks invoke whatever `python3` is on PATH, and on a stock macOS that is
-  #   the system 3.9. Ubuntu only, because setup-python has no arm64 build that far back.
+  #   the system 3.9. Ubuntu only, because setup-python has no arm64 build that far back. It is its
+  #   own job, `test-floor` below, and not a step here, for a reason found in #72: setup-python has
+  #   no 3.9 build for Ubuntu 26.04, which is what `ubuntu-latest` becomes from 2026-10-19.
   # - 3.11 and 3.13 cover the interpreter-level behaviour, which is where the version sensitivity is.
+  #   They stay on `ubuntu-latest` so the Linux half of the suite follows the image rather than
+  #   being pinned to one that has to be remembered and removed.
   #
   # macOS is its own job below rather than a fourth leg here. It is a different runner on a different
   # multiplier, and the one recurring argument about what this workflow costs is about that job alone,
@@ -71,15 +75,6 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: &leg ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
-          python-version: "3.9"
-
-      - name: Test on 3.9
-        if: *leg
-        run: python plugin/tests/run.py
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: *leg
-        with:
           python-version: "3.11"
 
       - name: Test on 3.11
@@ -93,6 +88,34 @@ jobs:
 
       - name: Test on 3.13
         if: *leg
+        run: python plugin/tests/run.py
+
+  # The floor, on the last image that still has it. Pinned to `ubuntu-24.04` on purpose and for one
+  # reason: setup-python carries its own Python builds, and it has none of 3.9 for Ubuntu 26.04, so on
+  # `ubuntu-latest` after 2026-10-19 this step fails at setup (#72, found by running the suite on
+  # 26.04 early in #105). Worse, the `Test on` step beside it is conditioned to run regardless, so it
+  # would have gone on to run the suite on whatever `python` the image ships and reported green: the
+  # setup failure is the only thing that makes the job red, which is why this job keeps its setup and
+  # its test in the same two steps with no `if` between them and lets a failed setup stop the run.
+  #
+  # The pin comes out when the floor is raised past 3.9 or setup-python gains a 3.9 build for the
+  # image `ubuntu-latest` has by then. 24.04 stays a hosted image for years, so this is not a clock
+  # that is running down, only a reminder that the floor and the runner are chosen together. It costs
+  # one more billed minute than keeping the floor beside the other two, which is the price of both
+  # keeping a 3.9 leg and following the label.
+  test-floor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+
+      - name: Test on 3.9
         run: python plugin/tests/run.py
 
   # One macOS run, on 3.13. The platform-sensitive parts are `os.kill` and `ps`, and those do not vary
@@ -516,7 +539,7 @@ jobs:
   # `always()` so it runs even when something upstream failed, and the explicit result check because
   # a skipped `needs` job does not fail a dependant on its own.
   ci:
-    needs: [test, test-macos, checks, mutate, secrets, pr-title]
+    needs: [test, test-floor, test-macos, checks, mutate, secrets, pr-title]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

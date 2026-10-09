@@ -174,8 +174,9 @@ the hooks invoke whatever `python3` is on PATH with no opportunity to install an
 third-party import is not a dependency decision, it is an `ImportError` at session start on every
 machine but yours. CI fails the build on one.
 
-The same reasoning sets the floor at **Python 3.9**, which is what a stock macOS ships. CI runs 3.9,
-3.11 and 3.13 on Linux in one job, and 3.13 on macOS in another. One macOS run rather than two: the
+The same reasoning sets the floor at **Python 3.9**, which is what a stock macOS ships. CI runs 3.11 and 3.13 on
+`ubuntu-latest` in one job, 3.9 on `ubuntu-24.04` in another (setup-python has no 3.9 for Ubuntu
+26.04), and 3.13 on macOS in a third. One macOS run rather than two: the
 platform-sensitive parts are `os.kill` and `ps`, which do not vary by interpreter version, and macOS
 minutes bill at 10x.
 
@@ -216,7 +217,7 @@ exists inside CI.
 | Tier | Command | In CI |
 |---|---|---|
 | Lint and shape | `ruff check .`, `ruff format --check .` (version pinned in `.github/requirements-ci.txt`), `shellcheck plugin/hooks-handlers/*.sh`, `claude plugin validate --strict ./plugin` and `--strict .` | `checks`, every push |
-| The suite | `python3 plugin/tests/run.py` | `test`, every push, on 3.9/3.11/3.13 |
+| The suite | `python3 plugin/tests/run.py` | `test` on 3.11/3.13 and `test-floor` on 3.9 (pinned to `ubuntu-24.04`, see #72), every push |
 | The suite on macOS | `python3 plugin/tests/run.py` | `test-macos`, on `main` and on PRs out of draft |
 | Sweep, narrowed | `python3 plugin/tests/mutate.py --since origin/main` | `mutate`, every push to a PR |
 | Sweep, full | `python3 plugin/tests/mutate.py` | `Sweep` workflow, weekly on `main` and on demand |

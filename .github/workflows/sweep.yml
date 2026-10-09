@@ -49,6 +49,12 @@ jobs:
     # measured 5m13s and 4m55s for the whole table, and 20 is roughly four times that. What still
     # grows is the tables owed, but what each one now adds is a file's worth of runtime rather than
     # the suite's, so there is more room inside this number than there was inside 90.
+    #
+    # Re-read on 2026-10-09 for #72, and the "four times" above is no longer true: the tables have
+    # grown from 244 mutations to 424. The scheduled run on 2026-10-05 took 8m53s on 24.04 (423
+    # mutations) and a trial on 26.04 took 6m35s (424), so the image change does not slow it and the
+    # headroom is about 2.3x on the slower reading. That is thinner than it was, and it is table growth
+    # that thinned it, so the next table owed is the moment to re-measure rather than the runner move.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
