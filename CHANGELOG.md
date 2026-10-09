@@ -4,6 +4,20 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 [semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
 each section is generated from the commits it ships.
 
+## [0.3.0](https://github.com/teerakarna/session-exchange/compare/v0.2.0...v0.3.0) (2026-10-09)
+
+
+### Added
+
+* flag a catch where the file also crashed after its check ([#57](https://github.com/teerakarna/session-exchange/issues/57)) ([#102](https://github.com/teerakarna/session-exchange/issues/102)) ([167126b](https://github.com/teerakarna/session-exchange/commit/167126bd2f4293372a40c95b4916423552f8b6aa))
+
+
+### Fixed
+
+* init's git-root ceiling climbs past a repo nested in another ([#96](https://github.com/teerakarna/session-exchange/issues/96)) ([5d05417](https://github.com/teerakarna/session-exchange/commit/5d05417c1e2f2e0359a93fc17f7df4e57154723c))
+* migrate names a stale moves directory instead of saying run it again ([#94](https://github.com/teerakarna/session-exchange/issues/94)) ([#100](https://github.com/teerakarna/session-exchange/issues/100)) ([dbe45db](https://github.com/teerakarna/session-exchange/commit/dbe45db69c86713259beae74f2ca06e2913302c7))
+* review nits from [#41](https://github.com/teerakarna/session-exchange/issues/41) ([#98](https://github.com/teerakarna/session-exchange/issues/98)) ([22ce6d9](https://github.com/teerakarna/session-exchange/commit/22ce6d95a812e51d57884ae5b96124f25ffcc45d))
+
 ## [0.2.0](https://github.com/teerakarna/session-exchange/compare/v0.1.0...v0.2.0) (2026-10-02)
 
 
