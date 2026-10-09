@@ -407,6 +407,37 @@ check(
     False,
 )
 
+# died_after_a_check is the #57 flag: the two facts above, read together on one section.
+check(
+    "an ordinary catch has no traceback, so it is not flagged",
+    mutate.died_after_a_check(CAUGHT, "test_hook.py"),
+    False,
+)
+check(
+    "a crash with no FAIL at all is not flagged either - that is the crash bucket, not this one",
+    mutate.died_after_a_check(CRASHED, "test_hook.py"),
+    False,
+)
+BOTH = (
+    "=== test_hook.py\n"
+    "  FAIL  a rule nobody kept: got 1, want 2\n"
+    "  ok    a check after it that still ran\n"
+    "Traceback (most recent call last):\n"
+    "TypeError: argument of type 'NoneType' is not iterable\n"
+    "FAILED: test_hook.py\n"
+)
+check(
+    "a FAIL and a traceback in the same section is flagged",
+    mutate.died_after_a_check(BOTH, "test_hook.py"),
+    True,
+)
+OTHER_FILE_CLEAN = BOTH + "=== test_store_claims.py\n  ok    fine\n"
+check(
+    "the flag is per file, not per run - a clean section elsewhere does not borrow it",
+    mutate.died_after_a_check(OTHER_FILE_CLEAN, "test_store_claims.py"),
+    False,
+)
+
 print("and each of those verdicts is what the sweep actually asks for")
 
 
@@ -459,7 +490,7 @@ check(
 check(
     "sweep_one asks verdict, and reports the mutation it was given",
     through((1, "FAILED: test_store_claims.py\n"), lambda: mutate.sweep_one(once)),
-    (False, "caught by test_store_claims.py rather than test_hook.py", False),
+    (False, "caught by test_store_claims.py rather than test_hook.py", False, False),
 )
 check(
     "and asked for that mutation rather than for a clean run",
@@ -474,7 +505,7 @@ check(
 check(
     "a catch whose file printed a failing check is an ordinary catch",
     through((1, CAUGHT), lambda: mutate.sweep_one(once)),
-    (True, "test_hook.py", False),
+    (True, "test_hook.py", False, False),
 )
 check(
     "a catch whose file only died is flagged instead",
@@ -502,7 +533,7 @@ check(
 check(
     "and a rule nothing asserts is not a crash",
     through((0, "everything passed\n"), lambda: mutate.sweep_one(once)),
-    (False, "the suite passed, so nothing asserts this rule", False),
+    (False, "the suite passed, so nothing asserts this rule", False, False),
 )
 
 print("and it pays for the whole suite only when one file cannot answer")
@@ -541,7 +572,7 @@ for outcome, what in (
     check(
         f"{what} is not asked twice, the second cap buying the same sentence",
         (through.handed, result),
-        ([(once, "test_hook.py")], (False, outcome[1], False)),
+        ([(once, "test_hook.py")], (False, outcome[1], False, False)),
     )
 
 print("and what run_suite hands it is what the scoring needs")
@@ -720,6 +751,7 @@ def run_main(
     tables,
     caught,
     crashed=False,
+    partial=False,
     baseline_problem=None,
     alone_problem=None,
     changed=None,
@@ -748,7 +780,7 @@ def run_main(
         return baseline_problem if only is None else (alone_problem or {}).get(only)
 
     mutate.baseline = stub_baseline
-    mutate.sweep_one = lambda mutation: (caught, "stubbed", crashed)
+    mutate.sweep_one = lambda mutation: (caught, "stubbed", crashed, partial)
     if changed is not None:
         mutate.changed_since = lambda base: changed
     # `main` reads the sweep marker from the real `os.environ`, and this calls it in-process rather
@@ -910,6 +942,32 @@ check(
     "a clean run reports no crashes at all",
     "caught by a file dying" in run_main([], tables=TWO, caught=True)[1],
     False,
+)
+
+# #57's flag: a catch where the named file failed a check and then also raised, so the rest of its
+# table is not vouched for on this run - not a crash (something did fail first) and not ordinary
+# (nothing after the traceback was asserted). Same shape of assertions as the crash block above, on
+# the other new bucket.
+code, printed = run_main([], tables=TWO, caught=True, partial=True)
+check("a partial catch still passes, since the mutation was caught", code, 0)
+check(
+    "but the run says how many, rather than folding it into an ordinary catch",
+    "4 mutation(s) were caught, but the file also raised afterward" in printed,
+    True,
+)
+check("and names them", "hookio: stub" in printed, True)
+check("and each one is marked part rather than ok", "part  stub" in printed, True)
+check(
+    "a clean run reports no partial catches either",
+    "also raised afterward" in run_main([], tables=TWO, caught=True)[1],
+    False,
+)
+check(
+    "crashed and partial are different buckets, not two names for one",
+    run_main([], tables=TWO, caught=True, crashed=True, partial=True)[1].count(
+        "4 mutation(s) were caught"
+    ),
+    1,
 )
 
 # The cost line, which is the cheap half of #43: the sweep's own runtime, printed by the sweep,
