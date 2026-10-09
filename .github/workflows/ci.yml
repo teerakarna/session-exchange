@@ -53,7 +53,7 @@ jobs:
   # which is easier to have when it is not sharing a matrix with three jobs whose cost is a rounding
   # error.
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -152,7 +152,7 @@ jobs:
   # the other way, to keep an unpinned npm install off them - there is nothing comparable on
   # this runner to reach, and `persist-credentials: false` above means there is no token on it either.
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -422,7 +422,7 @@ jobs:
   # something going wrong outside a single run rather than the mechanism. A job killed here prints
   # nothing at all, the buffer dying with it, which is how #67 came back unreadable.
   mutate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -470,7 +470,7 @@ jobs:
           python plugin/tests/mutate.py --since "$BASE"
 
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -497,7 +497,7 @@ jobs:
   # reasoning `test-macos` above rests on.
   pr-title:
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -518,7 +518,7 @@ jobs:
   ci:
     needs: [test, test-macos, checks, mutate, secrets, pr-title]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
