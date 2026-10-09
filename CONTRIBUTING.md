@@ -188,10 +188,14 @@ minutes.
 Lint and the shell handlers, matching what CI runs:
 
 ```sh
-uvx ruff@0.16.9 check .
-uvx ruff@0.16.9 format --check .
+RUFF="$(grep '^ruff==' .github/requirements-ci.txt)"
+uvx --from "$RUFF" ruff check .
+uvx --from "$RUFF" ruff format --check .
 shellcheck plugin/hooks-handlers/*.sh
 ```
+
+The ruff version is read from `.github/requirements-ci.txt` rather than written here, so a
+dependabot bump cannot leave this page telling you to run a different one from CI.
 
 `ruff format` will not fix E501 in a comment or a docstring, because it does not rewrap prose, and
 there is a lot of prose here. Rewrapping it by hand left a stub line ("pid," alone) in three
@@ -211,7 +215,7 @@ exists inside CI.
 
 | Tier | Command | In CI |
 |---|---|---|
-| Lint and shape | `uvx ruff@0.16.9 check .`, `ruff format --check .`, `shellcheck plugin/hooks-handlers/*.sh`, `claude plugin validate --strict ./plugin` and `--strict .` | `checks`, every push |
+| Lint and shape | `ruff check .`, `ruff format --check .` (version pinned in `.github/requirements-ci.txt`), `shellcheck plugin/hooks-handlers/*.sh`, `claude plugin validate --strict ./plugin` and `--strict .` | `checks`, every push |
 | The suite | `python3 plugin/tests/run.py` | `test`, every push, on 3.9/3.11/3.13 |
 | The suite on macOS | `python3 plugin/tests/run.py` | `test-macos`, on `main` and on PRs out of draft |
 | Sweep, narrowed | `python3 plugin/tests/mutate.py --since origin/main` | `mutate`, every push to a PR |
