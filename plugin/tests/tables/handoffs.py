@@ -715,4 +715,18 @@ MUTATIONS = [
         new="        pass",
         caught_by="test_handoffs.py",
     ),
+    Mutation(
+        module="handoffs",
+        rule="a move whose suffix collides is retried, not reported as lost",
+        old="        if not (problem and problem.endswith(store.EXISTS)):\n            break",
+        new="        break",
+        caught_by="test_handoffs.py",
+    ),
+    Mutation(
+        module="handoffs",
+        rule="the retry is bounded, so a name taken every time is reported",
+        old="    for _ in range(MOVE_ATTEMPTS):",
+        new="    for _ in range(100):",
+        caught_by="test_handoffs.py",
+    ),
 ]

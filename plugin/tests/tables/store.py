@@ -255,4 +255,32 @@ MUTATIONS = [
         new="    except OSError:\n        raise",
         caught_by="test_store_claims.py",
     ),
+    Mutation(
+        module="store",
+        rule="a volume with no hardlinks still gets the file, written in place",
+        old="        return _create_in_place(tmp, path)",
+        new='        return f"could not write {path}: {exc}"',
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="only an error about hardlinks falls back, any other is reported as it is",
+        old="        if exc.errno not in NO_HARDLINKS:",
+        new="        if False:",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="the in-place write refuses a name that is taken, as the link does",
+        old="os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666",
+        new="os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o666",
+        caught_by="test_store_claims.py",
+    ),
+    Mutation(
+        module="store",
+        rule="a write that fails after creating the name gives the name back",
+        old="        _unlink_best_effort(path)",
+        new="        pass",
+        caught_by="test_store_claims.py",
+    ),
 ]

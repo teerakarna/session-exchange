@@ -56,6 +56,7 @@ STATUSES = (OPEN, ACCEPTED, CLOSED)
 # matter of course, and the only safe behaviour would be to retry, which quietly turns a real
 # duplicate into a second row nobody compares.
 SUFFIX_BYTES = 3
+MOVE_ATTEMPTS = 3
 
 
 def path(root, handoff_id):
@@ -234,7 +235,15 @@ def _move(root, handoff_id, status, after, by, note, at):
     if note:
         entry["note"] = note
 
-    problem = store.create_json(transition_path(root, handoff_id, after), entry, TRANSITION)
+    # A name that is taken here is the random suffix colliding with another move at the same
+    # position, about one in sixteen million, and that loses a legitimate move if it is simply
+    # reported. Unlike a record id, where a collision means two distinct handoffs, this one is plain
+    # contention, which is what a retry is for. Bounded, because a collision on every attempt is a
+    # different problem wearing the same message (#54).
+    for _ in range(MOVE_ATTEMPTS):
+        problem = store.create_json(transition_path(root, handoff_id, after), entry, TRANSITION)
+        if not (problem and problem.endswith(store.EXISTS)):
+            break
     return (None, problem) if problem else (entry, None)
 
 

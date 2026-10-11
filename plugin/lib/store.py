@@ -24,6 +24,7 @@ still the one that created it. See #44.
 from __future__ import annotations
 
 import datetime
+import errno
 import json
 import os
 import pathlib
@@ -289,6 +290,16 @@ def write_json(path, obj, schema=None):
     return None
 
 
+# What `os.link` says when the filesystem has no hardlinks: exFAT, FAT32 and most SMB mounts. EPERM
+# is the one Linux gives for it, and which of the others macOS gives depends on the volume. Anything
+# not here is a real failure and is reported as one.
+NO_HARDLINKS = {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS}
+
+# The tail of the refusal `create_json` returns for a name that is taken, so a caller that retries
+# on contention can tell it from every other problem without matching on prose that may be reworded.
+EXISTS = "already exists; refusing to overwrite it"
+
+
 def create_json(path, obj, schema=None):
     """Like `write_json`, but refuses a path that already exists. Returns a problem, or None.
 
@@ -300,6 +311,15 @@ def create_json(path, obj, schema=None):
 
     The temp file is hardlinked into place and then unlinked, so a reader that globs the directory
     mid-write sees the target or nothing, and never the `.tmp-` name under a name it would read.
+
+    On a filesystem with no hardlinks the link is refused with an error that reads like a
+    permissions problem and is not one (#54), and every handoff write failed. There it falls back to
+    `O_CREAT | O_EXCL`, which is the same one-syscall guarantee that the name is created or the call
+    fails. What is given up is the content-first ordering: the name appears before the bytes do, so
+    a process killed between `open` and `close` leaves a truncated record under it. `read_json`
+    reports that rather than reading it as empty, and the id stays taken until a person clears it,
+    which is deliberate: a rule for how stale is stale enough to overwrite is how a crash recovery
+    becomes a second bug. That window exists only where the alternative was not working at all.
     """
     path = pathlib.Path(path)
     tmp, problem = _staged(path, obj, schema)
@@ -308,11 +328,33 @@ def create_json(path, obj, schema=None):
     try:
         os.link(tmp, path)
     except FileExistsError:
-        return f"{path.name} already exists; refusing to overwrite it"
+        return f"{path.name} {EXISTS}"
     except OSError as exc:
-        return f"could not write {path}: {exc}"
+        if exc.errno not in NO_HARDLINKS:
+            return f"could not write {path}: {exc}"
+        return _create_in_place(tmp, path)
     finally:
         _unlink_best_effort(tmp)
+    return None
+
+
+def _create_in_place(staged, path):
+    """The no-hardlink fallback for `create_json`: create `path` exclusively and write into it."""
+    try:
+        text = staged.read_text(encoding="utf-8")
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+    except FileExistsError:
+        return f"{path.name} {EXISTS}"
+    except OSError as exc:
+        return f"could not write {path}: {exc}"
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(text)
+    except OSError as exc:
+        # This call made the name, so it is this call's to remove; leaving it would take the id for
+        # good on a write that reported failure.
+        _unlink_best_effort(path)
+        return f"could not write {path}: {exc}"
     return None
 
 

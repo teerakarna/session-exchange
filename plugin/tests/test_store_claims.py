@@ -9,7 +9,9 @@ Two properties carry most of the weight, and both are asserted by breaking them:
   how a dead parser read as a quiet day for ten days.
 """
 
+import errno
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -576,6 +578,96 @@ with tempfile.TemporaryDirectory() as tmp:
         got = f"raised {type(exc).__name__}"
     check("a cleanup failure is swallowed, not raised", got, None)
     check("and the directory it could not remove is still there", not_a_file.is_dir(), True)
+
+print("a filesystem with no hardlinks (#54)")
+
+
+def without_hardlinks(code, then):
+    """Run `then` with `os.link` failing the way an exFAT or SMB volume makes it fail."""
+    real = os.link
+
+    def refuse(src, dst, **kwargs):
+        raise OSError(code, os.strerror(code))
+
+    os.link = refuse
+    try:
+        return then()
+    finally:
+        os.link = real
+
+
+def guarded(call):
+    """`call()`, with a raise turned into a value: a broken fallback fails a check, not the file."""
+    try:
+        return call()
+    except Exception as exc:
+        return f"raised {type(exc).__name__}"
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    path = claims.path(root, "nolinks")
+    record = {"session_id": "nolinks", "cwd": str(root), "updated_at": store.now()}
+
+    got = without_hardlinks(
+        errno.EPERM, lambda: guarded(lambda: store.create_json(path, record, CLAIM_SCHEMA))
+    )
+    check("a volume that refuses links still creates the file", got, None)
+    check("with the contents whole", store.read_json(path)[0], record)
+    check(
+        "and no temp file left beside it",
+        sorted(p.name for p in path.parent.glob(".tmp-*")),
+        [],
+    )
+    again = without_hardlinks(
+        errno.EPERM,
+        lambda: guarded(lambda: store.create_json(path, dict(record, cwd="/x"), CLAIM_SCHEMA)),
+    )
+    check(
+        "and the same name again is still refused, not replaced",
+        (again, store.read_json(path)[0]),
+        (f"{path.name} {store.EXISTS}", record),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    path = claims.path(root, "denied")
+    record = {"session_id": "denied", "cwd": str(root), "updated_at": store.now()}
+    # EACCES is a real permission failure, not a missing feature. Falling back on it would try the
+    # write again by another route and report the second failure, hiding which one it was.
+    got = without_hardlinks(
+        errno.EACCES, lambda: guarded(lambda: store.create_json(path, record, CLAIM_SCHEMA))
+    )
+    check(
+        "an error that is not about hardlinks is reported, not routed around",
+        (isinstance(got, str) and got.startswith("could not write"), path.exists()),
+        (True, False),
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = pathlib.Path(tmp).resolve()
+    path = claims.path(root, "cut")
+    record = {"session_id": "cut", "cwd": str(root), "updated_at": store.now()}
+    real_fdopen = os.fdopen
+
+    def dies(fd, *args, **kwargs):
+        os.close(fd)
+        raise OSError(errno.ENOSPC, "no space")
+
+    os.fdopen = dies
+    try:
+        got = without_hardlinks(
+            errno.EPERM, lambda: guarded(lambda: store.create_json(path, record, CLAIM_SCHEMA))
+        )
+    finally:
+        os.fdopen = real_fdopen
+    # This call made the name, so a write that reports failure must not leave it taken: the id would
+    # be held for good by a record nobody wrote.
+    check(
+        "a write that fails after creating the name gives the name back",
+        (isinstance(got, str) and "could not write" in got, path.exists()),
+        (True, False),
+    )
 
 print()
 if failures:
