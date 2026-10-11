@@ -939,6 +939,81 @@ check(
     False,
 )
 
+print("a move whose random suffix collides is retried, within a bound (#54)")
+
+
+def with_transition_names(root, names, then):
+    """Run `then` with `transition_path` handing out `names` in turn, then the real thing.
+
+    Returns `(result, calls)`. `calls` is how many times a name was asked for, which is the number
+    of attempts: a retry that never happens and one that never stops both show up in it.
+    """
+    real = handoffs.transition_path
+    asked = []
+
+    def hand_out(r, handoff_id, after):
+        asked.append(after)
+        return names[len(asked) - 1] if len(asked) <= len(names) else real(r, handoff_id, after)
+
+    handoffs.transition_path = hand_out
+    try:
+        try:
+            return then(), len(asked)
+        except Exception as exc:
+            return f"raised {type(exc).__name__}", len(asked)
+    finally:
+        handoffs.transition_path = real
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h-retry")
+    # A name that is taken, held outside the moves directory so it is not itself read as a move.
+    taken = root / "taken.json"
+    taken.write_text("{}")
+
+    result, attempts = with_transition_names(
+        root,
+        [taken, taken],
+        lambda: handoffs.set_status(root, "h-retry", handoffs.ACCEPTED, at="2026-01-02T03:04:05Z"),
+    )
+    move, problem = result if isinstance(result, tuple) else (None, result)
+    check(
+        "two collisions and then a free name: the move is written, on the third attempt",
+        (problem, attempts, read(move, "after")),
+        (None, 3, 0),
+    )
+    check(
+        "and the state shows it, so a lost move is not what happened",
+        handoffs.state_of(root, "h-retry"),
+        ("accepted", []),
+    )
+    check("while what held the name is untouched", taken.read_text(), "{}")
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = rooted(tmp)
+    handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h-stuck")
+    taken = root / "taken.json"
+    taken.write_text("{}")
+
+    result, attempts = with_transition_names(
+        root,
+        [taken] * 10,
+        lambda: handoffs.set_status(root, "h-stuck", handoffs.ACCEPTED),
+    )
+    move, problem = result if isinstance(result, tuple) else (None, result)
+    # A collision every time is not one in sixteen million; retrying forever would hide that.
+    check(
+        "a name taken every time stops at the bound and says so",
+        (move, attempts, str(problem).endswith(store.EXISTS)),
+        (None, handoffs.MOVE_ATTEMPTS, True),
+    )
+    check(
+        "and nothing was recorded as the move",
+        handoffs.state_of(root, "h-stuck"),
+        ("open", []),
+    )
+
 print()
 if failures:
     print(f"{len(failures)} failure(s): {', '.join(failures)}")
