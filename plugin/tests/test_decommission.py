@@ -53,11 +53,11 @@ new, removed, problems = decommission.unwired(
 check("the legacy entry is removed and named", (removed, problems), (["alpha-session-lane.sh"], []))
 check(
     "a hook beside it in the same group stays",
-    new["hooks"].get("SessionStart"),
+    new.get("hooks", {}).get("SessionStart"),
     [{"hooks": [hook(OTHER)]}],
 )
-check("an event left with nothing is taken out", "SessionEnd" in new["hooks"], False)
-check("one that was empty before is left as it was", new["hooks"].get("Stop"), [])
+check("an event left with nothing is taken out", "SessionEnd" in new.get("hooks", {}), False)
+check("one that was empty before is left as it was", new.get("hooks", {}).get("Stop"), [])
 check("and the rest of the file is untouched", new.get("model"), "kept")
 
 new, removed, _ = decommission.unwired(
@@ -74,7 +74,7 @@ new, removed, _ = decommission.unwired(
 )
 check(
     "a group left empty goes, and the group beside it stays",
-    new["hooks"].get("SessionEnd"),
+    new.get("hooks", {}).get("SessionEnd"),
     [{"hooks": [hook(OTHER)]}],
 )
 

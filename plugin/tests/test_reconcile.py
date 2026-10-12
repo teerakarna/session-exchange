@@ -42,6 +42,23 @@ def check(name, got, want):
         failures.append(name)
 
 
+def dig(obj, *path):
+    """Walk `path` into `obj` through indexes, keys and attributes, or give `"<missing>"`.
+
+    Indexing a plan's result directly raises when a broken rule leaves it empty, and a file that
+    raises part way stops asserting: every check after the crash goes unrun on exactly the mutation
+    that most needs them (#107). This turns the missing step into a value that fails its own check.
+    """
+    for step in path:
+        try:
+            obj = (
+                obj[step] if isinstance(step, int) or isinstance(obj, dict) else getattr(obj, step)
+            )
+        except (IndexError, KeyError, AttributeError, TypeError):
+            return "<missing>"
+    return obj
+
+
 def entry_with(text, fragment):
     """The one entry in `text` whose headline or preserved original contains `fragment`.
 
@@ -168,8 +185,12 @@ check("so the import updates exactly one row", len(after.update), 1)
 check("and creates none, which is the whole gate", after.create, [])
 check("the other four open rows are untouched", len(after.unchanged), 4)
 check("no row is orphaned, because the entry is still there", after.orphan, [])
-check("the updated row is the one that was acknowledged", after.update[0].entry.date, "2026-01-02")
-check("and it is the body that differs", sorted(after.update[0].fields), ["body"])
+check(
+    "the updated row is the one that was acknowledged",
+    dig(after.update, 0, "entry", "date"),
+    "2026-01-02",
+)
+check("and it is the body that differs", sorted(dig(after.update, 0, "fields")), ["body"])
 check(
     "not the status, because accepting is not closing and nothing here reads acceptance",
     reconcile.status_of(now_acked),
@@ -201,8 +222,12 @@ check(
 
 closure = reconcile.reconcile(ledger.entries(closed_later)[0], stored)
 check("the stored row updates rather than duplicating", len(closure.update), 1)
-check("and the status is one of the fields that moved", "status" in closure.update[0].fields, True)
-check("from open to closed", closure.update[0].fields["status"], ("open", "closed"))
+check(
+    "and the status is one of the fields that moved",
+    "status" in dig(closure.update, 0, "fields"),
+    True,
+)
+check("from open to closed", dig(closure.update, 0, "fields", "status"), ("open", "closed"))
 check(
     "it is not skipped, because skipping is only for a closure never imported",
     len(closure.skipped),
@@ -259,7 +284,7 @@ check("so one of them would be lost silently", len(collided.create), 1)
 check("which is why it is reported instead", len(collided.problems), 1)
 check(
     "and the report names the key, not just a count",
-    "share the key" in collided.problems[0] and "lane a>lane b" in collided.problems[0],
+    "share the key" in dig(collided.problems, 0) and "lane a>lane b" in dig(collided.problems, 0),
     True,
 )
 
@@ -324,7 +349,7 @@ check("so it has no key", reconcile.key_of(nobody[0]), None)
 nobody_plan = reconcile.reconcile(nobody, [])
 check("it is not created", nobody_plan.create, [])
 check("and not dropped quietly either", len(nobody_plan.problems), 1)
-check("the problem names the headline", "addressed to nobody" in nobody_plan.problems[0], True)
+check("the problem names the headline", "addressed to nobody" in dig(nobody_plan.problems, 0), True)
 
 print()
 print("the route key, where two spellings have to meet")
@@ -515,7 +540,7 @@ print("a row whose source is gone, and a date that appears later")
 gone = held_of(entry_with(SHAPES, "reversed arrow"), "from-another-file")
 orphaned = reconcile.reconcile(census, [*stored, gone])
 check("a stored row with no live entry is reported", len(orphaned.orphan), 1)
-check("named, so it can be looked at", orphaned.orphan[0]["id"], "from-another-file")
+check("named, so it can be looked at", dig(orphaned.orphan, 0, "id"), "from-another-file")
 check("and not touched: the archive is a different format, not a deletion", orphaned.update, [])
 
 # The known cost of comparing the date strictly, pinned rather than left to be discovered. A loose

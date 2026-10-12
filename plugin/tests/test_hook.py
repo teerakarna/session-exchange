@@ -40,6 +40,18 @@ def check(name, got, want):
         failures.append(name)
 
 
+def read_json_or_empty(path):
+    """The JSON object at `path`, or `{}` when it is missing or does not parse.
+
+    A claim a mutated hook failed to write is a failed check on what it says, not a
+    `FileNotFoundError` that ends the file and leaves every later check unrun (#107).
+    """
+    try:
+        return json.loads(pathlib.Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def fixture(tmp, *, wire_legacy, wire_under_root=False):
     """A synthetic HOME, a marked root, and a repo inside it.
 
@@ -163,10 +175,10 @@ with tempfile.TemporaryDirectory() as tmp:
 
     claim = root / ".claude" / "exchange" / "sessions" / "sess-1.json"
     check("seeded a claim under the root, not under the repo", claim.is_file(), True)
-    written = json.loads(claim.read_text())
+    written = read_json_or_empty(claim)
     check(
         "the claim knows where the session is and on what branch",
-        (written["cwd"], written.get("git_branch")),
+        (written.get("cwd"), written.get("git_branch")),
         (str(repo), "main"),
     )
 
@@ -545,9 +557,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a payload with no cwd falls back to where the process is", (code, out), (0, None))
     check(
         "and the claim it seeded says where that was",
-        json.loads((root / ".claude" / "exchange" / "sessions" / "sess-cwd.json").read_text())[
-            "cwd"
-        ],
+        read_json_or_empty(root / ".claude" / "exchange" / "sessions" / "sess-cwd.json").get("cwd"),
         str(repo),
     )
 
@@ -1085,13 +1095,19 @@ with tempfile.TemporaryDirectory() as tmp:
             )
         )
         sys.stdout = captured
-        code = hook.main("SessionStart")
+        try:
+            code = hook.main("SessionStart")
+        except Exception as exc:
+            code = f"raised {type(exc).__name__}"
     finally:
         sys.stdin, sys.stdout = stdin, stdout
         hook.HANDLERS["SessionStart"] = original
 
-    out = json.loads(captured.getvalue())
-    context = out["hookSpecificOutput"]["additionalContext"]
+    try:
+        out = json.loads(captured.getvalue())
+    except ValueError:
+        out = {}
+    context = (out.get("hookSpecificOutput") or {}).get("additionalContext", "")
     check("an exception is reported, not raised", code, 0)
     check(
         "and it names what broke",

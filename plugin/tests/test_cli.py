@@ -212,10 +212,15 @@ with tempfile.TemporaryDirectory() as tmp:
         home, repo, "claim", "--focus", "the hooks manifest", "--path", "a", "--path", "b"
     )
     check("claims as the calling session, by name", (code, "the-caller" in out), (0, True))
-    written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
+    try:
+        written = json.loads(
+            (area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text()
+        )
+    except (OSError, ValueError):
+        written = {}
     check(
         "and records what it was told",
-        (written["name"], written["focus"], written["paths"], written["git_branch"]),
+        tuple(written.get(k) for k in ("name", "focus", "paths", "git_branch")),
         ("the-caller", "the hooks manifest", ["a", "b"], "main"),
     )
 
