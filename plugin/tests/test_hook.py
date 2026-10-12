@@ -434,7 +434,7 @@ with tempfile.TemporaryDirectory() as tmp:
     seeded = root / ".claude" / "exchange" / "sessions" / "sess-named.json"
     check(
         "the claim carries the name the registry knows this session by",
-        json.loads(seeded.read_text()).get("name"),
+        read_json_or_empty(seeded).get("name"),
         "pane-a",
     )
 
@@ -1169,7 +1169,9 @@ def presence_fixture(tmp, *, wire_legacy=False):
 
 
 def context_rows(out):
-    return out["hookSpecificOutput"]["additionalContext"].splitlines() if out else []
+    if not out:
+        return []
+    return (out.get("hookSpecificOutput") or {}).get("additionalContext", "").splitlines()
 
 
 print("presence, with nobody else under the root")

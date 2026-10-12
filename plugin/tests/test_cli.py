@@ -37,6 +37,30 @@ def check(name, got, want):
         failures.append(name)
 
 
+class Absent(dict):
+    """A dict that answers `{}` for a key it lacks, so a missing field fails the check about it.
+
+    Indexing a field a mutated write never produced raises `KeyError` and ends the file, and every
+    check after it goes unrun on the mutation that most needs them (#107).
+    """
+
+    def __missing__(self, key):
+        return Absent()
+
+
+def read_json_or_empty(path):
+    """The JSON object at `path` as an `Absent`, or an empty one when it is missing or unreadable.
+
+    What the CLI wrote is read back to check it. When a mutation stops the write, the read itself
+    raises, which is the same crash one step earlier.
+    """
+    try:
+        data = json.loads(pathlib.Path(path).read_text())
+    except (OSError, ValueError):
+        return Absent()
+    return Absent(data) if isinstance(data, dict) else data
+
+
 def scope_of(text, script):
     """The scope marker on `doctor`'s `wired:` line for `script`.
 
@@ -212,12 +236,7 @@ with tempfile.TemporaryDirectory() as tmp:
         home, repo, "claim", "--focus", "the hooks manifest", "--path", "a", "--path", "b"
     )
     check("claims as the calling session, by name", (code, "the-caller" in out), (0, True))
-    try:
-        written = json.loads(
-            (area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text()
-        )
-    except (OSError, ValueError):
-        written = {}
+    written = read_json_or_empty(area / ".claude" / "exchange" / "sessions" / "real-one.json")
     check(
         "and records what it was told",
         tuple(written.get(k) for k in ("name", "focus", "paths", "git_branch")),
@@ -225,7 +244,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
     code, out = run(home, repo, "claim", "--path", "c")
-    written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
+    written = read_json_or_empty(area / ".claude" / "exchange" / "sessions" / "real-one.json")
     check("a second claim adds rather than replacing", written["paths"], ["a", "b", "c"])
 
     # Break it: the display name must come from the id being claimed as, not from whoever is
@@ -233,7 +252,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # everybody a stale row under it.
     code, out = run(home, repo, "claim", "--session", "someone-else", "--focus", "other work")
     other_path = area / ".claude" / "exchange" / "sessions" / "someone-else.json"
-    other = json.loads(other_path.read_text())
+    other = read_json_or_empty(other_path)
     check(
         "an explicit session id does not borrow the caller's name",
         ("name" in other, other["focus"]),
@@ -308,7 +327,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # The codepoint, not only the shape it renders as. `/etc` on its own is a string the typist can
     # see nothing wrong with, so a refusal carrying that alone is one they cannot act on.
     check("and the refusal names what to remove", "U+0009" in out, True)
-    written = json.loads((area / ".claude" / "exchange" / "sessions" / "real-one.json").read_text())
+    written = read_json_or_empty(area / ".claude" / "exchange" / "sessions" / "real-one.json")
     check("and none of them reached the record", written["repos"], ["one"])
     code, out = run(home, repo, "claim", "--repo", "two/../two")
     check("a .. in the middle is refused as well as one at the front", code, 1)
@@ -331,7 +350,7 @@ with tempfile.TemporaryDirectory() as tmp:
         home, repo, "claim", "--session", "peer-1", "--focus", nasty, "--ticket", "T\0071"
     )
     peer = area / ".claude" / "exchange" / "sessions" / "peer-1.json"
-    stored = json.loads(peer.read_text())
+    stored = read_json_or_empty(peer)
     # Stored verbatim, like a handoff body: the store is not the place to edit someone's prose.
     check("the claim keeps the focus exactly as it was written", stored["focus"], nasty)
     # The echo is a render too, and it was the one the first cut of this block missed while it fixed
@@ -370,7 +389,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # A list field, and not only its first element. Re-read before editing: the `claim` above wrote
     # a ticket and a fresh timestamp, and putting back the dict that was read before it would drop
     # both, leaving a check further down asserting against a record this file had already replaced.
-    stored = json.loads(peer.read_text())
+    stored = read_json_or_empty(peer)
     stored["paths"] = ["ok", "two\033[2K"]
     peer.write_text(json.dumps(stored))
     code, out = run(home, repo, "show")
@@ -408,7 +427,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("and step 4 is not what comes next", "next      step 4" in out, False)
     check("and says how to declare one that was missed", "name it there" in out, True)
     marker = area / ".claude" / "exchange.json"
-    written = json.loads(marker.read_text())
+    written = read_json_or_empty(marker)
     marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "ledger.md"})))
     code, out = run(home, repo, "doctor")
     check(
@@ -643,7 +662,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     first = posted_id(out)
     check("a body on stdin is posted", (code, (store_dir / f"{first}.json").is_file()), (0, True))
-    written = json.loads((store_dir / f"{first}.json").read_text())
+    written = read_json_or_empty(store_dir / f"{first}.json")
     # `.d`, not the bare id: an id may contain a dot, and a directory named after the bare id would
     # then sit exactly where another id's record goes.
     moves = store_dir / f"{first}.d"
@@ -680,7 +699,7 @@ with tempfile.TemporaryDirectory() as tmp:
             # broke there is no move to index, and an IndexError would report one broken rule as a
             # broken test file and take the rest of this fixture down with it.
             recorded[0].get("by") if recorded else None,
-            json.loads((store_dir / f"{first}.json").read_text()) == written,
+            read_json_or_empty(store_dir / f"{first}.json") == written,
         ),
         (["accepted"], "the-caller", True),
     )
@@ -789,7 +808,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "first")
     handoff_id = posted_id(out)
     path = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json"
-    legacy = json.loads(path.read_text())
+    legacy = read_json_or_empty(path)
     legacy["status"] = "closed"
     legacy["history"] = [{"at": legacy["created"], "status": "closed"}]
     path.write_text(json.dumps(legacy))
@@ -825,7 +844,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "posted long ago")
     handoff_id = posted_id(out)
     path = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json"
-    legacy_record = json.loads(path.read_text())
+    legacy_record = read_json_or_empty(path)
     legacy_record["status"] = "closed"
     legacy_record["history"] = [{"at": legacy_record["created"], "status": "closed"}]
     path.write_text(json.dumps(legacy_record))
@@ -851,7 +870,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     # Nothing was rewritten. A diagnostic that fixed it would be option 3 in #51, which was refused:
     # `post` is the only thing here that writes a record, and it writes it once.
-    check("and the record is left exactly as it was", json.loads(path.read_text()), legacy_record)
+    check("and the record is left exactly as it was", read_json_or_empty(path), legacy_record)
 
 with tempfile.TemporaryDirectory() as tmp:
     # #53. A moves directory whose record has gone. `rm handoffs/<id>.json` is the route in, there
@@ -1100,7 +1119,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (0, True),
     )
     marker = area / ".claude" / "exchange.json"
-    written = json.loads(marker.read_text())
+    written = read_json_or_empty(marker)
     (area / "ledger.md").write_text(LEDGER)
     marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "ledger.md"})))
     stored = area / ".claude" / "exchange" / "handoffs"
@@ -1192,7 +1211,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     run(home, repo, "init")
     marker = area / ".claude" / "exchange.json"
-    written = json.loads(marker.read_text())
+    written = read_json_or_empty(marker)
     marker.write_text(json.dumps(dict(written, legacy_ledger={"path": "gone.md"})))
     code, out = run(home, repo, "migrate", "--step", "7", "--apply")
     # Unwiring the ledger's hooks before its handoffs are in the store loses the only thing that
@@ -1220,7 +1239,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "migrate", "--step", "7", "--apply")
     check(
         "--apply unwires this root and retires the script it freed",
-        (code, json.loads(local.read_text()), (hooks / "alpha-session-lane.sh").exists()),
+        (code, read_json_or_empty(local), (hooks / "alpha-session-lane.sh").exists()),
         (0, {}, False),
     )
     code, out = run(home, repo, "doctor")

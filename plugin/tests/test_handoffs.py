@@ -331,7 +331,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "and a normal post has none",
-        "imported" in handoffs.post(root, to, "body", sender)[0],
+        "imported" in (pair_of(lambda: handoffs.post(root, to, "body", sender))[0] or {}),
         False,
     )
 
@@ -369,7 +369,11 @@ with tempfile.TemporaryDirectory() as tmp:
         (read(move, "by"), read(move, "note")),
         ("me", "mine now"),
     )
-    check("and the handoff reads as accepted", handoffs.state_of(root, "h1"), ("accepted", []))
+    check(
+        "and the handoff reads as accepted",
+        pair_of(lambda: handoffs.state_of(root, "h1")),
+        ("accepted", []),
+    )
     # The point of the whole shape. The sender wrote this file and nothing else ever writes it, so
     # there is no second copy of the status to contradict the moves and no read-modify-write to lose
     # a concurrent one.
@@ -575,6 +579,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # this module writes a file like this, which is why it has to be forged - and until it was, both
     # the refusal and the reporting were unfalsifiable: a mutation dropping the unreadable half of
     # the guard left the whole suite green.
+    store.transitions_dir(root, "h1").mkdir(parents=True, exist_ok=True)
     (store.transitions_dir(root, "h1") / "0001-bad.json").write_text("{ truncated")
     status, problems = handoffs.state_of(root, "h1")
     check(
