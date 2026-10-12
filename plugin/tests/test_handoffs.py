@@ -39,6 +39,32 @@ def check(name, got, want):
         failures.append(name)
 
 
+def tolerant(function, first=None):
+    """`function`, a raise turned into `(first, "raised X")`: for what returns `(result, problem)`.
+
+    These are called all through this file, and under a broken rule any of them can raise instead of
+    returning a problem. A test that lets that through ends the file there, and every check after it
+    goes unrun on exactly the mutation that most needs them (#107). Wrapped once here rather than at
+    each call, because a new call that forgets would be a new crash site. `first` is what stands in
+    for the result: an empty list for the readers whose callers iterate it, `None` otherwise.
+    """
+
+    def wrapped(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except Exception as exc:
+            return first, f"raised {type(exc).__name__}"
+
+    wrapped.__name__ = function.__name__
+    return wrapped
+
+
+for _name in ("post", "set_status", "resolve", "state_of"):
+    setattr(handoffs, _name, tolerant(getattr(handoffs, _name)))
+for _name in ("transitions", "load_all"):
+    setattr(handoffs, _name, tolerant(getattr(handoffs, _name), first=[]))
+
+
 def read(obj, key):
     """`obj[key]`, or the name of what it raised. A mutation that breaks the lookup then fails
     the check it belongs to by name, instead of ending the whole file on a traceback."""
@@ -399,9 +425,13 @@ with tempfile.TemporaryDirectory() as tmp:
     # closing inside one second is ordinary, and the first version of this sorted the directory by
     # a name built from that timestamp - which left the order to the random suffix and read a
     # closed handoff back as accepted about half the time.
+    moves_read = attempt(handoffs.transitions, root, "h1")
     check(
         "the clock does not decide the order, and here it cannot: both moves share a second",
-        (handoffs.state_of(root, "h1"), {e["at"] for e in handoffs.transitions(root, "h1")[0]}),
+        (
+            attempt(handoffs.state_of, root, "h1"),
+            {e.get("at") for e in (moves_read[0] if isinstance(moves_read, tuple) else [])},
+        ),
         (("closed", []), {same_second}),
     )
 
@@ -747,7 +777,7 @@ with tempfile.TemporaryDirectory() as tmp:
     frozen(root)
     handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h2")
     handoffs.set_status(root, "h2", handoffs.CLOSED)
-    reported = handoffs.unresolved(root)
+    reported = attempt(handoffs.unresolved, root)
     check(
         "only the frozen one is listed, and it names the verb and the flags",
         (
@@ -764,7 +794,9 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
     handoffs.resolve(root, "h1", handoffs.CLOSED, note="decided")
-    check("once resolved, it is not reported as frozen again", handoffs.unresolved(root), [])
+    check(
+        "once resolved, it is not reported as frozen again", attempt(handoffs.unresolved, root), []
+    )
 
 print("a moves directory is a name in its own right")
 

@@ -37,6 +37,19 @@ def check(name, got, want):
         failures.append(name)
 
 
+def forge_json(path, data):
+    """Write `data` at `path` to set up a check, or do nothing when `path` cannot be written.
+
+    The path comes from an id that `posted_id` read off a post, and when the post did not land that
+    is a description rather than an id. Writing there raises and ends the file (#107); skipping it
+    leaves the checks that follow to fail on what is missing, which is what they are for.
+    """
+    try:
+        pathlib.Path(path).write_text(json.dumps(data))
+    except OSError:
+        pass
+
+
 class Absent(dict):
     """A dict that answers `{}` for a key it lacks, so a missing field fails the check about it.
 
@@ -731,7 +744,14 @@ with tempfile.TemporaryDirectory() as tmp:
     run(home, repo, "handoff", "close", handoff_id)
     moves = area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.d"
     forged = {"at": "2026-01-02T03:04:05Z", "status": "accepted", "after": 0}
-    (moves / "0000-forged.json").write_text(json.dumps(forged))
+    # `handoff_id` is whatever `posted_id` found, which is a description rather than an id when the
+    # post failed, and writing under that path ends the file on an `OSError` (#107). The checks
+    # below then fail on what is missing, which is the point.
+    try:
+        moves.mkdir(parents=True, exist_ok=True)
+        (moves / "0000-forged.json").write_text(json.dumps(forged))
+    except OSError:
+        pass
 
     code, out = run(home, repo, "handoff", "list")
     check(
@@ -772,7 +792,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (code, "resolved at position 1" in out, "still on disk" in out),
         (0, True, True),
     )
-    declared = json.loads(sorted(moves.glob("0001-*.json"))[0].read_text())
+    declared = read_json_or_empty(next(iter(sorted(moves.glob("0001-*.json"))), moves / "absent"))
     check(
         "the move records who decided and why, which is what those fields are for",
         (declared["status"], declared["by"], declared["note"], declared["after"]),
@@ -811,7 +831,7 @@ with tempfile.TemporaryDirectory() as tmp:
     legacy = read_json_or_empty(path)
     legacy["status"] = "closed"
     legacy["history"] = [{"at": legacy["created"], "status": "closed"}]
-    path.write_text(json.dumps(legacy))
+    forge_json(path, legacy)
 
     code, out = run(home, repo, "handoff", "list")
     check(
@@ -847,7 +867,7 @@ with tempfile.TemporaryDirectory() as tmp:
     legacy_record = read_json_or_empty(path)
     legacy_record["status"] = "closed"
     legacy_record["history"] = [{"at": legacy_record["created"], "status": "closed"}]
-    path.write_text(json.dumps(legacy_record))
+    forge_json(path, legacy_record)
 
     code, out = run(home, repo, "doctor")
     check(
@@ -880,7 +900,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", "soon orphaned")
     handoff_id = posted_id(out)
     run(home, repo, "handoff", "close", handoff_id)
-    (area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json").unlink()
+    (area / ".claude" / "exchange" / "handoffs" / f"{handoff_id}.json").unlink(missing_ok=True)
 
     code, out = run(home, repo, "handoff", "list")
     check(
