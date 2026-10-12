@@ -674,7 +674,7 @@ with tempfile.TemporaryDirectory() as tmp:
             "status" in written,
             "history" in written,
             moves.exists(),
-            written["body"].endswith("see `doctor`"),
+            str(written["body"]).endswith("see `doctor`"),
         ),
         ("the-caller", {"repo": "repo", "paths": ["plugin/lib"]}, False, False, False, True),
     )

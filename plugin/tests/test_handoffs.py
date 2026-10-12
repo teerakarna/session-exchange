@@ -340,7 +340,10 @@ with tempfile.TemporaryDirectory() as tmp:
     record, _ = handoffs.post(root, to, "body", sender, at="2026-01-02T03:04:05Z")
     check(
         "the posting time is what is recorded, and what the id is built from",
-        (record["created"], record["id"].startswith("20260102T030405Z-")),
+        (
+            (record or {}).get("created"),
+            str((record or {}).get("id")).startswith("20260102T030405Z-"),
+        ),
         ("2026-01-02T03:04:05Z", True),
     )
 
@@ -383,7 +386,9 @@ with tempfile.TemporaryDirectory() as tmp:
         posted,
     )
 
-    move, problem = handoffs.set_status(root, "h1", handoffs.CLOSED, at=same_second)
+    move, problem = pair_of(
+        lambda: handoffs.set_status(root, "h1", handoffs.CLOSED, at=same_second)
+    )
     check("closing adds a second move rather than replacing the first", read(move, "after"), 1)
     check(
         "so both moves are on disk, in order",
@@ -669,7 +674,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # that writes a status nothing derived would also be the one reachable by typo. The moved-once
     # handoff goes first because a never-moved one has no position to write past, so a resolve that
     # stopped refusing would die on that rather than fail a check here and name the rule it broke.
-    settled = handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not")
+    settled = pair_of(lambda: handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not"))
     check(
         "a handoff with nothing wrong with it is refused, and told which verbs to use",
         (
