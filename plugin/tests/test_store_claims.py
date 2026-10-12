@@ -33,6 +33,23 @@ def check(name, got, want):
         failures.append(name)
 
 
+def of(record, *names):
+    """The named fields of a record that may not be one: a missing field fails its own check.
+
+    Indexing instead raises, and a file that raises part way stops asserting: every check after the
+    crash point goes unrun on the very mutation that broke the record (#107).
+    """
+    return tuple((record or {}).get(name, "<missing>") for name in names)
+
+
+def guarded(call):
+    """`call()`, with a raise turned into a value: a broken rule fails a check, not the file."""
+    try:
+        return call()
+    except Exception as exc:
+        return f"raised {type(exc).__name__}"
+
+
 CLAIM_SCHEMA = validate.load("claim")
 
 print("write, read, and the difference between missing and unreadable")
@@ -140,19 +157,23 @@ with tempfile.TemporaryDirectory() as tmp:
     claim, problem = claims.seed(root, "s1", root, name="pane-a")
     check(
         "a seeded claim carries what the payload knows",
-        (claim["session_id"], claim["name"], claim.get("git_branch"), problem),
+        (*of(claim, "session_id", "name", "git_branch"), problem),
         ("s1", "pane-a", "feat/thing", None),
     )
 
     (root / ".git" / "HEAD").write_text("9d4f1c0e" * 5 + "\n")
     claim, _ = claims.seed(root, "s1", root)
-    check("a detached head is no branch rather than a sha-shaped one", "git_branch" in claim, False)
+    check(
+        "a detached head is no branch rather than a sha-shaped one",
+        "git_branch" in (claim or {}),
+        False,
+    )
 
     claims.update(root, "s1", focus="the thing", add={"paths": ["a", "b"]})
     claim, _ = claims.update(root, "s1", add={"paths": ["b", "c"], "repos": ["repo-one"]})
     check(
         "adding to a list deduplicates rather than repeating",
-        (claim["paths"], claim["repos"]),
+        of(claim, "paths", "repos"),
         (["a", "b", "c"], ["repo-one"]),
     )
 
@@ -161,14 +182,14 @@ with tempfile.TemporaryDirectory() as tmp:
     claim, _ = claims.seed(root, "s1", root)
     check(
         "re-seeding keeps what the session said about itself",
-        (claim["focus"], claim["paths"]),
+        of(claim, "focus", "paths"),
         ("the thing", ["a", "b", "c"]),
     )
 
     claim, _ = claims.update(root, "s1", replace={"paths": ["only"]})
-    check("replacing a list replaces it", claim["paths"], ["only"])
+    check("replacing a list replaces it", of(claim, "paths"), (["only"],))
     claim, _ = claims.update(root, "s1", clear_fields=["paths"])
-    check("clearing removes the field entirely", "paths" in claim, False)
+    check("clearing removes the field entirely", "paths" in (claim or {}), False)
 
     held, problems = claims.load_all(root)
     check("one claim under this root", (len(held), problems), (1, []))
@@ -191,6 +212,7 @@ with tempfile.TemporaryDirectory() as tmp:
     root = pathlib.Path(tmp).resolve()
     claims.seed(root, "s1", root)
     claims.seed(root, "s2", root)
+    store.sessions_dir(root).mkdir(parents=True, exist_ok=True)
     (store.sessions_dir(root) / "s3.json").write_text("{ nope")
     held, problems = claims.load_all(root)
     check("two read, one reported", (len(held), len(problems)), (2, 1))
@@ -286,10 +308,18 @@ with tempfile.TemporaryDirectory() as tmp:
     claim, _ = claims.update(root, "s1", focus="")
     # `if focus:` instead of `if focus is not None:` is the same mistake as reading an empty string
     # as an absent argument, and it means there is no way to say "I am no longer on anything".
-    check("an empty focus is a focus being cleared, not an argument not passed", claim["focus"], "")
+    check(
+        "an empty focus is a focus being cleared, not an argument not passed",
+        of(claim, "focus"),
+        ("",),
+    )
 
     claim, _ = claims.update(root, "s1", replace={"paths": ["a", "a", "b"]})
-    check("replacing a list deduplicates it, the same as adding does", claim["paths"], ["a", "b"])
+    check(
+        "replacing a list deduplicates it, the same as adding does",
+        of(claim, "paths"),
+        (["a", "b"],),
+    )
 
 with tempfile.TemporaryDirectory() as tmp:
     root = pathlib.Path(tmp).resolve()
@@ -305,7 +335,7 @@ with tempfile.TemporaryDirectory() as tmp:
     claim, _ = claims.update(root, "s1", focus="speaking now")
     check(
         "an update touches the timestamp, or a session that just spoke reads as stale",
-        claim["updated_at"] != was,
+        of(claim, "updated_at") != (was,),
         True,
     )
 
@@ -424,7 +454,7 @@ check(
 )
 check(
     "and the message it comes back with carries no escape of its own",
-    "\033" in store.scope_fault("--repo", "x\033[2Ky"),
+    "\033" in (store.scope_fault("--repo", "x\033[2Ky") or ""),
     False,
 )
 # A value that is invisible end to end. The stripped form is empty, so the codepoint is the whole of
@@ -519,7 +549,7 @@ check(
     claims.describe_list(["ok", "two\033[2K", "three\007"]),
     ["ok", "two[2K", "three"],
 )
-check("an empty list field is not a special case", claims.describe_list([]), [])
+check("an empty list field is not a special case", guarded(lambda: claims.describe_list([])), [])
 
 print()
 print("a store filename in a problem line, which nothing this plugin wrote (#60)")
@@ -530,7 +560,10 @@ with tempfile.TemporaryDirectory() as tmp:
     _, problem = store.read_json(unparsed)
     check(
         "a file that does not parse is named without the escape",
-        ("\033" in problem, problem.startswith("bad[2Kname.json could not be read: ")),
+        (
+            "\033" in (problem or ""),
+            (problem or "").startswith("bad[2Kname.json could not be read: "),
+        ),
         (False, True),
     )
     unopened = base / "dir\033[2K.json"
@@ -538,7 +571,7 @@ with tempfile.TemporaryDirectory() as tmp:
     _, problem = store.read_json(unopened)
     check(
         "and one that cannot be opened, whose error carries the path again, but as a repr",
-        ("\033" in problem, "dir\\x1b[2K.json" in problem),
+        ("\033" in (problem or ""), "dir\\x1b[2K.json" in (problem or "")),
         (False, True),
     )
     invalid = base / "odd\033[2K.json"
@@ -546,7 +579,10 @@ with tempfile.TemporaryDirectory() as tmp:
     _, problem = store.read_json(invalid, CLAIM_SCHEMA)
     check(
         "and one that parses and is invalid, in the prefix and in every problem after it",
-        ("\033" in problem, problem.startswith("odd[2K.json is invalid: odd[2K.json")),
+        (
+            "\033" in (problem or ""),
+            (problem or "").startswith("odd[2K.json is invalid: odd[2K.json"),
+        ),
         (False, True),
     )
 
@@ -594,14 +630,6 @@ def without_hardlinks(code, then):
         return then()
     finally:
         os.link = real
-
-
-def guarded(call):
-    """`call()`, with a raise turned into a value: a broken fallback fails a check, not the file."""
-    try:
-        return call()
-    except Exception as exc:
-        return f"raised {type(exc).__name__}"
 
 
 with tempfile.TemporaryDirectory() as tmp:
