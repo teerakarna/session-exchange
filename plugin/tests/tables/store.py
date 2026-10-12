@@ -206,6 +206,13 @@ MUTATIONS = [
     # The marker is one path in one function, for the reason `TMP_PREFIX` is one constant: `init`
     # writing a file `config` does not read would leave every cap at its default with a marker in
     # the repo saying otherwise, and nothing would fail.
+    #
+    # The one mutation the sweep still reports as "caught, but the file also raised afterward"
+    # (#107), and left that way on purpose. Moving the marker breaks `init`, and nearly every
+    # section of `test_cli.py` after the first starts by running `init`, so there is no rule left to
+    # assert past the crash: they fail because the CLI is broken, which is the right outcome.
+    # Guarding the twenty setup writes that follow would be a rewrite of the file for a mutation
+    # that already fails dozens of checks by name.
     Mutation(
         module="store",
         rule="the marker is the file init writes and config reads, at one path",

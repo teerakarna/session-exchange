@@ -48,6 +48,19 @@ def held(root):
     return found
 
 
+def first_held(root):
+    """The first stored handoff record, or a stand-in when none was written.
+
+    `held(root)[0][0]` raises on the very mutation that stops the import writing anything, and a
+    file that raises part way stops asserting, so the checks after it go unrun (#107). The stand-in
+    has an id nothing owns, so whatever uses it fails its own check instead.
+    """
+    try:
+        return held(root)[0][0]
+    except (IndexError, AssertionError):
+        return {"id": "none-imported"}
+
+
 CENSUS_ROUTES = {
     "Lane B": {"repo": "b"},
     "lane e / f": {"repo": "ef"},
@@ -299,7 +312,7 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     root = rooted(tmp, SMALL)
     migrate.apply(root, migrate.prepare(root, SMALL_BLOCK))
-    record = held(root)[0][0]
+    record = first_held(root)
     handoffs.set_status(root, record["id"], handoffs.ACCEPTED)
     plan = migrate.prepare(root, SMALL_BLOCK)
     # The ledger has no word for accepted, so it says open. The store being ahead of the ledger is
@@ -407,10 +420,10 @@ with tempfile.TemporaryDirectory() as tmp:
     root = rooted(tmp, CENSUS)
     block = {"path": "ledger.md", "routes": CENSUS_ROUTES}
     migrate.apply(root, migrate.prepare(root, block))
-    record = held(root)[0][0]
+    record = first_held(root)
     # The #94 shape: an imported handoff closed, its record removed by hand, the ledger still open.
     handoffs.set_status(root, record["id"], handoffs.CLOSED, by="test")
-    (store.handoffs_dir(root) / f"{record['id']}.json").unlink()
+    (store.handoffs_dir(root) / f"{record['id']}.json").unlink(missing_ok=True)
     lines, problems = migrate.apply(root, migrate.prepare(root, block))
     moves = store.transitions_dir(root, record["id"])
     written = any(record["id"] in line for line in lines)

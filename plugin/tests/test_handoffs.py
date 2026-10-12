@@ -39,6 +39,32 @@ def check(name, got, want):
         failures.append(name)
 
 
+def tolerant(function, first=None):
+    """`function`, a raise turned into `(first, "raised X")`: for what returns `(result, problem)`.
+
+    These are called all through this file, and under a broken rule any of them can raise instead of
+    returning a problem. A test that lets that through ends the file there, and every check after it
+    goes unrun on exactly the mutation that most needs them (#107). Wrapped once here rather than at
+    each call, because a new call that forgets would be a new crash site. `first` is what stands in
+    for the result: an empty list for the readers whose callers iterate it, `None` otherwise.
+    """
+
+    def wrapped(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except Exception as exc:
+            return first, f"raised {type(exc).__name__}"
+
+    wrapped.__name__ = function.__name__
+    return wrapped
+
+
+for _name in ("post", "set_status", "resolve", "state_of"):
+    setattr(handoffs, _name, tolerant(getattr(handoffs, _name)))
+for _name in ("transitions", "load_all"):
+    setattr(handoffs, _name, tolerant(getattr(handoffs, _name), first=[]))
+
+
 def read(obj, key):
     """`obj[key]`, or the name of what it raised. A mutation that breaks the lookup then fails
     the check it belongs to by name, instead of ending the whole file on a traceback."""
@@ -46,6 +72,25 @@ def read(obj, key):
         return obj[key]
     except Exception as exc:
         return type(exc).__name__
+
+
+def pair_of(call):
+    """`call()` for something that returns `(result, problem)`, a raise turned into a problem.
+
+    The library under a broken rule can raise rather than return a problem, and a test that lets
+    that through ends the file there: every check after it goes unrun on exactly the mutation that
+    most needs them (#107).
+    """
+    try:
+        return call()
+    except Exception as exc:
+        return None, f"raised {type(exc).__name__}"
+
+
+def sender_of(record):
+    """The `from` block of a record, or `{}` when there is no record to read one from."""
+    block = (record or {}).get("from")
+    return block if isinstance(block, dict) else {}
 
 
 def attempt(call, *args):
@@ -294,13 +339,13 @@ with tempfile.TemporaryDirectory() as tmp:
     # than a KeyError that stops the file.
     check(
         "the sender is recorded whole when it is known",
-        (record["from"]["cwd"], record["from"].get("session_id"), record["from"].get("name")),
+        (*(sender_of(record).get(k) for k in ("cwd", "session_id", "name")),),
         (str(sender), "s1", "caller"),
     )
     record, _ = handoffs.post(root, to, "body", sender)
     check(
         "and cwd alone is enough when it is not - the schema asks for no more",
-        (record["from"], "session_id" in record["from"]),
+        (sender_of(record), "session_id" in sender_of(record)),
         ({"cwd": str(sender)}, False),
     )
     key = {"route": "a>b", "headline": "x"}
@@ -312,7 +357,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "and a normal post has none",
-        "imported" in handoffs.post(root, to, "body", sender)[0],
+        "imported" in (pair_of(lambda: handoffs.post(root, to, "body", sender))[0] or {}),
         False,
     )
 
@@ -321,7 +366,10 @@ with tempfile.TemporaryDirectory() as tmp:
     record, _ = handoffs.post(root, to, "body", sender, at="2026-01-02T03:04:05Z")
     check(
         "the posting time is what is recorded, and what the id is built from",
-        (record["created"], record["id"].startswith("20260102T030405Z-")),
+        (
+            (record or {}).get("created"),
+            str((record or {}).get("id")).startswith("20260102T030405Z-"),
+        ),
         ("2026-01-02T03:04:05Z", True),
     )
 
@@ -335,8 +383,10 @@ with tempfile.TemporaryDirectory() as tmp:
     # almost always, which is not the same as always: a check that only sometimes exercises the case
     # it is named after passes on the runs where it tested nothing.
     same_second = "2026-01-02T03:04:05Z"
-    move, problem = handoffs.set_status(
-        root, "h1", handoffs.ACCEPTED, by="me", note="mine now", at=same_second
+    move, problem = pair_of(
+        lambda: handoffs.set_status(
+            root, "h1", handoffs.ACCEPTED, by="me", note="mine now", at=same_second
+        )
     )
     check(
         "accepting writes one move, at position zero, and hands it back",
@@ -348,7 +398,11 @@ with tempfile.TemporaryDirectory() as tmp:
         (read(move, "by"), read(move, "note")),
         ("me", "mine now"),
     )
-    check("and the handoff reads as accepted", handoffs.state_of(root, "h1"), ("accepted", []))
+    check(
+        "and the handoff reads as accepted",
+        pair_of(lambda: handoffs.state_of(root, "h1")),
+        ("accepted", []),
+    )
     # The point of the whole shape. The sender wrote this file and nothing else ever writes it, so
     # there is no second copy of the status to contradict the moves and no read-modify-write to lose
     # a concurrent one.
@@ -358,8 +412,10 @@ with tempfile.TemporaryDirectory() as tmp:
         posted,
     )
 
-    move, problem = handoffs.set_status(root, "h1", handoffs.CLOSED, at=same_second)
-    check("closing adds a second move rather than replacing the first", move["after"], 1)
+    move, problem = pair_of(
+        lambda: handoffs.set_status(root, "h1", handoffs.CLOSED, at=same_second)
+    )
+    check("closing adds a second move rather than replacing the first", read(move, "after"), 1)
     check(
         "so both moves are on disk, in order",
         [e["status"] for e in handoffs.transitions(root, "h1")[0]],
@@ -369,9 +425,13 @@ with tempfile.TemporaryDirectory() as tmp:
     # closing inside one second is ordinary, and the first version of this sorted the directory by
     # a name built from that timestamp - which left the order to the random suffix and read a
     # closed handoff back as accepted about half the time.
+    moves_read = attempt(handoffs.transitions, root, "h1")
     check(
         "the clock does not decide the order, and here it cannot: both moves share a second",
-        (handoffs.state_of(root, "h1"), {e["at"] for e in handoffs.transitions(root, "h1")[0]}),
+        (
+            attempt(handoffs.state_of, root, "h1"),
+            {e.get("at") for e in (moves_read[0] if isinstance(moves_read, tuple) else [])},
+        ),
         (("closed", []), {same_second}),
     )
 
@@ -541,7 +601,7 @@ with tempfile.TemporaryDirectory() as tmp:
     move, _ = handoffs.set_status(root, "h1", handoffs.CLOSED)
     check(
         "a move files one past the highest position read, not the number of moves read",
-        (move["after"], len(handoffs.transitions(root, "h1")[0])),
+        (read(move, "after"), len(handoffs.transitions(root, "h1")[0])),
         (1, 3),
     )
 
@@ -554,6 +614,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # this module writes a file like this, which is why it has to be forged - and until it was, both
     # the refusal and the reporting were unfalsifiable: a mutation dropping the unreadable half of
     # the guard left the whole suite green.
+    store.transitions_dir(root, "h1").mkdir(parents=True, exist_ok=True)
     (store.transitions_dir(root, "h1") / "0001-bad.json").write_text("{ truncated")
     status, problems = handoffs.state_of(root, "h1")
     check(
@@ -643,7 +704,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # that writes a status nothing derived would also be the one reachable by typo. The moved-once
     # handoff goes first because a never-moved one has no position to write past, so a resolve that
     # stopped refusing would die on that rather than fail a check here and name the rule it broke.
-    settled = handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not")
+    settled = pair_of(lambda: handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not"))
     check(
         "a handoff with nothing wrong with it is refused, and told which verbs to use",
         (
@@ -665,7 +726,10 @@ with tempfile.TemporaryDirectory() as tmp:
     handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h1")
     check(
         "a handoff nobody has moved yet is refused as well, being open rather than stuck",
-        "(open)" in (handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not")[1] or ""),
+        "(open)"
+        in (
+            pair_of(lambda: handoffs.resolve(root, "h1", handoffs.CLOSED, note="why not"))[1] or ""
+        ),
         True,
     )
 
@@ -713,7 +777,7 @@ with tempfile.TemporaryDirectory() as tmp:
     frozen(root)
     handoffs.post(root, {"repo": "repo"}, "body", root, handoff_id="h2")
     handoffs.set_status(root, "h2", handoffs.CLOSED)
-    reported = handoffs.unresolved(root)
+    reported = attempt(handoffs.unresolved, root)
     check(
         "only the frozen one is listed, and it names the verb and the flags",
         (
@@ -730,7 +794,9 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
     handoffs.resolve(root, "h1", handoffs.CLOSED, note="decided")
-    check("once resolved, it is not reported as frozen again", handoffs.unresolved(root), [])
+    check(
+        "once resolved, it is not reported as frozen again", attempt(handoffs.unresolved, root), []
+    )
 
 print("a moves directory is a name in its own right")
 
