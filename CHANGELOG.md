@@ -4,6 +4,13 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 [semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
 each section is generated from the commits it ships.
 
+## [0.3.1](https://github.com/teerakarna/session-exchange/compare/v0.3.0...v0.3.1) (2026-10-12)
+
+
+### Fixed
+
+* handoff writes work on a filesystem with no hardlinks ([#106](https://github.com/teerakarna/session-exchange/issues/106)) ([ba33ca6](https://github.com/teerakarna/session-exchange/commit/ba33ca63b810a589c8b9dd18b67ab72d63ba8c43))
+
 ## [0.3.0](https://github.com/teerakarna/session-exchange/compare/v0.2.0...v0.3.0) (2026-10-09)
 
 
