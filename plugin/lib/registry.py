@@ -11,8 +11,9 @@ Two things it cannot tell you, which is why claims exist alongside it:
 - `status` is per-turn. `idle` there means "not currently in a turn", not "finished with the work".
 - It knows where a session is, never what it is doing.
 
-Liveness is checked rather than trusted. A registry file can outlive its process, and a row that
-reads as current and is not is worse than no row.
+Liveness is checked rather than trusted, but only as far as `alive` goes: something holds the pid,
+not necessarily the process that wrote the row, so a recycled pid reads as live (#66). A registry
+file can outlive its process, and a row that reads as current and is not is worse than no row.
 
 Not every row is a peer either, which is #31 and is a question about what a row *means* rather than
 about how one is drawn. Measured against this machine: eight rows where the session list showed six
