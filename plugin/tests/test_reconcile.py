@@ -15,7 +15,6 @@ negative is asserted on content that is present rather than by omission, so dele
 named check instead of changing a count nobody reads.
 """
 
-import os.path
 import pathlib
 import sys
 
@@ -294,7 +293,7 @@ NEAR = (
     "the same opening words for a good while, and then they diverge",
     "the same opening words for a good while, but here they do not",
 )
-common = len(os.path.commonprefix(NEAR))
+common = next(i for i, (a, b) in enumerate(zip(*NEAR)) if a != b)
 check("the pair shares a long opening", common >= 32, True)
 check("and diverges inside the compared prefix", common < reconcile.HEADLINE_PREFIX, True)
 check(
