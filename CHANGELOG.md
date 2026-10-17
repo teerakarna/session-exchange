@@ -4,6 +4,13 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 [semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
 each section is generated from the commits it ships.
 
+## [0.3.2](https://github.com/teerakarna/session-exchange/compare/v0.3.1...v0.3.2) (2026-10-17)
+
+
+### Fixed
+
+* alive() compares the row's procStart with ps, so a recycled pid is not live ([#66](https://github.com/teerakarna/session-exchange/issues/66)) ([#115](https://github.com/teerakarna/session-exchange/issues/115)) ([3762b4c](https://github.com/teerakarna/session-exchange/commit/3762b4cce881e858aa702d9cea74a9f9e13f3aef))
+
 ## [0.3.1](https://github.com/teerakarna/session-exchange/compare/v0.3.0...v0.3.1) (2026-10-12)
 
 
