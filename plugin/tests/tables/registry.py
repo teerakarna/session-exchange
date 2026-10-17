@@ -33,9 +33,122 @@ MUTATIONS = [
     ),
     Mutation(
         module="registry",
-        rule="a pid that can be signalled reads as alive",
-        old="    return True",
+        rule="a pid that can be signalled, with no start time to compare, reads as alive",
+        old="    if not proc_start:\n        return True",
+        new="    if not proc_start:\n        return False",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a live pid with a start time is compared, not waved through",
+        old="    return _same_start(pid, proc_start, run)",
+        new="    return True",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a start time that agrees with ps reads as alive",
+        old="    return any(abs(seen - at) <= START_TOLERANCE for at in written)",
         new="    return False",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        # The tolerance is the whole guard: wide enough to absorb an hour is wide enough to absorb a
+        # pid recycled within the hour, which is the reason #66 refused one.
+        rule="a start time an hour off is a different process, not skew",
+        old="START_TOLERANCE = 2",
+        new="START_TOLERANCE = 7200",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a row written in UTC matches ps in local time",
+        old="        written = (calendar.timegm(ours), time.mktime(ours))",
+        new="        written = (time.mktime(ours),)",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="and a row written in local time matches too",
+        old="        written = (calendar.timegm(ours), time.mktime(ours))",
+        new="        written = (calendar.timegm(ours),)",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="ps is asked in the C locale, so its month names are the ones parsed",
+        old='            env={**os.environ, "LC_ALL": "C"},',
+        new="            env=os.environ,",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="output that does not parse is no evidence against the row",
+        old="        if theirs is None or ours is None:\n            return True",
+        new="        if theirs is None and ours is None:\n            return True",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="no ps, or a ps that hangs, is no evidence against the row",
+        old=(
+            "    except (OSError, subprocess.SubprocessError, OverflowError, ValueError):\n"
+            "        return True"
+        ),
+        new="    except ValueError:\n        return True",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a year that cannot be a time is no evidence against the row",
+        old=(
+            "    except (OSError, subprocess.SubprocessError, OverflowError, ValueError):\n"
+            "        return True"
+        ),
+        new="    except (OSError, subprocess.SubprocessError, ValueError):\n        return True",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a time of day that does not exist is not read as one that does",
+        old="    if not (1 <= fields[2] <= days and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):",
+        new="    if False:",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a day the month does not have is not read as the next month's",
+        old="    if not (1 <= fields[2] <= days and",
+        new="    if not (1 <= fields[2] <= 31 and",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a second that does not exist is not read as one that does",
+        old="    if not 0 <= fields[5] <= 60:",
+        new="    if False:",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a row is judged on the start time it was written with",
+        old='    return alive(row.get("pid"), row.get("procStart"), run)',
+        new='    return alive(row.get("pid"), None, run)',
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a month name that is not one is no evidence against the row",
+        old="    except (AttributeError, KeyError, ValueError):\n        return None",
+        new="    except (AttributeError, ValueError):\n        return None",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a start time that is not text is no evidence against the row",
+        old="    except (AttributeError, KeyError, ValueError):\n        return None",
+        new="    except (KeyError, ValueError):\n        return None",
         caught_by="test_registry.py",
     ),
     Mutation(
@@ -79,15 +192,15 @@ MUTATIONS = [
     Mutation(
         module="registry",
         rule="a dead session's row is left out by default",
-        old='        if live_only and not alive(row.get("pid")):',
+        old="        if live_only and not alive_row(row):",
         new="        if live_only and False:",
         caught_by="test_registry.py",
     ),
     Mutation(
         module="registry",
         rule="and included when the caller says liveness is not the question",
-        old='        if live_only and not alive(row.get("pid")):',
-        new='        if not alive(row.get("pid")):',
+        old="        if live_only and not alive_row(row):",
+        new="        if not alive_row(row):",
         caught_by="test_registry.py",
     ),
     Mutation(
@@ -95,8 +208,8 @@ MUTATIONS = [
         # The module's own docstring calls this out, and nothing asserted it. A recycled pid is the
         # whole reason: the stem was written by whatever process held that number at the time.
         rule="the pid is read from inside the file, not from its name",
-        old='        if live_only and not alive(row.get("pid")):',
-        new="        if live_only and not alive(path.stem):",
+        old="        if live_only and not alive_row(row):",
+        new='        if live_only and not alive_row({"pid": path.stem}):',
         caught_by="test_registry.py",
     ),
     Mutation(

@@ -20,6 +20,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
 
@@ -77,6 +78,149 @@ for junk in (None, "", "not-a-pid", [LIVE]):
         got = f"raised {type(exc).__name__}"
     check(f"{junk!r} is not a live process, and not a crash either", got, False)
 
+print("a recycled pid is told from the process that wrote the row (#66)")
+
+# The registry writes `procStart` in UTC in the format `ps` prints in local time. The machine's own
+# zone is pinned to +07 so the two readings differ here as they do on the machine that measured it;
+# on a UTC runner they coincide and every check below would pass whichever clock was read.
+WAS_TZ = os.environ.get("TZ")
+os.environ["TZ"] = "Etc/GMT-7"
+time.tzset()
+# A zone database that lacks the name reads it as UTC, and then the UTC and local branches coincide
+# and nothing below could tell them apart, so say so instead of passing quietly.
+check("the pinned zone took effect", time.localtime(0).tm_gmtoff, 25200)
+
+
+class Ps:
+    """A `run` that answers as `ps -o lstart=` would, and remembers how it was asked."""
+
+    def __init__(self, stdout="", raises=None):
+        self.stdout = stdout
+        self.raises = raises
+        self.env = None
+
+    def __call__(self, argv, **kwargs):
+        self.env = kwargs.get("env")
+        if self.raises:
+            raise self.raises
+        return subprocess.CompletedProcess(argv, 0, stdout=self.stdout, stderr="")
+
+
+PS_LOCAL = "Sat Oct 17 13:22:46 2026\n"
+UTC_ROW = "Sat Oct 17 06:22:46 2026"
+LOCAL_ROW = "Sat Oct 17 13:22:46 2026"
+
+check("a row in UTC matches ps in local time", registry.alive(LIVE, UTC_ROW, Ps(PS_LOCAL)), True)
+check("a row in local time matches too", registry.alive(LIVE, LOCAL_ROW, Ps(PS_LOCAL)), True)
+check(
+    "two seconds either way is the same process",
+    (
+        registry.alive(LIVE, "Sat Oct 17 06:22:48 2026", Ps(PS_LOCAL)),
+        registry.alive(LIVE, "Sat Oct 17 06:22:44 2026", Ps(PS_LOCAL)),
+    ),
+    (True, True),
+)
+check(
+    "three seconds off is a different process",
+    registry.alive(LIVE, "Sat Oct 17 06:22:49 2026", Ps(PS_LOCAL)),
+    False,
+)
+check(
+    "and an hour off is a different process, not skew",
+    registry.alive(LIVE, "Sat Oct 17 07:22:46 2026", Ps(PS_LOCAL)),
+    False,
+)
+check("a row with no start time is the pid-only answer", registry.alive(LIVE, None, Ps("x")), True)
+check("and so is an empty one", registry.alive(LIVE, "", Ps("x")), True)
+check(
+    "a dead pid is dead whatever the start time says",
+    registry.alive(DEAD, UTC_ROW, Ps(PS_LOCAL)),
+    False,
+)
+
+ps = Ps(PS_LOCAL)
+registry.alive(LIVE, UTC_ROW, ps)
+check("ps is asked in the C locale", (ps.env or {}).get("LC_ALL"), "C")
+
+# Every doubt is the old answer. A wrong False renders a live session as absent.
+for label, run in (
+    ("there is no ps", Ps(raises=FileNotFoundError("ps"))),
+    ("ps hangs", Ps(raises=subprocess.TimeoutExpired("ps", 5))),
+    ("ps prints nothing", Ps("")),
+    ("ps prints something else", Ps("not a date at all")),
+    ("ps names a month that is not one", Ps("Sat Foo 17 13:22:46 2026")),
+    ("ps names a year that cannot be a time", Ps("Sat Oct 17 13:22:46 99999999999999")),
+):
+    try:
+        got = registry.alive(LIVE, UTC_ROW, run)
+    except Exception as exc:
+        got = f"raised {type(exc).__name__}"
+    check(f"{label}: the row is not dropped, and not a crash", got, True)
+
+for junk in ("not a date", "Sat Foo 17 06:22:46 2026", 12345):
+    try:
+        got = registry.alive(LIVE, junk, Ps(PS_LOCAL))
+    except Exception as exc:
+        got = f"raised {type(exc).__name__}"
+    check(f"a start time of {junk!r} is not evidence against the row", got, True)
+
+# And against the real `ps`, once, because every check above fakes the one thing whose output format
+# differs between kernels. This process's own start, written the way the registry writes it.
+try:
+    real = subprocess.run(
+        ["ps", "-o", "lstart=", "-p", str(LIVE)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "LC_ALL": "C"},
+    ).stdout.strip()
+except OSError:
+    real = ""
+parsed = registry._clock(real)
+check("the real ps prints a start time we can read", parsed is not None, True)
+if parsed is not None:
+    written = time.asctime(time.gmtime(time.mktime(parsed)))
+    check(
+        "this process matches its own start, as written in UTC", registry.alive(LIVE, written), True
+    )
+    check(
+        "and not a start a day earlier",
+        registry.alive(LIVE, time.asctime(time.gmtime(time.mktime(parsed) - 86400))),
+        False,
+    )
+
+# An hour that does not exist, a day that does not exist, a second that does not: normalised by
+# `mktime` into a confident wrong timestamp if let through, so each reads as no evidence at all.
+for label, text in (
+    ("a day of 99", "Sat Oct 99 06:22:46 2026"),
+    ("an hour of 25", "Sat Oct 17 25:22:46 2026"),
+    ("a minute of 61", "Sat Oct 17 06:61:46 2026"),
+    ("a second of 61", "Sat Oct 17 06:22:61 2026"),
+    ("a day of 0", "Sat Oct 0 06:22:46 2026"),
+    ("a 31st of February", "Sat Feb 31 06:22:46 2026"),
+    ("a 29th of February in a common year", "Sat Feb 29 06:22:46 2026"),
+):
+    check(f"{label} is not a time", registry._clock(text), None)
+check("a leap second is", registry._clock("Sat Oct 17 06:22:60 2026") is not None, True)
+check(
+    "and a leap day in a leap year", registry._clock("Sat Feb 29 06:22:46 2028") is not None, True
+)
+
+check(
+    "a whole row is judged on its own procStart",
+    (
+        registry.alive_row({"pid": LIVE, "procStart": "Sat Jan  1 00:00:00 2000"}, Ps(PS_LOCAL)),
+        registry.alive_row({"pid": LIVE, "procStart": UTC_ROW}, Ps(PS_LOCAL)),
+        registry.alive_row({"pid": LIVE}, Ps(PS_LOCAL)),
+    ),
+    (False, True, True),
+)
+
+if WAS_TZ is None:
+    del os.environ["TZ"]
+else:
+    os.environ["TZ"] = WAS_TZ
+time.tzset()
+
 print("which rows come back")
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -95,6 +239,22 @@ with tempfile.TemporaryDirectory() as tmp:
         "and comes back when liveness is not the question",
         [r["sessionId"] for r in registry.entries(sessions, live_only=False)],
         ["dead-one", "live-one"],
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    sessions = pathlib.Path(tmp) / "sessions"
+    # A live pid whose row was written by some other process: the recycled-pid case (#66). Dropped
+    # by default, and still there when liveness is not the question.
+    write(sessions, LIVE, sessionId="recycled", pid=LIVE, procStart="Sat Jan  1 00:00:00 2000")
+    check(
+        "a row whose pid now belongs to another process is left out",
+        [r["sessionId"] for r in registry.entries(sessions)],
+        [],
+    )
+    check(
+        "and comes back when liveness is not the question",
+        [r["sessionId"] for r in registry.entries(sessions, live_only=False)],
+        ["recycled"],
     )
 
 with tempfile.TemporaryDirectory() as tmp:

@@ -213,8 +213,8 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="a claim whose session is gone is not rendered as current",
-        old='    live = {row.get("sessionId") for row in rows if registry.alive(row.get("pid"))}',
-        new='    live = {row.get("sessionId") for row in rows}',
+        old='    live = {row.get("sessionId") for row in asked if registry.alive_row(row)}',
+        new='    live = {row.get("sessionId") for row in asked}',
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -241,8 +241,8 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="a live background job's claim is not rendered as a peer",
-        old='    peers = {row.get("sessionId") for row in rows if registry.is_peer(row)} & live',
-        new='    peers = {row.get("sessionId") for row in rows} & live',
+        old='    peers = {row.get("sessionId") for row in asked if registry.is_peer(row)} & live',
+        new='    peers = {row.get("sessionId") for row in asked} & live',
         caught_by="test_hook.py",
     ),
     Mutation(

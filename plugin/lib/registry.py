@@ -11,9 +11,10 @@ Two things it cannot tell you, which is why claims exist alongside it:
 - `status` is per-turn. `idle` there means "not currently in a turn", not "finished with the work".
 - It knows where a session is, never what it is doing.
 
-Liveness is checked rather than trusted, but only as far as `alive` goes: something holds the pid,
-not necessarily the process that wrote the row, so a recycled pid reads as live (#66). A registry
-file can outlive its process, and a row that reads as current and is not is worse than no row.
+Liveness is checked rather than trusted. A registry file can outlive its process, and a row that
+reads as current and is not is worse than no row. A pid alone does not say it is the same process,
+because a pid gets recycled, so a row's `procStart` is compared with the start time `ps` reports
+(#66). See `alive` for what that does and does not catch.
 
 Not every row is a peer either, which is #31 and is a question about what a row *means* rather than
 about how one is drawn. Measured against this machine: eight rows where the session list showed six
@@ -27,10 +28,12 @@ at all, and which of the two a caller wants is never a default it gets by accide
 
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import pathlib
 import subprocess
+import time
 
 SESSIONS_DIR = pathlib.Path.home() / ".claude" / "sessions"
 
@@ -55,13 +58,103 @@ def is_peer(row):
     return row.get("kind") not in NOT_PEERS
 
 
-def alive(pid):
-    """Is this pid a live process? Signal 0 rather than `ps`, so it costs nothing."""
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1
+    )
+}
+
+# Seconds. `procStart` is whole seconds in `ps lstart` format, and the two readings of one start can
+# land either side of a second boundary. Kept this tight on purpose: a tolerance wide enough to
+# absorb a clock skew is wide enough to absorb a pid recycled inside it, which would weaken the
+# check to nothing.
+START_TOLERANCE = 2
+
+
+def _clock(text):
+    """`Sat Oct 17 06:22:46 2026` as a time tuple, or None for anything else.
+
+    By hand rather than `strptime`, which reads month and day names through the locale: a machine
+    set to another language would fail every row, and a check that fails every row renders nobody
+    present.
+    """
+    try:
+        _weekday, month, day, hms, year = text.split()
+        hour, minute, second = hms.split(":")
+        fields = (int(year), _MONTHS[month], int(day), int(hour), int(minute), int(second))
+    except (AttributeError, KeyError, ValueError):
+        return None
+    # `mktime` and `timegm` normalise rather than refuse, so `Oct 99 99:99:99` would become a
+    # confident wrong timestamp and a verdict of "different process" on a row that is merely odd.
+    days = calendar.monthrange(fields[0], fields[1])[1]
+    if not (1 <= fields[2] <= days and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):
+        return None
+    if not 0 <= fields[5] <= 60:
+        return None
+    return (*fields, 0, 0, -1)
+
+
+def _same_start(pid, proc_start, run):
+    """False only when `ps` positively reports a different start time than the row was written with.
+
+    Claude Code writes `procStart` in UTC, in the format `ps -o lstart=` prints in local time, so on
+    any machine off UTC the two differ by exactly the local offset (7h at +07, 1h at +01). Measured
+    in #66. That is a fixed offset, not noise, but it is behaviour of something this plugin does not
+    control and has only been checked on macOS. So a row matches if it agrees with `ps` read as
+    either clock: one extra two-second window costs nothing against a recycled pid, and a version
+    that writes local time instead does not drop every row.
+
+    Every doubt answers True. No `ps`, a hang, output that does not parse, a row that has no usable
+    `procStart`: each is the old pid-only answer, because a wrong False renders a live session as
+    absent, which is this project's founding failure, and a wrong True is the bug that was already
+    there. Not handled: the one hour a year when local time repeats, where a live row can read as
+    dead until the hour passes.
+    """
+    try:
+        out = run(
+            ["ps", "-o", "lstart=", "-p", str(int(pid))],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+        theirs = _clock(out.stdout.strip())
+        ours = _clock(proc_start)
+        if theirs is None or ours is None:
+            return True
+        seen = time.mktime(theirs)
+        written = (calendar.timegm(ours), time.mktime(ours))
+    except (OSError, subprocess.SubprocessError, OverflowError, ValueError):
+        return True
+    return any(abs(seen - at) <= START_TOLERANCE for at in written)
+
+
+def alive(pid, proc_start=None, run=subprocess.run):
+    """Is this pid a live process, and when `proc_start` is given, the one that wrote the row?
+
+    Signal 0 first, so a dead pid costs nothing. Only a live one with a `procStart` to compare pays
+    for a `ps`. Without `proc_start` this is the pid-only answer, which cannot tell a recycled pid
+    from the original, and that is what a row from a version that predates the field gets.
+
+    `run` is a seam for the reason `_parents` gives.
+    """
     try:
         os.kill(int(pid), 0)
     except (OSError, TypeError, ValueError):
         return False
-    return True
+    if not proc_start:
+        return True
+    return _same_start(pid, proc_start, run)
+
+
+def alive_row(row, run=subprocess.run):
+    """`alive` for a registry row, reading both the pid and the `procStart` it was written with.
+
+    What callers use, because `alive(pid)` alone is the answer #66 is about and compiles just as
+    well. Taking the row is what stops a call site from forgetting the second field.
+    """
+    return alive(row.get("pid"), row.get("procStart"), run)
 
 
 def entries(sessions_dir=SESSIONS_DIR, live_only=True, peers_only=True):
@@ -87,7 +180,7 @@ def entries(sessions_dir=SESSIONS_DIR, live_only=True, peers_only=True):
             continue
         if peers_only and not is_peer(row):
             continue
-        if live_only and not alive(row.get("pid")):
+        if live_only and not alive_row(row):
             continue
         rows.append(row)
     return sorted(rows, key=lambda r: str(r.get("name") or r.get("sessionId")))

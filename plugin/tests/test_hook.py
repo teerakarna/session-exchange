@@ -1227,6 +1227,24 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
 
+print("presence, with a claim whose session's pid now belongs to another process (#66)")
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = fixture(tmp, wire_legacy=False)
+    register(home, "me", os.getpid())
+    # A live pid, written into a row by a process that started long ago: a recycled pid.
+    register(home, "recycled", os.getpid(), procStart="Sat Jan  1 00:00:00 2000")
+    put_claim(root, "recycled", name="pane-recycled", focus="long finished")
+    code, out = run("SessionStart", {"session_id": "me", "cwd": str(repo)}, home)
+    rows = context_rows(out)
+    check(
+        "its claim is counted as left behind, and not rendered as a peer's",
+        (
+            any("pane-recycled" in r for r in rows),
+            any("1 claim(s) left by sessions no longer running" in r for r in rows),
+        ),
+        (False, True),
+    )
+
 print("presence, under a root whose path a terminal would act on")
 with tempfile.TemporaryDirectory() as tmp:
     # The path comes off the filesystem rather than out of anything this plugin wrote, and a
