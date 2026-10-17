@@ -186,6 +186,13 @@ cannot be merged, so nothing reaches `main` without having been through macOS, a
 takes to write a branch stop costing ten billed minutes each. Forgetting costs you nothing but the
 minutes.
 
+The same arithmetic applies to the mutation sweep. On a PR that touches the harness, every push sweeps
+every mutation, because the base is the PR's base and not your last commit, and a push that supersedes
+a running sweep cancels it while still billing its minutes (#58). So batch review fixes into one push,
+hold prose-only fixes until the reviewed content is settled, and let a running sweep finish when the
+fix is not urgent. The sweep is not narrowed for a comment-only push, on purpose: the gate on a PR must
+not be weaker than the gate on `main`.
+
 Lint and the shell handlers, matching what CI runs:
 
 ```sh
