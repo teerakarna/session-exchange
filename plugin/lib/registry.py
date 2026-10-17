@@ -82,9 +82,16 @@ def _clock(text):
     try:
         _weekday, month, day, hms, year = text.split()
         hour, minute, second = hms.split(":")
-        return (int(year), _MONTHS[month], int(day), int(hour), int(minute), int(second), 0, 0, -1)
+        fields = (int(year), _MONTHS[month], int(day), int(hour), int(minute), int(second))
     except (AttributeError, KeyError, ValueError):
         return None
+    # `mktime` and `timegm` normalise rather than refuse, so `Oct 99 99:99:99` would become a
+    # confident wrong timestamp and a verdict of "different process" on a row that is merely odd.
+    if not (1 <= fields[2] <= 31 and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):
+        return None
+    if not 0 <= fields[5] <= 60:
+        return None
+    return (*fields, 0, 0, -1)
 
 
 def _same_start(pid, proc_start, run):
@@ -140,6 +147,15 @@ def alive(pid, proc_start=None, run=subprocess.run):
     return _same_start(pid, proc_start, run)
 
 
+def alive_row(row, run=subprocess.run):
+    """`alive` for a registry row, reading both the pid and the `procStart` it was written with.
+
+    What callers use, because `alive(pid)` alone is the answer #66 is about and compiles just as
+    well. Taking the row is what stops a call site from forgetting the second field.
+    """
+    return alive(row.get("pid"), row.get("procStart"), run)
+
+
 def entries(sessions_dir=SESSIONS_DIR, live_only=True, peers_only=True):
     """Registry rows that are peers, sorted by name. Unreadable files are skipped, not guessed at.
 
@@ -163,7 +179,7 @@ def entries(sessions_dir=SESSIONS_DIR, live_only=True, peers_only=True):
             continue
         if peers_only and not is_peer(row):
             continue
-        if live_only and not alive(row.get("pid"), row.get("procStart")):
+        if live_only and not alive_row(row):
             continue
         rows.append(row)
     return sorted(rows, key=lambda r: str(r.get("name") or r.get("sessionId")))

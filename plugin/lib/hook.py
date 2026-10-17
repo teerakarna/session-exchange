@@ -163,7 +163,7 @@ def presence(root, held, session_id, config, rows):
     marker text, typed by hand, so it goes through `store.printable` like anything else a render
     did not write itself.
     """
-    live = {row.get("sessionId") for row in rows if registry.alive(row.get("pid"))}
+    live = {row.get("sessionId") for row in rows if registry.alive_row(row)}
     peers = {row.get("sessionId") for row in rows if registry.is_peer(row)} & live
     others = [claim for claim in held if claim["session_id"] != session_id]
     current = [claim for claim in others if claim["session_id"] in peers]

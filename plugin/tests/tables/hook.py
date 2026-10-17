@@ -213,7 +213,7 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="a claim whose session is gone is not rendered as current",
-        old='    live = {row.get("sessionId") for row in rows if registry.alive(row.get("pid"))}',
+        old='    live = {row.get("sessionId") for row in rows if registry.alive_row(row)}',
         new='    live = {row.get("sessionId") for row in rows}',
         caught_by="test_hook.py",
     ),

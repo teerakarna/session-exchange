@@ -101,6 +101,37 @@ MUTATIONS = [
     ),
     Mutation(
         module="registry",
+        rule="a year that cannot be a time is no evidence against the row",
+        old=(
+            "    except (OSError, subprocess.SubprocessError, OverflowError, ValueError):\n"
+            "        return True"
+        ),
+        new="    except (OSError, subprocess.SubprocessError, ValueError):\n        return True",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a time of day that does not exist is not read as one that does",
+        old="    if not (1 <= fields[2] <= 31 and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):",
+        new="    if False:",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a second that does not exist is not read as one that does",
+        old="    if not 0 <= fields[5] <= 60:",
+        new="    if False:",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a row is judged on the start time it was written with",
+        old='    return alive(row.get("pid"), row.get("procStart"), run)',
+        new='    return alive(row.get("pid"), None, run)',
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
         rule="a month name that is not one is no evidence against the row",
         old="    except (AttributeError, KeyError, ValueError):\n        return None",
         new="    except (AttributeError, ValueError):\n        return None",
@@ -154,15 +185,15 @@ MUTATIONS = [
     Mutation(
         module="registry",
         rule="a dead session's row is left out by default",
-        old='        if live_only and not alive(row.get("pid"), row.get("procStart")):',
+        old="        if live_only and not alive_row(row):",
         new="        if live_only and False:",
         caught_by="test_registry.py",
     ),
     Mutation(
         module="registry",
         rule="and included when the caller says liveness is not the question",
-        old='        if live_only and not alive(row.get("pid"), row.get("procStart")):',
-        new='        if not alive(row.get("pid"), row.get("procStart")):',
+        old="        if live_only and not alive_row(row):",
+        new="        if not alive_row(row):",
         caught_by="test_registry.py",
     ),
     Mutation(
@@ -170,8 +201,8 @@ MUTATIONS = [
         # The module's own docstring calls this out, and nothing asserted it. A recycled pid is the
         # whole reason: the stem was written by whatever process held that number at the time.
         rule="the pid is read from inside the file, not from its name",
-        old='        if live_only and not alive(row.get("pid"), row.get("procStart")):',
-        new='        if live_only and not alive(path.stem, row.get("procStart")):',
+        old="        if live_only and not alive_row(row):",
+        new='        if live_only and not alive_row({"pid": path.stem}):',
         caught_by="test_registry.py",
     ),
     Mutation(

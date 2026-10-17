@@ -83,8 +83,12 @@ print("a recycled pid is told from the process that wrote the row (#66)")
 # The registry writes `procStart` in UTC in the format `ps` prints in local time. The machine's own
 # zone is pinned to +07 so the two readings differ here as they do on the machine that measured it;
 # on a UTC runner they coincide and every check below would pass whichever clock was read.
+WAS_TZ = os.environ.get("TZ")
 os.environ["TZ"] = "Etc/GMT-7"
 time.tzset()
+# A zone database that lacks the name reads it as UTC, and then the UTC and local branches coincide
+# and nothing below could tell them apart, so say so instead of passing quietly.
+check("the pinned zone took effect", time.localtime(0).tm_gmtoff, 25200)
 
 
 class Ps:
@@ -180,6 +184,34 @@ if parsed is not None:
         registry.alive(LIVE, time.asctime(time.gmtime(time.mktime(parsed) - 86400))),
         False,
     )
+
+# An hour that does not exist, a day that does not exist, a second that does not: normalised by
+# `mktime` into a confident wrong timestamp if let through, so each reads as no evidence at all.
+for label, text in (
+    ("a day of 99", "Sat Oct 99 06:22:46 2026"),
+    ("an hour of 25", "Sat Oct 17 25:22:46 2026"),
+    ("a minute of 61", "Sat Oct 17 06:61:46 2026"),
+    ("a second of 61", "Sat Oct 17 06:22:61 2026"),
+    ("a day of 0", "Sat Oct 0 06:22:46 2026"),
+):
+    check(f"{label} is not a time", registry._clock(text), None)
+check("a leap second is", registry._clock("Sat Oct 17 06:22:60 2026") is not None, True)
+
+check(
+    "a whole row is judged on its own procStart",
+    (
+        registry.alive_row({"pid": LIVE, "procStart": "Sat Jan  1 00:00:00 2000"}, Ps(PS_LOCAL)),
+        registry.alive_row({"pid": LIVE, "procStart": UTC_ROW}, Ps(PS_LOCAL)),
+        registry.alive_row({"pid": LIVE}, Ps(PS_LOCAL)),
+    ),
+    (False, True, True),
+)
+
+if WAS_TZ is None:
+    del os.environ["TZ"]
+else:
+    os.environ["TZ"] = WAS_TZ
+time.tzset()
 
 print("which rows come back")
 
