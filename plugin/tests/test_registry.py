@@ -166,12 +166,15 @@ for junk in ("not a date", "Sat Foo 17 06:22:46 2026", 12345):
 
 # And against the real `ps`, once, because every check above fakes the one thing whose output format
 # differs between kernels. This process's own start, written the way the registry writes it.
-real = subprocess.run(
-    ["ps", "-o", "lstart=", "-p", str(LIVE)],
-    capture_output=True,
-    text=True,
-    env={**os.environ, "LC_ALL": "C"},
-).stdout.strip()
+try:
+    real = subprocess.run(
+        ["ps", "-o", "lstart=", "-p", str(LIVE)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "LC_ALL": "C"},
+    ).stdout.strip()
+except OSError:
+    real = ""
 parsed = registry._clock(real)
 check("the real ps prints a start time we can read", parsed is not None, True)
 if parsed is not None:
@@ -193,9 +196,14 @@ for label, text in (
     ("a minute of 61", "Sat Oct 17 06:61:46 2026"),
     ("a second of 61", "Sat Oct 17 06:22:61 2026"),
     ("a day of 0", "Sat Oct 0 06:22:46 2026"),
+    ("a 31st of February", "Sat Feb 31 06:22:46 2026"),
+    ("a 29th of February in a common year", "Sat Feb 29 06:22:46 2026"),
 ):
     check(f"{label} is not a time", registry._clock(text), None)
 check("a leap second is", registry._clock("Sat Oct 17 06:22:60 2026") is not None, True)
+check(
+    "and a leap day in a leap year", registry._clock("Sat Feb 29 06:22:46 2028") is not None, True
+)
 
 check(
     "a whole row is judged on its own procStart",

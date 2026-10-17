@@ -87,7 +87,8 @@ def _clock(text):
         return None
     # `mktime` and `timegm` normalise rather than refuse, so `Oct 99 99:99:99` would become a
     # confident wrong timestamp and a verdict of "different process" on a row that is merely odd.
-    if not (1 <= fields[2] <= 31 and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):
+    days = calendar.monthrange(fields[0], fields[1])[1]
+    if not (1 <= fields[2] <= days and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):
         return None
     if not 0 <= fields[5] <= 60:
         return None

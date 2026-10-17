@@ -149,7 +149,8 @@ def presence(root, held, session_id, config, rows):
 
     Other sessions only: a session reading its own claim back is being told what it already knows,
     at the cost of a row. Live peers in full. A claim whose session is not running - no registry
-    row, or a row whose pid is dead, which is what a crash leaves - is counted rather than rendered,
+    row, or a row whose pid is dead or now belongs to another process (#66), which is what a crash
+    leaves - is counted rather than rendered,
     because a stale row that reads as current is worse than no row, and counted rather than dropped,
     because a claim nobody cleared is a fault somebody should be able to see. The count says where
     the files are, since nothing removes them on its own: absence from the registry is also what a
@@ -163,9 +164,13 @@ def presence(root, held, session_id, config, rows):
     marker text, typed by hand, so it goes through `store.printable` like anything else a render
     did not write itself.
     """
-    live = {row.get("sessionId") for row in rows if registry.alive_row(row)}
-    peers = {row.get("sessionId") for row in rows if registry.is_peer(row)} & live
     others = [claim for claim in held if claim["session_id"] != session_id]
+    # Only the rows somebody holds a claim for, because liveness can cost a `ps` and its answer is
+    # read nowhere else.
+    claimed = {claim["session_id"] for claim in others}
+    asked = [row for row in rows if row.get("sessionId") in claimed]
+    live = {row.get("sessionId") for row in asked if registry.alive_row(row)}
+    peers = {row.get("sessionId") for row in asked if registry.is_peer(row)} & live
     current = [claim for claim in others if claim["session_id"] in peers]
     stale = [claim for claim in others if claim["session_id"] not in live]
     out = []

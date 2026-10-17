@@ -112,8 +112,15 @@ MUTATIONS = [
     Mutation(
         module="registry",
         rule="a time of day that does not exist is not read as one that does",
-        old="    if not (1 <= fields[2] <= 31 and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):",
+        old="    if not (1 <= fields[2] <= days and 0 <= fields[3] < 24 and 0 <= fields[4] < 60):",
         new="    if False:",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="a day the month does not have is not read as the next month's",
+        old="    if not (1 <= fields[2] <= days and",
+        new="    if not (1 <= fields[2] <= 31 and",
         caught_by="test_registry.py",
     ),
     Mutation(
