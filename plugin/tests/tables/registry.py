@@ -63,6 +63,43 @@ MUTATIONS = [
     ),
     Mutation(
         module="registry",
+        rule="a bare-number procStart is compared as ticks, not handed to ps",
+        old=(
+            "    if isinstance(proc_start, str) and proc_start.isdigit():\n"
+            "        return _same_ticks(pid, proc_start)\n"
+        ),
+        new="",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="ticks that differ are a different process",
+        old="        return int(theirs) == int(proc_start)",
+        new="        return True",
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="the command name is skipped from its last parenthesis",
+        old='stat.rindex(")")',
+        new='stat.index(")")',
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
+        rule="an unreadable stat file is doubt, so the row stays live",
+        old=(
+            "    except (OSError, ValueError, IndexError):\n"
+            "        return True\n\n\ndef _same_start"
+        ),
+        new=(
+            "    except (OSError, ValueError, IndexError):\n"
+            "        return False\n\n\ndef _same_start"
+        ),
+        caught_by="test_registry.py",
+    ),
+    Mutation(
+        module="registry",
         rule="a row written in UTC matches ps in local time",
         old="        written = (calendar.timegm(ours), time.mktime(ours))",
         new="        written = (time.mktime(ours),)",
