@@ -164,6 +164,48 @@ for junk in ("not a date", "Sat Foo 17 06:22:46 2026", 12345):
         got = f"raised {type(exc).__name__}"
     check(f"a start time of {junk!r} is not evidence against the row", got, True)
 
+# Linux writes `procStart` as clock ticks since boot, not a `ps` time (#117). Exact match, read from
+# `/proc/<pid>/stat`, whose command name can hold spaces and parentheses.
+STAT_TAIL = "S 1 1 1 0 -1 4194560 100 0 0 0 1 1 0 0 20 0 1 0 {ticks} 1000 100 18446744073709551615"
+was_proc = registry.PROC
+with tempfile.TemporaryDirectory() as tmp:
+    registry.PROC = pathlib.Path(tmp)
+    (registry.PROC / str(LIVE)).mkdir()
+    stat = registry.PROC / str(LIVE) / "stat"
+
+    stat.write_text(f"{LIVE} (claude) " + STAT_TAIL.format(ticks=18950569))
+    check("ticks that agree are the same process", registry.alive(LIVE, "18950569", Ps("x")), True)
+    check("ticks that differ are a recycled pid", registry.alive(LIVE, "18950570", Ps("x")), False)
+    stat.write_text(f"{LIVE} (a b) (c) " + STAT_TAIL.format(ticks=777))
+    check("a command name with spaces and parens", registry.alive(LIVE, "777", Ps("x")), True)
+    check("and still told apart", registry.alive(LIVE, "778", Ps("x")), False)
+
+    ps = Ps(PS_LOCAL)
+    registry.alive(LIVE, "777", ps)
+    check("ticks are never sent to ps", ps.env, None)
+
+    for label, text in (("empty", ""), ("short", f"{LIVE} (x) S 1 2"), ("no parens", "garbage")):
+        stat.write_text(text)
+        check(
+            f"a {label} stat file is doubt, not death",
+            registry.alive(LIVE, "777", Ps("x")),
+            True,
+        )
+    stat.unlink()
+    check("a missing stat file is doubt, not death", registry.alive(LIVE, "777", Ps("x")), True)
+    check(
+        "a whole row is judged on its ticks",
+        registry.alive_row({"pid": LIVE, "procStart": "777"}, Ps("x")),
+        True,
+    )
+registry.PROC = was_proc
+
+# And the real `/proc`, where there is one, for the same reason as the real `ps` below.
+if (registry.PROC / str(LIVE) / "stat").exists():
+    real_ticks = (registry.PROC / str(LIVE) / "stat").read_text().rsplit(")", 1)[1].split()[19]
+    check("this process matches its own ticks", registry.alive(LIVE, real_ticks), True)
+    check("and not the next tick", registry.alive(LIVE, str(int(real_ticks) + 1)), False)
+
 # And against the real `ps`, once, because every check above fakes the one thing whose output format
 # differs between kernels. This process's own start, written the way the registry writes it.
 try:

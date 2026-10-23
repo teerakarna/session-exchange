@@ -37,6 +37,10 @@ import time
 
 SESSIONS_DIR = pathlib.Path.home() / ".claude" / "sessions"
 
+# Where Linux keeps per-process state. A name rather than a literal so a test can point it at a
+# directory it built.
+PROC = pathlib.Path("/proc")
+
 # The kinds that are not a person. Live values seen in `kind`: `interactive` and `bg`.
 NOT_PEERS = ("bg",)
 
@@ -95,6 +99,24 @@ def _clock(text):
     return (*fields, 0, 0, -1)
 
 
+def _same_ticks(pid, proc_start):
+    """`procStart` as Linux writes it: the start time in clock ticks since boot, a bare number.
+
+    That is field 22 of `/proc/<pid>/stat` (#117), and unlike a `ps` time it is exact, so it has no
+    tolerance. Counted from after the last `)`, because the command name is field 2 and may itself
+    hold spaces and parentheses.
+
+    Same rule as `_same_start`: False only when the file positively reports a different number.
+    A missing file, a short line, anything unparseable is doubt, and doubt is True.
+    """
+    try:
+        stat = (PROC / str(int(pid)) / "stat").read_text()
+        theirs = stat[stat.rindex(")") + 1 :].split()[19]
+        return int(theirs) == int(proc_start)
+    except (OSError, ValueError, IndexError):
+        return True
+
+
 def _same_start(pid, proc_start, run):
     """False only when `ps` positively reports a different start time than the row was written with.
 
@@ -111,6 +133,8 @@ def _same_start(pid, proc_start, run):
     there. Not handled: the one hour a year when local time repeats, where a live row can read as
     dead until the hour passes.
     """
+    if isinstance(proc_start, str) and proc_start.isdigit():
+        return _same_ticks(pid, proc_start)
     try:
         out = run(
             ["ps", "-o", "lstart=", "-p", str(int(pid))],
