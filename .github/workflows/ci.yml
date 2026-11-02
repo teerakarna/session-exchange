@@ -72,7 +72,7 @@ jobs:
       # them out at once, which is the one case where one clean failure beats three confusing ones.
       #
       # No install step anywhere below, and that is the point: see the stdlib step in `checks`.
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: &leg ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           python-version: "3.11"
@@ -81,7 +81,7 @@ jobs:
         if: *leg
         run: python plugin/tests/run.py
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: *leg
         with:
           python-version: "3.13"
@@ -111,7 +111,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.9"
 
@@ -153,7 +153,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
 
@@ -202,7 +202,7 @@ jobs:
         if: &gate ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: shellcheck plugin/hooks-handlers/*.sh
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: *gate
         with:
           python-version: "3.13"
@@ -454,7 +454,7 @@ jobs:
           # `--since` needs a merge base, which a depth-1 clone does not have.
           fetch-depth: 0
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
 
@@ -601,7 +601,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           python-version: "3.13"
