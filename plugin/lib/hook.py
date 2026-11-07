@@ -323,7 +323,13 @@ def stop(data, root, lines):
       announced back to it on the next turn.
 
     A session with no `handoffs_seen` yet is one whose claim predates this field, so it records the
-    set without reporting it: whatever was waiting then was shown at its start.
+    set without reporting it. A handoff posted after that session started and before its first Stop
+    is baselined unreported, and surfaces at its next SessionStart; only a session that was running
+    across the upgrade can be in that position.
+
+    Recorded before it is said, so a report that is lost on the way (a closed pipe, output Claude
+    Code drops) is not repeated. Said at most once is the choice: the other order repeats, which is
+    the bug.
 
     No problem lines either, from here or from `main`: a fault that is reported on every turn is the
     behaviour this handler exists to remove.
@@ -342,11 +348,19 @@ def stop(data, root, lines):
     mine = addressed(stored, session_id, repos, paths)
     ids = {record["id"] for record, _ in mine}
     seen = claim.get("handoffs_seen")
-    if claims.mark_seen(root, session_id, ids):
+    known = set(seen or ())
+    # Everything ever shown that still exists, not only what matches now: a session that changes its
+    # repos or paths can lose a handoff for a turn and get it back, and that must not read as new.
+    # Bounded by the handoffs on disk, so a closed-and-removed one does not stay on the claim.
+    kept = (known | ids) & {record["id"] for record, _ in stored}
+    # No write when nothing changed, which is nearly every turn: a read-modify-write of the claim
+    # file after each one, in every session on the root, is a cost and a window for losing an
+    # `exchange claim` made in the same moment.
+    if (seen is None or kept != known) and claims.mark_seen(root, session_id, kept):
         return
     if seen is None:
         return
-    fresh = [pair for pair in mine if pair[0]["id"] not in set(seen or ())]
+    fresh = [pair for pair in mine if pair[0]["id"] not in known]
     lines += waiting(fresh, config, "{n} new handoff(s) for this session, newest first.")
 
 

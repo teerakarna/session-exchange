@@ -5,6 +5,20 @@ from .shape import Mutation
 MUTATIONS = [
     Mutation(
         module="hook",
+        rule="Stop does not rewrite the claim when what was shown has not changed",
+        old="    if (seen is None or kept != known) and claims.mark_seen(root, session_id, kept):",
+        new="    if claims.mark_seen(root, session_id, kept):",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a handoff that leaves the set and returns is not announced as new",
+        old='    kept = (known | ids) & {record["id"] for record, _ in stored}',
+        new="    kept = ids",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
         rule="a Stop that is itself a forced continuation says nothing, so turns do not chain",
         old='    if data.get("stop_hook_active") is True:\n        return\n',
         new="",
@@ -20,15 +34,21 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="Stop reports only a handoff the session has not been shown",
-        old='    fresh = [pair for pair in mine if pair[0]["id"] not in set(seen or ())]',
+        old='    fresh = [pair for pair in mine if pair[0]["id"] not in known]',
         new="    fresh = mine",
         caught_by="test_hook.py",
     ),
     Mutation(
         module="hook",
         rule="a record that cannot be written means Stop says nothing, so it cannot repeat",
-        old="    if claims.mark_seen(root, session_id, ids):\n        return\n",
-        new="    claims.mark_seen(root, session_id, ids)\n",
+        old=(
+            "    if (seen is None or kept != known) and "
+            "claims.mark_seen(root, session_id, kept):\n        return\n"
+        ),
+        new=(
+            "    if seen is None or kept != known:\n"
+            "        claims.mark_seen(root, session_id, kept)\n"
+        ),
         caught_by="test_hook.py",
     ),
     Mutation(

@@ -1582,8 +1582,23 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     code, out = run("Stop", stop_payload(repo), home)
     check("the first Stop after start has nothing to add", (code, out), (0, None))
+    mine = root / ".claude" / "exchange" / "sessions" / "me.json"
+    before = mine.stat().st_mtime_ns
     code, out = run("Stop", stop_payload(repo), home)
     check("and neither does the second, with the set unchanged", (code, out), (0, None))
+    check("which does not rewrite the claim", mine.stat().st_mtime_ns, before)
+
+    # Losing a handoff for a turn and getting it back is not a new handoff.
+    claim = read_json_or_empty(mine)
+    claim["paths"] = ["docs"]
+    mine.write_text(json.dumps(claim))
+    code, out = run("Stop", stop_payload(repo), home)
+    check("a handoff narrowed out of the set is not news", (code, out), (0, None))
+    claim = read_json_or_empty(mine)
+    claim.pop("paths")
+    mine.write_text(json.dumps(claim))
+    code, out = run("Stop", stop_payload(repo), home)
+    check("and is not announced again when it comes back", (code, out), (0, None))
 
     post_later(root, "h-new", {"repo": "repo"}, 1)
     code, out = run("Stop", stop_payload(repo), home)
@@ -1619,14 +1634,6 @@ with tempfile.TemporaryDirectory() as tmp:
     handoffs.set_status(root, "h-new", handoffs.CLOSED, by="someone")
     code, out = run("Stop", stop_payload(repo), home)
     check("a handoff leaving the set is not news", (code, out), (0, None))
-    check(
-        "but it is dropped from what was seen",
-        "h-new"
-        in read_json_or_empty(root / ".claude" / "exchange" / "sessions" / "me.json").get(
-            "handoffs_seen", []
-        ),
-        False,
-    )
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = handoff_fixture(tmp)
