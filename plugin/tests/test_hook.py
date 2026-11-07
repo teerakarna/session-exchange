@@ -576,7 +576,9 @@ print("wired under an event the plugin does not handle")
 
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=False)
-    code, out = run("Stop", {"hook_event_name": "Stop", "session_id": "s", "cwd": str(repo)}, home)
+    code, out = run(
+        "PreCompact", {"hook_event_name": "PreCompact", "session_id": "s", "cwd": str(repo)}, home
+    )
     context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
     check(
         "reports the mismatch instead of doing nothing quietly",
@@ -586,7 +588,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "and replies under the event that actually fired",
         (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
-        "Stop",
+        "PreCompact",
     )
 
 print("the payload disagrees with the wiring about which event fired")
@@ -602,7 +604,7 @@ print("the payload disagrees with the wiring about which event fired")
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=True)
     code, out = run(
-        "Stop",
+        "PreCompact",
         {
             "hook_event_name": "SessionStart",
             "session_id": "s",
@@ -632,7 +634,7 @@ print("the payload does not say which event fired")
 # addressed to `None` and no injected context at all.
 with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = fixture(tmp, wire_legacy=False)
-    code, out = run("Stop", {"session_id": "s", "cwd": str(repo)}, home)
+    code, out = run("PreCompact", {"session_id": "s", "cwd": str(repo)}, home)
     context = (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
     check(
         "the wiring is the fallback, and it still replies under a real event name",
@@ -640,7 +642,7 @@ with tempfile.TemporaryDirectory() as tmp:
             (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
             "does not handle" in context,
         ),
-        ("Stop", True),
+        ("PreCompact", True),
     )
 
 # A non-string is the same case as absent: the field cannot be echoed back, and a reply whose event
@@ -1543,6 +1545,171 @@ with tempfile.TemporaryDirectory() as tmp:
         "the machine-wide warning's 'presence shown above' has presence above it",
         bool(heading and guard and heading[0] < guard[0]),
         True,
+    )
+
+print("stop, after every turn: said once, silent after")
+
+
+# #123. Whatever a Stop hook prints makes Claude continue, so an unchanged set said again each turn
+# is a forced turn each time, until Claude Code overrides the hook after eight in a row. Every check
+# here is about what is NOT said, and the first one is the positive that keeps the rest honest: a
+# handler that never says anything would pass all of them.
+def stop_payload(repo, **extra):
+    return {"hook_event_name": "Stop", "session_id": "me", "cwd": str(repo / "plugin"), **extra}
+
+
+def post_later(root, handoff_id, to, minute, **sender):
+    _, problem = handoffs.post(
+        root,
+        to,
+        f"body of {handoff_id}",
+        str(root),
+        handoff_id=handoff_id,
+        at=f"2026-09-30T02:{minute:02d}:00Z",
+        **sender,
+    )
+    assert problem is None, problem
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    run("SessionStart", {"session_id": "me", "cwd": str(repo / "plugin")}, home)
+    seen = read_json_or_empty(root / ".claude" / "exchange" / "sessions" / "me.json")
+    check(
+        "session start records the ids it showed",
+        seen.get("handoffs_seen"),
+        ["h-accepted", "h-named", "h-narrowed-in", "h-narrowed-out", "h-spelt"],
+    )
+    code, out = run("Stop", stop_payload(repo), home)
+    check("the first Stop after start has nothing to add", (code, out), (0, None))
+    mine = root / ".claude" / "exchange" / "sessions" / "me.json"
+    before = mine.stat().st_mtime_ns
+    code, out = run("Stop", stop_payload(repo), home)
+    check("and neither does the second, with the set unchanged", (code, out), (0, None))
+    check("which does not rewrite the claim", mine.stat().st_mtime_ns, before)
+
+    # Losing a handoff for a turn and getting it back is not a new handoff.
+    claim = read_json_or_empty(mine)
+    claim["paths"] = ["docs"]
+    mine.write_text(json.dumps(claim))
+    code, out = run("Stop", stop_payload(repo), home)
+    check("a handoff narrowed out of the set is not news", (code, out), (0, None))
+    claim = read_json_or_empty(mine)
+    claim.pop("paths")
+    mine.write_text(json.dumps(claim))
+    code, out = run("Stop", stop_payload(repo), home)
+    check("and is not announced again when it comes back", (code, out), (0, None))
+
+    post_later(root, "h-new", {"repo": "repo"}, 1)
+    code, out = run("Stop", stop_payload(repo), home)
+    rows = context_rows(out)
+    check(
+        "a handoff posted mid-session is reported, and only that one",
+        [r for r in rows if r.startswith("- ")],
+        [r for r in rows if r.startswith("- h-new ")],
+    )
+    check(
+        "the report says it is the new ones",
+        bool(rows) and rows[0].startswith("[session-exchange] 1 new handoff(s)"),
+        True,
+    )
+    check(
+        "and replies under Stop, which is the event Claude Code will accept it for",
+        (out or {}).get("hookSpecificOutput", {}).get("hookEventName"),
+        "Stop",
+    )
+    code, out = run("Stop", stop_payload(repo), home)
+    check("said once, then silent", (code, out), (0, None))
+
+    post_later(root, "h-late", {"repo": "repo"}, 2)
+    code, out = run("Stop", stop_payload(repo, stop_hook_active=True), home)
+    check("a Stop that is itself a forced continuation says nothing", (code, out), (0, None))
+    code, out = run("Stop", stop_payload(repo), home)
+    check(
+        "and what it held back is still reported at the next real Stop",
+        [r for r in context_rows(out) if r.startswith("- ")][:1],
+        [r for r in context_rows(out) if r.startswith("- h-late ")],
+    )
+
+    handoffs.set_status(root, "h-new", handoffs.CLOSED, by="someone")
+    code, out = run("Stop", stop_payload(repo), home)
+    check("a handoff leaving the set is not news", (code, out), (0, None))
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    code, out = run("Stop", stop_payload(repo), home)
+    check("no claim, so nothing to compare with and nothing said", (code, out), (0, None))
+    check(
+        "and it does not make a claim up",
+        (root / ".claude" / "exchange" / "sessions" / "me.json").exists(),
+        False,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    run("SessionStart", {"session_id": "me", "cwd": str(repo / "plugin")}, home)
+    mine = root / ".claude" / "exchange" / "sessions" / "me.json"
+    claim = read_json_or_empty(mine)
+    claim.pop("handoffs_seen")
+    mine.write_text(json.dumps(claim))
+    code, out = run("Stop", stop_payload(repo), home)
+    check(
+        "a claim from before the field records the set without reporting it",
+        (code, out),
+        (0, None),
+    )
+    check(
+        "and has it recorded after",
+        bool(read_json_or_empty(mine).get("handoffs_seen")),
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    run("SessionStart", {"session_id": "me", "cwd": str(repo / "plugin")}, home)
+    mine = root / ".claude" / "exchange" / "sessions" / "me.json"
+    mine.write_text("{ not json")
+    post_later(root, "h-new", {"repo": "repo"}, 1)
+    code, out = run("Stop", stop_payload(repo), home)
+    check("an unreadable claim is silence, not a problem line every turn", (code, out), (0, None))
+
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    (root / ".claude" / "exchange.json").write_text("{ not json")
+    code, out = run("Stop", stop_payload(repo), home)
+    check("an unresolvable root is silence at Stop too", (code, out), (0, None))
+
+# A crash inside the handler is reported at session start and must not be at Stop, where it would be
+# said again after every turn. A cwd that is not a path is the cheapest input that raises.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    code, out = run("SessionStart", {"session_id": "me", "cwd": 7}, home)
+    check(
+        "the same crash is reported at session start",
+        (code, "in the SessionStart hook" in " ".join(context_rows(out))),
+        (0, True),
+    )
+    code, out = run("Stop", {"hook_event_name": "Stop", "session_id": "me", "cwd": 7}, home)
+    check("and is silence at Stop", (code, out), (0, None))
+
+# If the record of what was shown cannot be kept, reporting would repeat: nothing remembers it was
+# said. So it is not said, however new the handoff is.
+with tempfile.TemporaryDirectory() as tmp:
+    home, root, repo = handoff_fixture(tmp)
+    run("SessionStart", {"session_id": "me", "cwd": str(repo / "plugin")}, home)
+    post_later(root, "h-new", {"repo": "repo"}, 1)
+    sessions = root / ".claude" / "exchange" / "sessions"
+    sessions.chmod(0o555)
+    try:
+        code, out = run("Stop", stop_payload(repo), home)
+        check("a record that cannot be written means nothing is said", (code, out), (0, None))
+    finally:
+        sessions.chmod(0o755)
+    code, out = run("Stop", stop_payload(repo), home)
+    check(
+        "and once it can be, the handoff is still news",
+        [r for r in context_rows(out) if r.startswith("- ")][:1],
+        [r for r in context_rows(out) if r.startswith("- h-new ")],
     )
 
 print()

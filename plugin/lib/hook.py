@@ -10,9 +10,11 @@ What each event is for:
 - **SessionEnd** - clear the claim. This is what makes "set your row to idle when you are done" stop
   depending on a session remembering to, which it reliably did not.
 
-`Stop` is deliberately not wired yet. Its job in the design is catching handoffs posted mid-session,
-and the matcher it would call is now here; it goes in as its own change, since a hook on every turn
-is a cost every session pays and deserves its own review.
+- **Stop** - report a handoff posted since this session was last shown the set, and nothing else.
+  It fires after every turn, and what a Stop hook prints makes Claude continue, so anything it
+  says that is not new costs a forced turn each time (#123). Claude Code overrides a Stop hook
+  after eight such blocks in a row, so a hook that repeats itself is not just noisy, it is
+  eventually ignored.
 """
 
 from __future__ import annotations
@@ -108,7 +110,14 @@ def session_start(data, root, lines):
     # leaves whatever the session claimed before, and that is still where it said it is working.
     own = claim or next((c for c in held if c.get("session_id") == session_id), {})
     repos, paths = where(root, own, cwd)
-    lines += waiting(stored, session_id, repos, paths, config)
+    mine = addressed(stored, session_id, repos, paths)
+    lines += waiting(mine, config)
+    # What was just shown, so the first Stop has something to compare against. Only when the claim
+    # exists: with nowhere to record it, `stop` stays silent rather than guess.
+    if claim:
+        recorded = claims.mark_seen(root, session_id, {record["id"] for record, _ in mine})
+        if recorded:
+            lines.append(hookio.problem(recorded))
 
     # The migration guard stays last, after presence and handoffs, because it is what tells the
     # reader whether the blocks above are the only ones of their kind in the context: a
@@ -244,11 +253,8 @@ def where(root, claim, cwd):
     return repos, paths
 
 
-def waiting(stored, session_id, repos, paths, config):
-    """Handoffs not yet closed that are for this session, as context lines, and a count of the rest.
-
-    Newest first under `max_handoffs_listed`, for the reason `exchange handoff list` gives: the one
-    posted a minute ago is the one nobody has read. What the cap leaves out is counted.
+def addressed(stored, session_id, repos, paths):
+    """Handoffs not yet closed that are for this session, newest first.
 
     Accepted as well as open, because accepted is somebody having taken it on, and that somebody is
     often this session again after a resume. A session is not shown what it posted itself.
@@ -256,10 +262,6 @@ def waiting(stored, session_id, repos, paths, config):
     A session with no id in its payload posted nothing anyone could tell was its own, so nothing is
     left out for that reason. Without the guard, every handoff whose sender had no id either would
     compare `None` with `None` and vanish.
-
-    The rest are neither listed nor counted. They are somebody else's to read, and a count of them
-    would be a line in nearly every session on a busy root - the always-there section the reader
-    stops looking at. `exchange handoff list` has all of them.
     """
     pending = [pair for pair in stored if pair[1] != handoffs.CLOSED]
     mine = [
@@ -269,12 +271,26 @@ def waiting(stored, session_id, repos, paths, config):
         and handoffs.addressed_to(record["to"], session_id, repos, paths)
     ]
     mine.sort(key=lambda pair: (pair[0]["created"], pair[0]["id"]), reverse=True)
+    return mine
+
+
+def waiting(mine, config, heading="{n} handoff(s) for this session, newest first."):
+    """Context lines for handoffs `addressed` found, and a count of what the cap leaves out.
+
+    Newest first under `max_handoffs_listed`, for the reason `exchange handoff list` gives: the one
+    posted a minute ago is the one nobody has read. What the cap leaves out is counted.
+
+    The rest, the ones addressed to somebody else, are neither listed nor counted. They are
+    somebody else's to read, and a count of them would be a line in nearly every session on a busy
+    root - the always-there section the reader stops looking at. `exchange handoff list` has all of
+    them.
+    """
     shown = mine[: config["max_handoffs_listed"]]
     width = config["max_focus_chars"]
     out = []
     if shown:
         out.append(
-            f"[{hookio.PREFIX}] {len(mine)} handoff(s) for this session, newest first. "
+            f"[{hookio.PREFIX}] {heading.format(n=len(mine))} "
             "`exchange handoff accept <id>` takes one on:"
         )
         for record, status in shown:
@@ -290,6 +306,64 @@ def waiting(stored, session_id, repos, paths, config):
     return out
 
 
+def stop(data, root, lines):
+    """Say so when a handoff has arrived since this session was last shown the set.
+
+    The set is what SessionStart showed, recorded on the claim as ids. An id not in it is news, said
+    once and then recorded. Everything else is silence, and that includes the cases that look like
+    they want a message:
+
+    - `stop_hook_active` means this Stop is the continuation a previous one forced. Saying anything
+      again chains the turns, which is how a hook runs into the eight-block override.
+    - No usable claim means there is nowhere to record what was shown, so nothing said now could be
+      kept from being said again after the next turn.
+    - A record that could not be written is the same case: reporting it would repeat.
+    - A handoff leaving the set, or changing status, is not news. A close or an accept by somebody
+      else is not something this session has to act on, and its own `accept` would otherwise be
+      announced back to it on the next turn.
+
+    A session with no `handoffs_seen` yet is one whose claim predates this field, so it records the
+    set without reporting it. A handoff posted after that session started and before its first Stop
+    is baselined unreported, and surfaces at its next SessionStart; only a session that was running
+    across the upgrade can be in that position.
+
+    Recorded before it is said, so a report that is lost on the way (a closed pipe, output Claude
+    Code drops) is not repeated. Said at most once is the choice: the other order repeats, which is
+    the bug.
+
+    No problem lines either, from here or from `main`: a fault that is reported on every turn is the
+    behaviour this handler exists to remove.
+    """
+    if data.get("stop_hook_active") is True:
+        return
+    session_id = store.safe_id(data.get("session_id"))
+    if session_id is None:
+        return
+    claim, _ = store.read_json(claims.path(root, session_id), claims.SCHEMA)
+    if claim is None:
+        return
+    config, _ = store.config(root)
+    stored, _ = handoffs.load_all(root)
+    repos, paths = where(root, claim, data.get("cwd") or os.getcwd())
+    mine = addressed(stored, session_id, repos, paths)
+    ids = {record["id"] for record, _ in mine}
+    seen = claim.get("handoffs_seen")
+    known = set(seen or ())
+    # Everything ever shown that still exists, not only what matches now: a session that changes its
+    # repos or paths can lose a handoff for a turn and get it back, and that must not read as new.
+    # Bounded by the handoffs on disk, so a closed-and-removed one does not stay on the claim.
+    kept = (known | ids) & {record["id"] for record, _ in stored}
+    # No write when nothing changed, which is nearly every turn: a read-modify-write of the claim
+    # file after each one, in every session on the root, is a cost and a window for losing an
+    # `exchange claim` made in the same moment.
+    if (seen is None or kept != known) and claims.mark_seen(root, session_id, kept):
+        return
+    if seen is None:
+        return
+    fresh = [pair for pair in mine if pair[0]["id"] not in known]
+    lines += waiting(fresh, config, "{n} new handoff(s) for this session, newest first.")
+
+
 def session_end(data, root, lines):
     problem = claims.clear(root, data.get("session_id"))
     if problem:
@@ -300,6 +374,7 @@ def session_end(data, root, lines):
 
 HANDLERS = {
     "SessionStart": session_start,
+    "Stop": stop,
     "SessionEnd": session_end,
 }
 
@@ -312,7 +387,9 @@ def main(default_event, argv=None):
     try:
         resolution = exchange_root.resolve(data.get("cwd") or os.getcwd())
         if resolution.problem:
-            lines.append(hookio.problem(resolution.problem))
+            # Not at Stop, here or below: it would be said again after every turn (#123).
+            if event != "Stop":
+                lines.append(hookio.problem(resolution.problem))
         elif resolution.root is None:
             # Rule 3. No exchange in this environment, so there is nothing to do and nothing to say.
             return 0
@@ -328,12 +405,13 @@ def main(default_event, argv=None):
             else:
                 handler(data, resolution.root, lines)
     except Exception as exc:
-        lines.append(
-            hookio.problem(
-                f"{type(exc).__name__} in the {event} hook: {exc}. "
-                "Session unaffected; the exchange is not being updated."
+        if event != "Stop":
+            lines.append(
+                hookio.problem(
+                    f"{type(exc).__name__} in the {event} hook: {exc}. "
+                    "Session unaffected; the exchange is not being updated."
+                )
             )
-        )
 
     hookio.emit(event, lines)
     return 0
