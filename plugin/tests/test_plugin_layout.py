@@ -70,7 +70,7 @@ hooks, problem = load(PLUGIN / "hooks" / "hooks.json")
 check("the hooks manifest parses", problem, None)
 
 events = sorted(hooks["hooks"])
-check("the events wired", events, ["SessionEnd", "SessionStart"])
+check("the events wired", events, ["SessionEnd", "SessionStart", "Stop"])
 
 commands = [
     entry["command"]
@@ -78,7 +78,7 @@ commands = [
     for matcher in event
     for entry in matcher["hooks"]
 ]
-check("every wiring is a command", len(commands), 2)
+check("every wiring is a command", len(commands), 3)
 
 for command in commands:
     check(
@@ -94,7 +94,11 @@ for command in commands:
 
 print("and each handler runs the entrypoint it claims to")
 
-for handler, event in (("session-start.sh", "SessionStart"), ("session-end.sh", "SessionEnd")):
+for handler, event in (
+    ("session-start.sh", "SessionStart"),
+    ("session-end.sh", "SessionEnd"),
+    ("stop.sh", "Stop"),
+):
     text = (PLUGIN / "hooks-handlers" / handler).read_text(encoding="utf-8")
     check(f"{handler} passes {event}", f'hook.py" {event}' in text, True)
     # `set -e` in a hook handler turns any future unguarded failure into a failed session, which is

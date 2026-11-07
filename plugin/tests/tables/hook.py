@@ -5,6 +5,61 @@ from .shape import Mutation
 MUTATIONS = [
     Mutation(
         module="hook",
+        rule="a Stop that is itself a forced continuation says nothing, so turns do not chain",
+        old='    if data.get("stop_hook_active") is True:\n        return\n',
+        new="",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a claim with no record of what was shown records the set instead of reporting it",
+        old="    if seen is None:\n        return\n    fresh",
+        new="    fresh",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="Stop reports only a handoff the session has not been shown",
+        old='    fresh = [pair for pair in mine if pair[0]["id"] not in set(seen or ())]',
+        new="    fresh = mine",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a record that cannot be written means Stop says nothing, so it cannot repeat",
+        old="    if claims.mark_seen(root, session_id, ids):\n        return\n",
+        new="    claims.mark_seen(root, session_id, ids)\n",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="session start records what it showed, which is what Stop compares against",
+        old=(
+            "        recorded = claims.mark_seen("
+            'root, session_id, {record["id"] for record, _ in mine})'
+        ),
+        new="        recorded = None",
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
+        rule="a crash at Stop is silence, where at any other event it is reported",
+        old=(
+            '        if event != "Stop":\n'
+            "            lines.append(\n"
+            "                hookio.problem(\n"
+            '                    f"{type(exc).__name__}'
+        ),
+        new=(
+            "        if True:\n"
+            "            lines.append(\n"
+            "                hookio.problem(\n"
+            '                    f"{type(exc).__name__}'
+        ),
+        caught_by="test_hook.py",
+    ),
+    Mutation(
+        module="hook",
         rule="the handler that runs is the one the payload named, not the one argv carried",
         old="    event = hookio.event_name(data, default_event)",
         new="    event = default_event",
@@ -21,10 +76,10 @@ MUTATIONS = [
         module="hook",
         rule="a root that resolved to a problem is said out loud, not walked past",
         old=(
-            "        if resolution.problem:\n"
-            "            lines.append(hookio.problem(resolution.problem))"
+            '            if event != "Stop":\n'
+            "                lines.append(hookio.problem(resolution.problem))"
         ),
-        new="        if resolution.problem:\n            pass",
+        new='            if event != "Stop":\n                pass',
         caught_by="test_hook.py",
     ),
     Mutation(
@@ -43,9 +98,9 @@ MUTATIONS = [
     ),
     Mutation(
         module="hook",
-        rule="both events are wired, so SessionEnd is not an unhandled event",
-        old='HANDLERS = {\n    "SessionStart": session_start,\n    "SessionEnd": session_end,\n}',
-        new='HANDLERS = {\n    "SessionStart": session_start,\n}',
+        rule="every wired event has a handler, so SessionEnd is not an unhandled event",
+        old='    "Stop": stop,\n    "SessionEnd": session_end,\n}',
+        new='    "Stop": stop,\n}',
         caught_by="test_hook.py",
     ),
     # The wrapper, not any one type it catches. Narrowing it is the mutation because the list is
@@ -346,8 +401,8 @@ MUTATIONS = [
     Mutation(
         module="hook",
         rule="handoffs are rendered at session start",
-        old="    lines += waiting(stored, session_id, repos, paths, config)",
-        new="    lines += waiting([], session_id, repos, paths, config)",
+        old="    lines += waiting(mine, config)\n",
+        new="    lines += waiting([], config)\n",
         caught_by="test_hook.py",
     ),
     Mutation(

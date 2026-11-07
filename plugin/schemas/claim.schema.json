@@ -44,6 +44,11 @@
       "items": { "type": "string", "minLength": 1 },
       "description": "Opaque references for a human reader. Never parsed."
     },
+    "handoffs_seen": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Ids of the handoffs this session has already been shown. Written at SessionStart and by the Stop hook, which reports only an id that is not in it, so an unchanged set is silent. Goes with the claim at SessionEnd."
+    },
     "updated_at": {
       "type": "string",
       "pattern": "^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$",

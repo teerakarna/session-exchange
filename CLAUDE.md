@@ -51,11 +51,14 @@ from live state, which is the one copy that cannot go stale.
 - **`status` in the native registry is per-turn.** `idle` means "not mid-turn", not "finished". That is
   why claims exist alongside it, and why a claim is not inferred from status.
 - **Roots never read each other**, in either direction. The test for it must never regress.
+- **`Stop` must say nothing unless something is new.** Whatever a Stop hook prints makes Claude continue,
+  and Claude Code overrides a Stop hook after eight blocks in a row, so a repeated line is a forced turn
+  each time and then a hook that is ignored (#123). It reports only a handoff id not already on the
+  claim's `handoffs_seen`, stays silent on `stop_hook_active`, and never emits a problem line, since a
+  fault reported every turn is the same bug. Do not add a status line, an "all clear" or a count to it.
 
 ## Things left undone on purpose, so do not "fix" them
 
-- **`Stop` is unwired.** Its only job is catching handoffs posted mid-session. The matcher it would call
-  exists, but a hook on every turn is a cost every session pays, so it goes in as its own reviewed change.
 - **`migrate --step 7` never edits `~/.claude/settings.json`.** A wiring there serves every root on
   the machine, and the file is often generated, so it is reported and left. Scripts are retired into
   a dated directory, never deleted.

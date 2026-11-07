@@ -107,6 +107,22 @@ def update(root, session_id, focus=None, add=None, replace=None, clear_fields=()
     return (None, write_problem) if write_problem else (claim, None)
 
 
+def mark_seen(root, session_id, ids):
+    """Record which handoffs this session has been shown. Returns a problem, or None.
+
+    Not `update`: that is a session saying something about itself, and bumps `updated_at`. This is
+    the hook keeping its own place, so the claim reads as unchanged to anyone looking at it.
+    """
+    session_id = store.safe_id(session_id)
+    if session_id is None:
+        return "session id is not usable as a filename"
+    claim, problem = store.read_json(path(root, session_id), SCHEMA)
+    if claim is None:
+        return problem or "no claim for this session yet; it is seeded at session start"
+    claim["handoffs_seen"] = sorted(ids)
+    return store.write_json(path(root, session_id), claim, SCHEMA)
+
+
 def clear(root, session_id):
     """Remove a session's claim. Returns a problem, or None.
 

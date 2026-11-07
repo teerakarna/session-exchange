@@ -12,7 +12,8 @@ deliberately.
 **Status: early, installable, not yet load-bearing.** Root resolution, both hooks, and
 `init | show | claim | doctor | handoff | migrate` all work. Presence and handoffs are both
 delivered at session start: a handoff reaches the sessions working in the scope it was addressed to.
-One posted mid-session waits for the recipient's next start, because `Stop` is not wired yet.
+One posted mid-session is reported by the `Stop` hook after the turn it arrives in, once, and the hook
+is silent otherwise.
 Seven migration steps, and the two that write are built: the import out of an existing markdown
 ledger, and unwiring the legacy hooks. `doctor` prints all seven derived from live state.
 
@@ -226,7 +227,7 @@ which is that nobody thought to look.
 | OS | Linux and macOS, both in CI. Posix-only in practice: the process-tree walk shells out to `ps` |
 | Python | 3.9+, standard library only. The floor is what a stock macOS ships, because the hooks run whatever `python3` is on PATH |
 | Dependencies | None at runtime, gated by CI rather than documented |
-| Hooks used | `SessionStart`, `SessionEnd`. `Stop` deliberately unwired |
+| Hooks used | `SessionStart`, `SessionEnd`, `Stop`. `Stop` reports only a handoff the session has not been shown, because whatever a Stop hook prints makes Claude continue |
 | Egress | None. No daemon, no socket, no listening port |
 
 ## Safety
