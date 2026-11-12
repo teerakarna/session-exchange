@@ -27,8 +27,9 @@ With no arguments, run `show`.
 - `handoff list [--all]` - handoffs under this root, open ones unless `--all`. The count says how
   many are stored as well as how many are shown, so a filtered list never reads as a complete one.
 - `handoff post --repo X [--path Y] | --session S --body "..."` - address a scope or one session,
-  never both. `--body -` reads stdin, which is the right way to send anything with a backtick or a
-  blank line in it. An id that already exists is refused rather than replaced.
+  never both. `--session` takes a session's id or the name `show` lists for it; a name two
+  sessions here share is refused. `--body -` reads stdin, which is the right way to send anything
+  with a backtick or a blank line in it. An id that already exists is refused rather than replaced.
 - `handoff accept <id> [--note "..."]` and `handoff close <id>` - separate verbs on purpose, so
   taking something on cannot be typed as finishing it. Either one on a handoff that is already in
   that state is refused rather than absorbed, because it means a stale render or two sessions
