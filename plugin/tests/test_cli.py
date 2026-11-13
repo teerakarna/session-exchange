@@ -1120,6 +1120,60 @@ with tempfile.TemporaryDirectory() as tmp:
         (1, True, []),
     )
 
+print("a --repo no session would be placed in says so when posted (#129)")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # A session that never claimed anything is matched by the repo `hook.where` places it in, so a
+    # scope it would not be placed in reaches nobody but a session that claims it by hand. Both
+    # halves are checked: a note that also fires on a real repo says nothing.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    (repo / "sub").mkdir()
+    (area / "plain").mkdir()
+    # A linked worktree of `repo`: `hook.checkout` places its sessions in the main checkout.
+    (repo / ".git" / "worktrees" / "wt").mkdir(parents=True)
+    (area / "wt").mkdir()
+    (area / "wt" / ".git").write_text(f"gitdir: {repo}/.git/worktrees/wt\n")
+    # A repo outside the root, reached through a symlink under it.
+    outside = pathlib.Path(tmp) / "outside"
+    (outside / ".git").mkdir(parents=True)
+    (area / "ext").symlink_to(outside)
+
+    def post(scope):
+        return run(home, repo, "handoff", "post", "--repo", scope, "--body", "hi")
+
+    code, out = post("repo")
+    check("a real repo gets no note", (code, "note:" in out), (0, False))
+    cases = [
+        ("repo/sub", "a session started in repo/sub is placed in repo,"),
+        ("plain", "a session started in plain is placed in no repo here,"),
+        ("wt", "a session started in wt is placed in repo,"),
+        ("ext", "a session started in ext is placed in no repo here,"),
+        ("missing", "there is no folder missing under this root"),
+    ]
+    for scope, said in cases:
+        code, out = post(scope)
+        check(
+            f"--repo {scope} is posted with the note",
+            (code, "posted" in out, said in out),
+            (0, True, True),
+        )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The layout #129 was found in: the root is itself one repo and the work areas are folders.
+    home, area, repo = fixture(tmp)
+    (area / ".git").mkdir()
+    (area / "lane").mkdir()
+    (area / ".claude").mkdir(exist_ok=True)
+    code, out = run(
+        home, area / "lane", "handoff", "post", "--repo", "lane", "--body", "hi", exchange_root=area
+    )
+    check(
+        "a folder of a root that is one repo places its sessions in .",
+        (code, "a session started in lane is placed in .," in out),
+        (0, True),
+    )
+
 print("another session's text does not get to drive the reader's terminal")
 
 with tempfile.TemporaryDirectory() as tmp:

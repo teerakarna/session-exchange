@@ -22,6 +22,7 @@ import claims
 import decommission
 import exchange_root
 import handoffs
+import hook
 import legacy
 import migrate
 import registry
@@ -610,6 +611,40 @@ def _session_target(value, root, live_ids):
     )
 
 
+def _repo_note(root, repo):
+    """A note when no session would be placed in `--repo` by where it started, else None. #129.
+
+    A session that never ran `exchange claim` is matched by the repo its cwd is in, as `hook.where`
+    works it out: the enclosing `.git`, a linked worktree's main checkout, and only under the root.
+    So the question is asked of `hook.where` itself, for a session started in that folder, rather
+    than answered a second time here where it would drift. A plain folder, a worktree, a symlink
+    and a repo outside the root all fall out of that one rule. A note rather than a refusal,
+    because a claim can name any scope and a handoff to one is legitimate.
+
+    Runs after the handoff is on disk, so a filesystem error here is swallowed: a traceback after
+    `posted` is a non-zero exit, and a caller that reads it as "not posted" retries and writes a
+    second handoff, the hazard the config note below is written against.
+    """
+    root = pathlib.Path(root)
+    folder = root / repo
+    try:
+        if not folder.is_dir():
+            return (
+                f"  note: there is no folder {repo} under this root, so only a session that runs "
+                f"`exchange claim --repo {repo}` is addressed by this"
+            )
+        placed, _ = hook.where(root, {}, folder)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if handoffs.spelling(repo) in {handoffs.spelling(found) for found in placed}:
+        return None
+    where = f"is placed in {placed[0]}" if placed else "is placed in no repo here"
+    return (
+        f"  note: a session started in {repo} {where}, so only a session that runs "
+        f"`exchange claim --repo {repo}` is addressed by this"
+    )
+
+
 def cmd_handoff_post(args):
     resolution = _resolved(args)
     if resolution is None:
@@ -648,6 +683,10 @@ def cmd_handoff_post(args):
     # are reading the reply - but it is the same call the list makes, so it takes the same cap.
     config, config_problem = store.config(resolution.root)
     print(f"posted {record['id']} to {handoffs.describe(record['to'], config['max_focus_chars'])}")
+    if "repo" in record["to"]:
+        repo_note = _repo_note(resolution.root, record["to"]["repo"])
+        if repo_note:
+            print(repo_note)
     for note in notes:
         print(note)
     if config_problem:
