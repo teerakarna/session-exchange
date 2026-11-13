@@ -26,6 +26,8 @@ With no arguments, run `show`.
   are still on disk or still wired, and which migration step is the first one outstanding.
 - `handoff list [--all]` - handoffs under this root, open ones unless `--all`. The count says how
   many are stored as well as how many are shown, so a filtered list never reads as a complete one.
+- `handoff show <id>` - one handoff whole: the body uncut, line by line, and every move on it with
+  who made it and their note. `list` previews each body to one capped line.
 - `handoff post --repo X [--path Y] | --session S --body "..."` - address a scope or one session,
   never both. `--session` takes a session's id or the name `show` lists for it; a name two
   sessions here share is refused. `--body -` reads stdin, which is the right way to send anything

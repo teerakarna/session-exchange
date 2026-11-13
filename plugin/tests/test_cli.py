@@ -1193,6 +1193,74 @@ with tempfile.TemporaryDirectory() as tmp:
         (1, True, []),
     )
 
+print("handoff show prints one handoff whole, with its moves (#130)")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The list caps a body to one line; this is the command that does not, so the checks are on
+    # what the list would have cut: a second line, and text past the cap.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    tail = "x" * 400 + "END"
+    body = f"first line\n\nsecond \033[2Kline\n\tindented\n{tail}"
+    code, out = run(home, repo, "handoff", "post", "--repo", "repo", "--body", body)
+    hid = out.split()[1]
+
+    code, out = run(home, repo, "handoff", "show", hid)
+    check(
+        "every line of the body, uncut, with the status and sender",
+        (
+            code,
+            f"{hid}  open" in out,
+            "from the-caller" in out,
+            "  first line\n\n  second [2Kline" in out,
+            f"  {tail}" in out,
+        ),
+        (0, True, True, True, True),
+    )
+    check("a tab keeps its indent as spaces rather than vanishing", "\n      indented" in out, True)
+    check("and the body goes through the same stripping as the list", "\033" in out, False)
+    check("an empty body line prints no trailing spaces", "\n  \n" in out, False)
+
+    # The mover's name is the registry's free text, so it gets an escape too.
+    own = next((pathlib.Path(home) / ".claude" / "sessions").glob("*.json"))
+    own.write_text(own.read_text().replace("the-caller", "the-\\u001b[2Kcaller"))
+    run(home, repo, "handoff", "accept", hid, "--note", "on \033[2Kit")
+    code, out = run(home, repo, "handoff", "show", hid)
+    check(
+        "a move is listed with its status, who made it, and its note, stripped",
+        (code, f"{hid}  accepted" in out, "accepted by the-[2Kcaller: on [2Kit" in out),
+        (0, True, True),
+    )
+
+    stored = area / ".claude" / "exchange" / "handoffs"
+    copy = "20990101T000000Z-aaaaaa"
+    (stored / f"{copy}.json").write_text((stored / f"{hid}.json").read_text())
+    code, out = run(home, repo, "handoff", "show", copy)
+    check(
+        "a file named for one id and holding another is a problem, as list says it",
+        (code, f"{copy}.json holds the id {hid}" in out),
+        (1, True),
+    )
+    (stored / f"{copy}.json").unlink()
+
+    moves = stored / f"{hid}.d"
+    (moves / "0099-broken.json").write_text("{")
+    code, out = run(home, repo, "handoff", "show", hid)
+    check(
+        "a move that cannot be read is still shown as a problem, with a non-zero exit",
+        (code, "0099-broken.json could not be read" in out),
+        (1, True),
+    )
+
+    code, out = run(home, repo, "handoff", "show", "20990101T000000Z-000000")
+    check("an id nothing posted is a problem", (code, "no handoff with id" in out), (1, True))
+    code, out = run(home, repo, "handoff", "show", "../escape")
+    check(
+        "a value that cannot be an id is refused",
+        (code, "cannot be a handoff id" in out),
+        (1, True),
+    )
+
 print("another session's text does not get to drive the reader's terminal")
 
 with tempfile.TemporaryDirectory() as tmp:
