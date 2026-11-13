@@ -521,6 +521,95 @@ def _body(args):
     return sys.stdin.read()
 
 
+UNREACHED = "It stays open until some session moves it; any session can."
+
+
+def _session_target(value, root, live_ids):
+    """The id `--session` means, the notes to print once it is posted, and a problem. #126.
+
+    `show` and every presence line name a session before its id, so the name is what gets typed. It
+    passes the schema's id pattern and was stored as `to.session_id`, which `addressed_to` compares
+    with the reader's id, so it matched nobody and stayed open for good.
+
+    Looked up on this root's claims, which is what `show` lists and what a session on this root
+    reads its handoffs against. Not the registry: that is machine-wide, so an id or name it knows
+    can belong to a session under another root, which never reads this one, and its name drifts
+    from the claim's after a rename. The name is compared as `show` prints it, stripped, because
+    that is what gets typed. An id is tried before a name, since ids are not UUID-shaped in every
+    registry and shape cannot tell. Among several claims of one name a single live one is the one
+    meant, the rest being sessions that have ended. Several live ones, or a name lookup with claim
+    files it could not read, are refused rather than guessed, with each candidate's cwd, because
+    `show` prints no ids to choose between.
+
+    The notes are #45's and stay notes, not refusals: addressing is a hint to a reader, not access
+    control, so what is wrong with an unheld id is only that nobody is coming. Said now, because
+    this is the last moment anyone is looking. One note per case, so a typo does not read as two
+    findings. In `cli` deliberately: the person who typed the value is the one reading the reply.
+    """
+    claims_here, problems = claims.load_all(root)
+    unread = (
+        [
+            f"  note: {len(problems)} claim file(s) here could not be read and were not searched; "
+            "`exchange doctor` names them"
+        ]
+        if problems
+        else []
+    )
+
+    def unheld(session_id):
+        if session_id in live_ids:
+            return []
+        return [
+            f"  note: no live session is registered as {session_id}, so nobody is currently "
+            f"addressed by this. {UNREACHED}"
+        ]
+
+    named = [c for c in claims_here if store.printable(c.get("name") or "") == value]
+    if any(claim["session_id"] == value for claim in claims_here):
+        # Taken as the id, but a name copied out of `show` lands here too when it is also some
+        # other claim's id, so the collision is said rather than left to read as "not running".
+        also = [c["session_id"] for c in named if c["session_id"] != value]
+        collision = (
+            [f"  note: {value} is also the name of {', '.join(also)}; pass that id to reach it"]
+            if also
+            else []
+        )
+        return value, [*collision, *unheld(value)], None
+    if named and problems:
+        # An unread claim could be a second session of this name, and resolving past it is a guess
+        # that depends on whether a file happens to parse.
+        return (
+            None,
+            [],
+            (
+                f"{len(problems)} claim file(s) here could not be read, so {value} may name "
+                "more than one session; pass its id, or see `exchange doctor`"
+            ),
+        )
+    live = [c for c in named if c["session_id"] in live_ids]
+    chosen = live if live else named
+    if len(chosen) == 1:
+        target = chosen[0]["session_id"]
+        resolved = f"  note: {value} is a session name, addressed to its id {target}"
+        return target, [resolved, *unheld(target)], None
+    if chosen:
+        which = "; ".join(
+            f"{c['session_id']} in {store.printable(c['cwd'])}"
+            + ("" if c["session_id"] in live_ids else " (not running)")
+            for c in chosen
+        )
+        return None, [], f"{len(chosen)} sessions here are named {value}; pass one id: {which}"
+    if value in live_ids:
+        why = "is a live session with no claim under this root, so it does not read this root"
+    else:
+        why = "is no id or name of any session under this root"
+    return (
+        value,
+        [f"  note: {value} {why}, so nobody is addressed by this. {UNREACHED}", *unread],
+        None,
+    )
+
+
 def cmd_handoff_post(args):
     resolution = _resolved(args)
     if resolution is None:
@@ -529,6 +618,15 @@ def cmd_handoff_post(args):
     if problem:
         print(f"problem: {problem}")
         return 1
+    notes = []
+    if "session_id" in to:
+        # Every row, as `show` reads liveness, so the two agree about who is running.
+        live_ids = {row.get("sessionId") for row in registry.entries(peers_only=False)}
+        target, notes, problem = _session_target(to["session_id"], resolution.root, live_ids)
+        if problem:
+            print(f"problem: {problem}")
+            return 1
+        to = {"session_id": target}
     body = _body(args)
     if body is None:
         return 1
@@ -550,29 +648,14 @@ def cmd_handoff_post(args):
     # are reading the reply - but it is the same call the list makes, so it takes the same cap.
     config, config_problem = store.config(resolution.root)
     print(f"posted {record['id']} to {handoffs.describe(record['to'], config['max_focus_chars'])}")
+    for note in notes:
+        print(note)
     if config_problem:
         # Says the handoff is on disk, because the exit code below is 1 and on its own it does not.
         # A caller reading the non-zero as "it did not post" retries, ids are random so the retry
         # writes a second record, and the root then holds two handoffs for one intent with nothing
         # anywhere comparing them.
         print(f"problem   the handoff is written; {config_problem}")
-    if "session_id" in record["to"]:
-        # #45. A note here rather than a refusal in `handoffs`, and rather than a guard in
-        # `set_status`: addressing is a hint to a reader, not access control, so the only thing
-        # actually wrong with a mistyped id is that nobody is coming. Said at the moment it is
-        # typed, because that is the last moment anyone is looking - a handoff addressed to an id no
-        # session has is otherwise permanently open, unreachable, and counted in `show`'s "N not
-        # closed" forever, with nothing anywhere saying why.
-        #
-        # In `cli` deliberately, unlike the stripping in `handoffs.describe`. The argument in
-        # `DECLINED` is that this module's output is wrong in front of the person who typed the
-        # command, and here that is exactly true: they chose the id and they are reading the reply.
-        target = record["to"]["session_id"]
-        if not any(row.get("sessionId") == target for row in registry.entries()):
-            print(
-                f"  note: no live session is registered as {target}, so nobody is currently "
-                "addressed by this. It stays open until some session moves it; any session can."
-            )
     if not record["from"].get("session_id"):
         # Said out loud rather than left as an absent field. The recipient sees a handoff from a cwd
         # and no name, and "who sent this" is the first thing they will ask.
@@ -853,7 +936,7 @@ def build_parser():
     hpost = hsub.add_parser("post", help="post a handoff to a scope or to one session")
     hpost.add_argument("--repo", help="root-relative repository directory")
     hpost.add_argument("--path", action="append", default=[], help="repeatable; narrows --repo")
-    hpost.add_argument("--session", help="address one live session instead of a scope")
+    hpost.add_argument("--session", help="one live session, by id or name, instead of a scope")
     hpost.add_argument("--body", required=True, help="markdown; `-` reads stdin")
     hpost.set_defaults(func=cmd_handoff_post)
 

@@ -977,7 +977,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run(home, repo, "handoff", "post", "--session", "no-such-session", "--body", "hi")
     check(
         "an unheld id is a note, not a refusal, and the handoff is posted",
-        (code, "no live session is registered as no-such-session" in out, "posted" in out),
+        (code, "no-such-session is no id or name of any session" in out, "posted" in out),
         (0, True, True),
     )
     check(
@@ -986,13 +986,138 @@ with tempfile.TemporaryDirectory() as tmp:
         True,
     )
 
-    # The fixture registers this test process, so its own session id is one the registry holds.
-    own = json.loads(next((pathlib.Path(home) / ".claude" / "sessions").glob("*.json")).read_text())
-    code, out = run(home, repo, "handoff", "post", "--session", own["sessionId"], "--body", "hi")
+    # The fixture registers this test process as `real-one`, live, with no claim under this root:
+    # a session elsewhere on the machine, which never reads this root's handoffs.
+    code, out = run(home, repo, "handoff", "post", "--session", "real-one", "--body", "hi")
     check(
-        "a live id gets no note, or the warning means nothing",
-        (code, "no live session is registered" in out),
-        (0, False),
+        "a live id with no claim here says it does not read this root",
+        (code, "real-one is a live session with no claim under this root" in out),
+        (0, True),
+    )
+
+    # And with a claim here it is a session on this root that is running, which gets no note at
+    # all, or the warning means nothing.
+    claimed = area / ".claude" / "exchange" / "sessions"
+    claimed.mkdir(parents=True, exist_ok=True)
+    (claimed / "real-one.json").write_text(
+        json.dumps(
+            {"session_id": "real-one", "cwd": str(repo), "updated_at": "2026-01-01T00:00:00Z"}
+        )
+    )
+    code, out = run(home, repo, "handoff", "post", "--session", "real-one", "--body", "hi")
+    check("a live id with a claim here gets no note", (code, "note:" in out), (0, False))
+
+print("a session name given to --session is addressed to that session's id (#126)")
+
+with tempfile.TemporaryDirectory() as tmp:
+    # The name is what `show` prints first, so it is what gets typed. Before #126 it was stored as
+    # the id, matched nobody, and the only signal was the unheld-id note, which reads as "that
+    # session is not running". So each record is read back, not only the output: a note that says
+    # the right thing over a record still holding the name is the bug with a better message.
+    home, area, repo = fixture(tmp)
+    run(home, repo, "init")
+    stored = area / ".claude" / "exchange" / "handoffs"
+    claimed = area / ".claude" / "exchange" / "sessions"
+    claimed.mkdir(parents=True, exist_ok=True)
+
+    def claim(session_id, name, cwd):
+        record = {"session_id": session_id, "cwd": str(cwd), "updated_at": "2026-01-01T00:00:00Z"}
+        (claimed / f"{session_id}.json").write_text(json.dumps({**record, "name": name}))
+
+    def post(*scope):
+        before = set(stored.glob("*.json")) if stored.is_dir() else set()
+        code, out = run(home, repo, "handoff", "post", *scope, "--body", "hi")
+        new = [json.loads(p.read_text())["to"] for p in set(stored.glob("*.json")) - before]
+        return code, out, new
+
+    claim("alpha", "beta", repo)
+    claim("beta", "gamma", repo)
+    claim("t-1", "twin", repo)
+    claim("t-2", "twin", area)
+
+    code, out, new = post("--session", "gamma")
+    check(
+        "a claim's name here resolves to its id, says so, and says that session is not running",
+        (
+            code,
+            "addressed to its id beta" in out,
+            "no live session is registered as beta" in out,
+            new,
+        ),
+        (0, True, True, [{"session_id": "beta"}]),
+    )
+
+    code, out, new = post("--session", "beta")
+    check(
+        "an id is taken as an id first, and the claim it also names is pointed out",
+        (code, "is a session name" in out, "beta is also the name of alpha" in out, new),
+        (0, False, True, [{"session_id": "beta"}]),
+    )
+
+    # `the-caller` is the registry's name for the live `real-one`, but no claim here carries it.
+    # The registry is machine-wide, so resolving against it can reach a session under another root.
+    code, out, new = post("--session", "the-caller")
+    check(
+        "a name only the registry knows is not resolved, and the note says nothing here has it",
+        (code, "the-caller is no id or name of any session under this root" in out, new),
+        (0, True, [{"session_id": "the-caller"}]),
+    )
+
+    code, out, new = post("--session", "twin")
+    check(
+        "a name two claims share is refused with each id and cwd, and nothing is posted",
+        (code, f"t-1 in {repo} (not running); t-2 in {area} (not running)" in out, new),
+        (1, True, []),
+    )
+
+    # A live session takes its name over the claim a session of that name left behind. `real-one`
+    # is live in the fixture's registry.
+    claim("real-one", "fixer", repo)
+    claim("gone", "fixer", repo)
+    code, out, new = post("--session", "fixer")
+    check(
+        "among claims of one name, the single live one is meant, with no unheld note",
+        (code, "addressed to its id real-one" in out, "no live session" in out, new),
+        (0, True, False, [{"session_id": "real-one"}]),
+    )
+
+    # A second live `fixer`: now the live ones are the choice, and the ended one is not offered.
+    sessions = pathlib.Path(home) / ".claude" / "sessions"
+    twin = {"pid": os.getppid(), "sessionId": "also-live", "name": "x", "status": "idle"}
+    (sessions / f"{os.getppid()}.json").write_text(json.dumps(twin))
+    claim("also-live", "fixer", area)
+    code, out, new = post("--session", "fixer")
+    check(
+        "two live claims of one name are refused, listing only the live ones",
+        (code, f"also-live in {area}; real-one in {repo}" in out, "gone" in out, new),
+        (1, True, False, []),
+    )
+    (sessions / f"{os.getppid()}.json").unlink()
+
+    # Compared as `show` prints it. The name is free text from another process, and the stripped
+    # form is the only one anybody can type.
+    claim("bidi", "\u202eworker", repo)
+    code, out, new = post("--session", "worker")
+    check(
+        "a name is matched in the form show prints, without characters the stripper removes",
+        (code, new),
+        (0, [{"session_id": "bidi"}]),
+    )
+
+    # A claim file that cannot be read may be the session the name meant, so the lookup says it
+    # did not search it rather than reading as complete.
+    (claimed / "broken.json").write_text("{")
+    code, out, new = post("--session", "nobody")
+    check(
+        "an unreadable claim is said to be unsearched",
+        (code, "1 claim file(s) here could not be read" in out, new),
+        (0, True, [{"session_id": "nobody"}]),
+    )
+    code, out, new = post("--session", "gamma")
+    check(
+        "and a name is not resolved past it, since it could be a second session of that name",
+        (code, "could not be read, so gamma may name more than one session" in out, new),
+        (1, True, []),
     )
 
 print("another session's text does not get to drive the reader's terminal")
