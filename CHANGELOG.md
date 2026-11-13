@@ -4,6 +4,19 @@ Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning i
 [semver](https://semver.org/spec/v2.0.0.html). 0.1.0 was written by hand; from the next release on,
 each section is generated from the commits it ships.
 
+## [0.4.0](https://github.com/teerakarna/session-exchange/compare/v0.3.4...v0.4.0) (2026-11-13)
+
+
+### Added
+
+* handoff show prints one handoff whole, with its moves ([#130](https://github.com/teerakarna/session-exchange/issues/130)) ([#131](https://github.com/teerakarna/session-exchange/issues/131)) ([422fac9](https://github.com/teerakarna/session-exchange/commit/422fac9f491a0be2f0ddad7a4805b4ad49c34849))
+
+
+### Fixed
+
+* a folder of a root that is one repo is addressable, and --repo notes a scope nobody is placed in ([#129](https://github.com/teerakarna/session-exchange/issues/129)) ([#132](https://github.com/teerakarna/session-exchange/issues/132)) ([88e0416](https://github.com/teerakarna/session-exchange/commit/88e0416bb6899e947d7b4f0175642921a3f7d29e))
+* handoff post --session resolves a session name to its id ([#126](https://github.com/teerakarna/session-exchange/issues/126)) ([#128](https://github.com/teerakarna/session-exchange/issues/128)) ([be55c3a](https://github.com/teerakarna/session-exchange/commit/be55c3a955076240125a95833404054e755404c5))
+
 ## [0.3.4](https://github.com/teerakarna/session-exchange/compare/v0.3.3...v0.3.4) (2026-11-07)
 
 
