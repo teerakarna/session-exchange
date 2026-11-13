@@ -1492,6 +1492,74 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 with tempfile.TemporaryDirectory() as tmp:
+    # #129: a root that is itself one repo, its work areas plain folders. A session there is in `.`
+    # and also in the top-level folder its cwd is under, so a handoff to that folder reaches it from
+    # any depth, one to `.` still reaches everyone, and one to another folder does not.
+    home, root, repo = handoff_fixture(tmp)
+    (root / ".git").mkdir()
+    (root / "area-a" / "deep").mkdir(parents=True)
+    (root / "area-b").mkdir()
+    # A repo nested inside a folder stays its own scope, and is not the folder too.
+    (root / "area-a" / "inner" / ".git").mkdir(parents=True)
+    # Started in a subfolder named like another scope, which a wrong rule would place it in.
+    (root / "area-a" / "inner" / "area-b").mkdir()
+    # A linked worktree of the root, kept outside it: its sessions are placed by folder as well.
+    (root / ".git" / "worktrees" / "wt").mkdir(parents=True)
+    tree = pathlib.Path(tmp).resolve() / "wt"
+    (tree / "area-a").mkdir(parents=True)
+    (tree / ".git").write_text(f"gitdir: {root}/.git/worktrees/wt\n")
+    ids = ("h-a", "h-dot", "h-b", "h-sub")
+    for hid, to in (
+        ("h-a", {"repo": "area-a"}),
+        ("h-dot", {"repo": "."}),
+        ("h-b", {"repo": "area-b"}),
+        ("h-sub", {"repo": "area-a", "paths": ["sub"]}),
+    ):
+        handoffs.post(root, to, hid, str(root), handoff_id=hid)
+
+    def seen(cwd, session="me"):
+        # The root by name, since a worktree kept outside it cannot find it by walking up.
+        payload = {"session_id": session, "cwd": str(cwd)}
+        _, out = run("SessionStart", payload, home, env={"CC_EXCHANGE_ROOT": str(root)})
+        return sorted(
+            r.split()[1] for r in context_rows(out) if r.split()[1:2] and r.split()[1] in ids
+        )
+
+    check(
+        "a session under a top-level folder of a root that is one repo is in that folder and .",
+        seen(root / "area-a" / "deep"),
+        ["h-a", "h-dot", "h-sub"],
+    )
+    check("a session at the root itself is in . only", seen(root), ["h-dot"])
+    check(
+        "a repo nested inside a folder is its own scope, not the folder",
+        seen(root / "area-a" / "inner" / "area-b"),
+        [],
+    )
+    check(
+        "a worktree of the root places its sessions by folder too",
+        seen(tree / "area-a"),
+        ["h-a", "h-dot", "h-sub"],
+    )
+
+    # A claim's paths are relative to the root; a handoff to the folder names them relative to it.
+    put_claim(root, "pathed", paths=["area-a/sub"])
+    register(home, "pathed", os.getppid())
+    check(
+        "a session that claimed a path under its folder still gets a handoff to that folder's path",
+        "h-sub" in seen(root / "area-a", session="pathed"),
+        True,
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    # Direct, because a rendered start cannot show an empty or extra scope that matches nothing.
+    root = pathlib.Path(tmp).resolve()
+    (root / ".git").mkdir()
+    (root / ".claude").mkdir()
+    check("where() at the root of a root-repo is . alone", hook.where(root, {}, root)[0], ["."])
+    check("and a dot-folder is no scope", hook.where(root, {}, root / ".claude")[0], ["."])
+
+with tempfile.TemporaryDirectory() as tmp:
     home, root, repo = handoff_fixture(tmp)
     # A submodule's `.git` is a file too, into `.git/modules`, and it is a repo of its own.
     (repo / ".git" / "modules" / "sub").mkdir(parents=True, exist_ok=True)

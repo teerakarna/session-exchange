@@ -32,6 +32,9 @@ With no arguments, run `show`.
   never both. `--session` takes a session's id or the name `show` lists for it; a name two
   sessions here share is refused. `--body -` reads stdin, which is the right way to send anything
   with a backtick or a blank line in it. An id that already exists is refused rather than replaced.
+  A `--repo` that a session started there would not be placed in (a plain folder, a linked worktree,
+  a repo outside the root) is posted with a note, since only a session that has run `claim --repo`
+  for it will see it.
 - `handoff accept <id> [--note "..."]` and `handoff close <id>` - separate verbs on purpose, so
   taking something on cannot be typed as finishing it. Either one on a handoff that is already in
   that state is refused rather than absorbed, because it means a stale render or two sessions
