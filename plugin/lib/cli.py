@@ -638,7 +638,7 @@ def _repo_note(root, repo):
         return None
     if handoffs.spelling(repo) in {handoffs.spelling(found) for found in placed}:
         return None
-    where = f"is placed in {placed[0]}" if placed else "is placed in no repo here"
+    where = f"is placed in {' and '.join(placed)}" if placed else "is placed in no repo here"
     return (
         f"  note: a session started in {repo} {where}, so only a session that runs "
         f"`exchange claim --repo {repo}` is addressed by this"

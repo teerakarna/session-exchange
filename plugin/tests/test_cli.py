@@ -1161,16 +1161,35 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     # The layout #129 was found in: the root is itself one repo and the work areas are folders.
+    # A top-level folder there is a scope of its own, so it gets no note; one level down is not.
     home, area, repo = fixture(tmp)
     (area / ".git").mkdir()
-    (area / "lane").mkdir()
+    (area / "area-a" / "sub").mkdir(parents=True)
     (area / ".claude").mkdir(exist_ok=True)
-    code, out = run(
-        home, area / "lane", "handoff", "post", "--repo", "lane", "--body", "hi", exchange_root=area
-    )
+
+    def post_here(scope):
+        return run(
+            home,
+            area / "area-a",
+            "handoff",
+            "post",
+            "--repo",
+            scope,
+            "--body",
+            "hi",
+            exchange_root=area,
+        )
+
+    code, out = post_here("area-a")
     check(
-        "a folder of a root that is one repo places its sessions in .",
-        (code, "a session started in lane is placed in .," in out),
+        "a top-level folder of a root that is one repo gets no note",
+        (code, "note:" in out),
+        (0, False),
+    )
+    code, out = post_here("area-a/sub")
+    check(
+        "a folder below that names both scopes its sessions are placed in",
+        (code, "a session started in area-a/sub is placed in . and area-a," in out),
         (0, True),
     )
 

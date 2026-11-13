@@ -194,6 +194,13 @@ The hooks manifest is wired twice. `doctor` names both files.
 EOF
 ```
 
+`--repo` is matched against the repo a session's cwd is in, relative to the root, unless the session
+claimed others with `exchange claim --repo`. A root that is itself one git repo, with its work areas
+kept as plain folders, places a session in `.` and also in the top-level folder its cwd is under, so
+`--repo my-area` reaches the sessions started in `my-area/`, and `--repo .` still reaches all of them.
+A repo nested inside `my-area/` is still its own scope and is not reached by `--repo my-area`.
+A scope no session would be placed in is posted with a note saying so.
+
 Posting never overwrites: an id already on disk is a refusal, because a silently dropped handoff is
 invisible at both ends. The refusal is the filesystem's rather than a check the code runs first, since
 a check and then a write has a window in between that two senders can both fit through.

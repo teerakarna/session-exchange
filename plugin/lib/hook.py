@@ -243,6 +243,16 @@ def where(root, claim, cwd):
 
     A worktree whose main repo is outside the root keeps its own name, which is the only one under
     the root anything could have addressed it by.
+
+    A root that is itself the repo is the one exception to "the repo only" (#129). Every session in
+    it is in `.`, so nothing could address the sessions in one of its folders: work areas kept as
+    plain folders of one repo were reachable only by a claim each session had to remember to make,
+    and two handoffs in a real trial went unread that way. So there a session is also in the
+    top-level folder its cwd is under, as a repo-equivalent. Added, not substituted: `.` still
+    reaches everyone, and a scope is still a name rather than a path, so nobody is narrowed out.
+    Only the first level, and only when the enclosing tree is the root itself or a worktree of it:
+    anywhere else the enclosing repo already is the answer, and nothing here changes it, which
+    includes a repo nested inside one of those folders.
     """
     repos, paths = list(claim.get("repos", ())), list(claim.get("paths", ()))
     found = exchange_root.git_root(cwd)
@@ -250,6 +260,19 @@ def where(root, claim, cwd):
         if enclosing == root or root in enclosing.parents:
             repos.append(str(enclosing.relative_to(root)))
             break
+    if found is not None and checkout(found) == root:
+        # Relative to the tree the cwd is in, so a linked worktree of the root places its sessions
+        # by the same folder as the main checkout does. A dot-folder is the tool's state or git's,
+        # not a work area, and is no scope.
+        inside = pathlib.Path(cwd).expanduser().resolve().relative_to(found).parts
+        if inside and not inside[0].startswith("."):
+            folder = inside[0]
+            repos.append(folder)
+            # A claim's paths are relative to the root, which is the repo, while a handoff to the
+            # folder names paths relative to the folder. Both spellings are kept, so a session that
+            # claimed `area/sub` is not narrowed out of `--repo area --path sub`. Wider, never
+            # narrower, for the reason `addressed_to` gives about one row too many.
+            paths += [p[len(folder) + 1 :] for p in paths if p.startswith(folder + "/")]
     return repos, paths
 
 
