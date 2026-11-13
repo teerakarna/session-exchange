@@ -319,6 +319,17 @@ def set_status(root, handoff_id, status, by=None, note=None, at=None):
     return _move(root, handoff_id, status, after, by, note, at)
 
 
+def history(root, handoff_id):
+    """`(status, moves, problems)` from one read of the moves, for a caller showing both.
+
+    One read so the status and the list it was derived from cannot disagree: two reads let a move
+    another session writes in between put a status above a list that ends somewhere else.
+    """
+    entries, problems = transitions(root, handoff_id)
+    status, faults = _status_of(handoff_id, entries)
+    return status, entries, problems + faults
+
+
 def state_of(root, handoff_id):
     """The current status of one handoff, and anything wrong with how it got there.
 

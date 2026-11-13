@@ -154,7 +154,7 @@ survives a version bump.
 
 ## Commands
 
-**Look** `show` `doctor` `handoff list`
+**Look** `show` `doctor` `handoff list` `handoff show`
 **Say** `claim` `handoff post` `handoff accept` `handoff close` `handoff resolve`
 **Set up** `init` `migrate --step 4` `migrate --step 7`
 

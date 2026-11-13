@@ -760,6 +760,59 @@ def cmd_handoff_list(args):
     return 1 if problems else 0
 
 
+def cmd_handoff_show(args):
+    """One handoff whole: the header `list` prints, every line of the body, and its moves. #130.
+
+    `list` previews a body to one capped line, which is right for a list, and the only way to read
+    the rest was the JSON file under the root. The body keeps its lines here, each through
+    `printable`, so it is the same text with the same boundary as the preview, only not cut. The
+    sender and scope keep their cap, since nothing here is about reading those in full.
+    """
+    resolution = _resolved(args)
+    if resolution is None:
+        return 1
+    root = resolution.root
+    if store.safe_id(args.id) is None:
+        print(f"problem: {store.printable(args.id)} cannot be a handoff id")
+        return 1
+    record, problem = store.read_json(handoffs.path(root, args.id), handoffs.SCHEMA)
+    if record is None:
+        print(f"problem: {problem or f'no handoff with id {args.id} under this root'}")
+        return 1
+    config, config_problem = store.config(root)
+    status, moves, problems = handoffs.history(root, args.id)
+    if record["id"] != args.id:
+        # As `load_all` says it: the moves live under the id inside the record, so a file named
+        # for one id and holding another shows a status that belongs to neither for certain.
+        problems = [
+            f"{args.id}.json holds the id {record['id']}, so it is not named after the handoff in "
+            "it; the status above is not to be trusted",
+            *problems,
+        ]
+    width = config["max_focus_chars"]
+    print(f"{record['id']}  {status}")
+    print(
+        f"  to {handoffs.describe(record['to'], width)}, "
+        f"from {handoffs.describe_sender(record, width)}, {record['created']}"
+    )
+    print()
+    for line in record["body"].splitlines():
+        # Tabs become spaces first, since `printable` drops them and a pasted Makefile or YAML
+        # block would lose its indent in the one command meant to show the body as written.
+        line = store.printable(line.expandtabs(4))
+        print(f"  {line}" if line else "")
+    if moves:
+        print()
+        for move in moves:
+            by = f" by {store.printable(move['by'])}" if move.get("by") else ""
+            note = f": {store.printable(move['note'])}" if move.get("note") else ""
+            print(f"  {move['at']}  {move['status']}{by}{note}")
+    problems = [config_problem, *problems] if config_problem else problems
+    for problem in problems:
+        print(f"problem   {problem}")
+    return 1 if problems else 0
+
+
 def _cmd_migrate_step4(root, apply):
     config, problem = store.config(root)
     if problem:
@@ -962,6 +1015,10 @@ def build_parser():
     # the thing the next reader of the tie cannot do anything with.
     hresolve.add_argument("--note", required=True, help="why this way rather than the other")
     hresolve.set_defaults(func=cmd_handoff_resolve)
+
+    hshow = hsub.add_parser("show", help="one handoff whole, with its moves")
+    hshow.add_argument("id")
+    hshow.set_defaults(func=cmd_handoff_show)
 
     hlist = hsub.add_parser("list", help="handoffs under this root, open ones by default")
     hlist.add_argument("--all", action="store_true", help="include closed ones")

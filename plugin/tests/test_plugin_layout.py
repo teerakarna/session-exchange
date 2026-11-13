@@ -163,7 +163,7 @@ handoff_verbs = sorted(
 check(
     "handoff offers the verbs it was designed with",
     handoff_verbs,
-    ["accept", "close", "list", "post", "resolve"],
+    ["accept", "close", "list", "post", "resolve", "show"],
 )
 for name in handoff_verbs:
     check(f"the doc mentions handoff {name}", f"`handoff {name}" in command_doc, True)
