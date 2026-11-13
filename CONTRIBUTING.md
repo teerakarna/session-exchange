@@ -215,6 +215,20 @@ a docstring, never on "this line is too long", and `python3 -c 'import ast; ast.
 file it touched is the cheap check that it did. A long string is split with implicit concatenation
 instead, which `ruff format` then leaves alone.
 
+### Checking the Stop hook live
+
+A session is never shown a handoff it posted itself, and `exchange handoff post` run from a session's
+own shell records that session as the sender. So the obvious live test, posting to yourself and
+waiting for Stop, is silent by design and reads as a broken hook (#127). Post from somewhere the
+registry has no entry for: another session, or a detached process from your own shell:
+
+```sh
+( (sleep 2; exchange handoff post --session <id-or-name> --body test) & )
+```
+
+On the next turn Stop should report it once through `additionalContext`, record it on the claim's
+`handoffs_seen`, and stay silent on the turn after.
+
 ## What runs when, and how to run it yourself
 
 Every gate here has a local command, because Actions goes down, the free minutes run out, and a gate
