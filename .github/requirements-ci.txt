@@ -8,4 +8,4 @@
 # pip, which is why the `needs` check in `ci` can parse the workflow properly instead of with a regex
 # that would agree with a file Actions rejects.
 ruff==0.17.6
-pyyaml==6.0.3
+pyyaml==6.0.4
